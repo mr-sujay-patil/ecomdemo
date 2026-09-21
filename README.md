@@ -4,15 +4,20 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · H2 (in-memory) · springdoc-openapi · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · springdoc-openapi · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 3: API Documentation** — the Phase 1 application (products, a single shared cart and
-order placement on in-memory H2), under a 94-test safety net, now describes itself: an OpenAPI 3
-document at `/v3/api-docs` and Swagger UI at
-**<http://localhost:8080/swagger-ui.html>**, where every endpoint can be called from the browser.
-No security, no real database and no Docker yet; those arrive in Phases 8, 4 and 10.
+**Phase 4: PostgreSQL** — the application now stores its data in a real PostgreSQL server
+instead of an in-memory database, so **a product you create is still there after a restart**.
+Configuration is split into profiles: `dev` talks to PostgreSQL and is the default, `test` keeps
+the 102-test suite on in-memory H2 so `./mvnw clean verify` needs nothing running. Connection
+details come from environment variables with local defaults.
+
+Everything from the earlier phases still stands: products, a single shared cart and order
+placement, documented by an OpenAPI 3 spec at `/v3/api-docs` and Swagger UI at
+**<http://localhost:8080/swagger-ui.html>**. No schema migrations, no security and no Docker
+Compose yet; those arrive in Phases 5, 8 and 10.
 
 ## Roadmap
 
@@ -28,11 +33,14 @@ ecomdemo/
 │   ├── cart/      # the single shared cart
 │   └── order/     # checkout and order history
 ├── src/main/resources/
-│   ├── application.properties
-│   └── data.sql   # 10 seed products
+│   ├── application.properties       # shared by every profile
+│   ├── application-dev.properties   # PostgreSQL + Hikari (the default profile)
+│   └── data.sql                     # 10 seed products, guarded so re-running is a no-op
 ├── src/test/java/com/ecomdemo/
 │   ├── support/   # TestData fixture builders
 │   └── <feature>/ # *ServiceTest, *ControllerTest, *RepositoryTest per feature
+├── src/test/resources/
+│   └── application-test.properties  # in-memory H2 for the suite
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
 ├── scripts/       # smoke-test.sh
 └── .github/       # Pull Request template (workflows from Phase 11)
@@ -56,26 +64,97 @@ Branches are never deleted — they are the permanent history of the learning jo
 
 ## Running it
 
-Requires **JDK 21** on the path. Nothing else — the database is in-memory and the Maven Wrapper
-fetches Maven itself.
+Requires **JDK 21** on the path, and **Docker** (or a native PostgreSQL) for the database.
+
+### 1. Start PostgreSQL
+
+One command, and it keeps its data in a Docker volume between restarts:
 
 ```bash
-./mvnw spring-boot:run          # starts on http://localhost:8080
+docker run --name ecomdemo-postgres \
+  -e POSTGRES_DB=ecomdemo -e POSTGRES_USER=ecomdemo -e POSTGRES_PASSWORD=ecomdemo \
+  -p 5432:5432 -d postgres:18-alpine
 ```
+
+After the first time, start and stop the same container instead of creating a new one — `docker
+run` again would fail on the name, and `docker rm` would throw the data away:
+
+```bash
+docker start ecomdemo-postgres          # bring it back up
+docker stop  ecomdemo-postgres          # shut it down, data kept
+docker rm -f ecomdemo-postgres          # delete it AND its data, to start clean
+```
+
+Prefer a native install? Anything that gives you a `ecomdemo` database owned by a `ecomdemo` user
+on port 5432 works — or point the application somewhere else with the environment variables below.
+
+### 2. Start the application
+
+```bash
+./mvnw spring-boot:run          # starts on http://localhost:8080, dev profile
+```
+
+On the first start Hibernate creates the five tables and `data.sql` seeds ten products. On every
+start after that the schema is left alone and the seed does nothing, because it is guarded — see
+[`data.sql`](src/main/resources/data.sql).
 
 In a second terminal:
 
 ```bash
-./mvnw clean verify             # build and run all 94 tests
-scripts/smoke-test.sh           # 48 end-to-end checks against the running app
+./mvnw clean verify             # build and run all 102 tests (no database needed)
+scripts/smoke-test.sh           # 52-54 end-to-end checks against the running app
 ```
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html> — every endpoint is listed with its
 parameters, example bodies and error responses, and *Try it out* calls the running application.
 
-The H2 console is at <http://localhost:8080/h2-console> — JDBC URL `jdbc:h2:mem:ecomdemo`, user
-`sa`, empty password. The schema is recreated and re-seeded on every start, so anything you change
-is gone on restart. Phase 4 swaps H2 for PostgreSQL and Phase 5 adds Flyway migrations.
+### Configuration
+
+| Variable | Default | What it is |
+|---|---|---|
+| `POSTGRES_HOST` | `localhost` | Database host |
+| `POSTGRES_PORT` | `5432` | Database port |
+| `POSTGRES_DB` | `ecomdemo` | Database name |
+| `POSTGRES_USER` | `ecomdemo` | Database user |
+| `POSTGRES_PASSWORD` | `ecomdemo` | Database password |
+
+The defaults are throwaway local credentials, which is why they can live in Git. A real password is
+passed in as `POSTGRES_PASSWORD` and never written into a file:
+
+```bash
+POSTGRES_HOST=db.example.com POSTGRES_PASSWORD="$PROD_DB_PASSWORD" ./mvnw spring-boot:run
+```
+
+Two profiles select which database is used:
+
+| Profile | Database | Selected by |
+|---|---|---|
+| `dev` | PostgreSQL | the default, set in `application.properties` |
+| `test` | in-memory H2 | the surefire configuration in `pom.xml`, for every test JVM |
+
+That split is why `./mvnw clean verify` passes with no PostgreSQL running. It also means the tests
+do not yet prove the application works on PostgreSQL — "works on H2" is not "works on
+PostgreSQL", which is exactly what Phase 7 fixes with Testcontainers.
+
+### Seeing that the data is real
+
+```bash
+# create a product, restart the app, and it is still there
+curl -X POST http://localhost:8080/api/products -H 'Content-Type: application/json' \
+  -d '{"name":"Survivor","description":"still here after a restart","price":10.00,"stockQuantity":1}'
+```
+
+Or look at the rows directly. The H2 console is gone; point **DBeaver** or **pgAdmin** at
+`localhost:5432`, database `ecomdemo`, user `ecomdemo`, password `ecomdemo` — or use `psql` in the
+container:
+
+```bash
+docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo
+
+\dt                              -- the five tables Hibernate generated
+\d product                       -- the columns and types it chose
+SELECT * FROM product;           -- the seeded catalogue
+```
 
 ## API
 
@@ -164,8 +243,8 @@ curl -s -X POST localhost:8080/api/orders
 
 ## Tests
 
-`./mvnw clean verify` runs all 94 tests in about eight seconds. They sit at four levels, each
-loading only what it needs:
+`./mvnw clean verify` runs all 102 tests in about eight seconds, against in-memory H2 — no
+PostgreSQL needed. They sit at four levels, each loading only what it needs:
 
 | Level | Annotation | What it loads | Classes |
 |---|---|---|---|
@@ -173,6 +252,7 @@ loading only what it needs:
 | Web slice | `@WebMvcTest` | The controller, JSON conversion, validation and the error handler; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest` |
 | Persistence slice | `@DataJpaTest` | JPA and an H2 database; no web layer | `CartRepositoryTest`, `OrderRepositoryTest` |
 | Full context | `@SpringBootTest` | The whole application | `PlaceOrderFlowTest`, `OpenApiDocumentationTest` |
+| Configuration | `ApplicationContextRunner` | Only the properties files, resolved as at startup | `DatasourceConfigurationTest` |
 
 That shape is the **test pyramid**: many fast tests where the logic lives, fewer slow ones as more
 of the framework is loaded. A failing unit test can only mean the service is wrong; a failing
@@ -198,7 +278,10 @@ Conventions, if you add tests:
   stock without producing an order, and two simultaneous checkouts can oversell the last unit.
   Stock is validated for every line before anything is written, which keeps the common case
   clean, but the race is real. **Phase 6** fixes it with `@Transactional` and optimistic locking.
-- **Everything is in-memory.** Restarting loses all data. **Phase 4** introduces PostgreSQL.
+- **The schema is generated, not migrated.** `ddl-auto=update` lets Hibernate add tables and
+  columns at startup, and it will never drop or rename anything — so a change that needs one is
+  silently not applied, and nothing records which version of the schema a database is on.
+  **Phase 5** replaces it with Flyway migrations.
 - **No authentication.** Every endpoint is open and there is one cart for the whole world.
   **Phases 8 and 9** add Spring Security and JWT.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the

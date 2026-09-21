@@ -12,7 +12,40 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 03: API Documentation (tag: pending, PR: pending)
+## Phase 04: PostgreSQL (tag: pending, PR: pending)
+**What exists now:** The application stores its data in a real PostgreSQL 18 server; data survives
+a restart. Configuration is split into profiles — `dev` (PostgreSQL, the default) and `test`
+(in-memory H2), so `./mvnw clean verify` still needs nothing running. No production Java changed
+this phase; it is all dependencies, configuration and the seed script.
+**Key code:** Nothing in `src/main/java` changed. `DatasourceConfigurationTest` asserts what each
+profile resolves to using `ApplicationContextRunner` + `ConfigDataApplicationContextInitializer`,
+without connecting to anything.
+**Config & infrastructure:** `application.properties` keeps only what every profile shares and
+sets `spring.profiles.active=dev`. `application-dev.properties` (main resources) holds the
+PostgreSQL URL as `${POSTGRES_HOST:localhost}` / `PORT` / `DB` / `USER` / `PASSWORD` placeholders
+plus the Hikari pool (`EcomdemoPool`, max 10). `application-test.properties` lives in **test**
+resources and points at `jdbc:h2:mem:ecomdemo;MODE=PostgreSQL`. `ddl-auto` is `update` for the app
+and `create-drop` for tests. Dependencies: `org.postgresql:postgresql` (runtime, version from the
+Boot BOM) replaces H2 at runtime; H2 drops to `test` scope; `spring-boot-h2console` is gone. Start
+the database with `docker run --name ecomdemo-postgres -e POSTGRES_DB=ecomdemo -e
+POSTGRES_USER=ecomdemo -e POSTGRES_PASSWORD=ecomdemo -p 5432:5432 -d postgres:18-alpine`, then
+`docker start/stop ecomdemo-postgres` after that.
+**Tests:** 102 total, was 94 — `DatasourceConfigurationTest` adds 8. The smoke test grows from 48
+checks to 52 on a first run and 54 once a probe from a previous run exists.
+**Gotchas:** The `test` profile is activated by surefire's `<systemPropertyVariables>` in
+`pom.xml`, **not** by a `src/test/resources/application.properties` — a file of that name shadows
+the main one instead of merging with it, so every shared setting would be lost. That same system
+property also means a test cannot observe the file's default profile; assert the file instead.
+`spring.sql.init.mode` must be `always` for PostgreSQL (`embedded` means in-memory only), which is
+why `data.sql` is now guarded by `WHERE NOT EXISTS` as one statement — an unguarded INSERT would
+re-seed ten products on every restart. `@DataJpaTest` replaces the datasource with an embedded one
+regardless of profile, which is why the repository slices never needed changing. Values written to
+`.smoke-state` must be quoted: the probe name contains spaces and the file is read back with `.`.
+**Follow-ups (not done, out of scope):** Flyway instead of `ddl-auto=update` — Phase 5.
+`@Transactional` and the oversell race — Phase 6. Tests against real PostgreSQL with
+Testcontainers — Phase 7. Bringing the database up with the app — Phase 10 (Docker Compose).
+
+## Phase 03: API Documentation (tag: phase-03-complete, PR #3)
 **What exists now:** The unchanged Phase 1 API now describes itself. springdoc-openapi builds an
 OpenAPI 3 document from the code at startup, served at `/v3/api-docs` (and `.yaml`) and rendered
 by Swagger UI at `/swagger-ui.html`. No production logic changed this phase.
@@ -36,28 +69,3 @@ auto-configuration, so the spec test has to be a `@SpringBootTest`.
 **Follow-ups (not done, out of scope):** securing or disabling the docs endpoints — Phase 8.
 Splitting the spec into groups per module — Phases 19–20. Generating a client from the YAML —
 not planned.
-
-## Phase 02: Automated Testing (tag: phase-02-complete, PR #2)
-**What exists now:** A four-level test suite over the unchanged Phase 1 code: 79 tests, 0
-skipped, ~9s. No production code changed this phase apart from reverting a stray `server.port`.
-**Key code:** `com.ecomdemo.support.TestData` builds entities and sets generated ids
-reflectively — use it rather than adding setters. `{Product,Cart,Order}ServiceTest` (Mockito),
-`{Product,Cart,Order}ControllerTest` (`@WebMvcTest` + `@MockitoBean` + `MockMvcTester`),
-`{Cart,Order}RepositoryTest` (`@DataJpaTest` + `TestEntityManager`).
-**Config & infrastructure:** Boot 4 moved the slice annotations —
-`org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest`,
-`org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`,
-`org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`. `@MockBean` is gone; use
-`@MockitoBean` from `org.springframework.test.context.bean.override.mockito`. Surefire loads the
-Mockito agent via `-javaagent` (needs `maven-dependency-plugin:properties`). No new dependencies:
-JUnit Jupiter 6, Mockito 5.23 and AssertJ 3.27 all arrive with the Boot 4 test starters.
-**Tests:** 35 unit · 33 web slice · 10 persistence slice · 1 `@SpringBootTest`. Smoke test
-unchanged at 34 checks.
-**Gotchas:** `BigDecimal.equals()` compares scale, so `8999.00 != 8999.0` — assert money with
-`isEqualByComparingTo`, and assert web bodies as JSON (JSONAssert compares numerically).
-`new BigDecimal("1.00")` keeps its scale; `BigDecimal.valueOf(1.00)` does not. Repository tests
-set `spring.sql.init.mode=never` so `data.sql` does not seed them. A `@WebMvcTest` needs
-`@Import(GlobalExceptionHandler.class)` for the error-shape assertions to see the advice.
-**Follow-ups (not done, out of scope):** coverage reporting — Phase 12. Tests against a real
-PostgreSQL — Phase 7. The oversell race in checkout still has no test, because it cannot be
-fixed until Phase 6.

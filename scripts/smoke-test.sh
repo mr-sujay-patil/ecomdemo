@@ -13,6 +13,11 @@
 #
 # The script is re-runnable: it empties the cart before starting, so it does not care whether
 # the application was just started or has been used already.
+#
+# One check spans two runs. The "Persistence across restarts" section leaves a probe product
+# behind and verifies it on the next run, so restarting the application between two runs is what
+# proves the data is in PostgreSQL and not in memory. The probe id is kept in .smoke-state
+# (override with SMOKE_STATE_FILE); deleting that file just resets the check to a first run.
 
 set -uo pipefail
 
@@ -218,6 +223,68 @@ check "the Swagger UI page itself returns 200" "200" "$STATUS"
 
 STATUS="$(request GET /swagger-ui/swagger-ui-bundle.js)"
 check "the Swagger UI javascript bundle is served" "200" "$STATUS"
+
+# --------------------------------------------------------------------------------------------
+# 4. Persistence across restarts (Phase 4)
+# --------------------------------------------------------------------------------------------
+#
+# Proving that data outlives the process needs two runs with a restart between them, because a
+# single run cannot restart the application it is talking to. So each run does two things:
+#
+#   1. checks whether the probe product the PREVIOUS run created is still there, and
+#   2. leaves a fresh probe behind for the next run.
+#
+# With the old in-memory H2 the first check failed, because the restart wiped the database. To see
+# it for yourself:
+#
+#   scripts/smoke-test.sh          # first run: leaves a probe, nothing to verify yet
+#   <restart the application>
+#   scripts/smoke-test.sh          # second run: the probe from before the restart is still there
+#
+# The probe id is remembered in a small state file, ignored by Git, NOT in the database - reading
+# it back out of the API is the whole point of the check.
+section "Persistence across restarts"
+
+STATE_FILE="${SMOKE_STATE_FILE:-.smoke-state}"
+
+PROBE_ID=""
+PROBE_NAME=""
+PROBE_PRICE=""
+
+if [ -f "$STATE_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$STATE_FILE"
+    STATUS="$(request GET "/api/products/${PROBE_ID:-0}")"
+    if [ "$STATUS" = "200" ]; then
+        pass "the probe product from the previous run is still there (id=$PROBE_ID)"
+        check "it kept its name" "${PROBE_NAME:-<missing>}" "$(jget "d['name']")"
+        check "it kept its price" "${PROBE_PRICE:-<missing>}" "$(jget "str(d['price'])")"
+    else
+        fail "the probe product from the previous run is still there (id=$PROBE_ID)" \
+            "200" "$STATUS - the data did not survive; is the database still in memory?"
+    fi
+    # Tidy up, so repeated runs do not grow the catalogue.
+    request DELETE "/api/products/$PROBE_ID" >/dev/null
+else
+    pass "first run: no previous probe to check (run again after a restart to verify persistence)"
+fi
+
+# Leave a probe for the next run. The name is unique per run so a stale row is never mistaken for
+# a fresh one.
+PROBE_NAME="Persistence Probe $(date +%Y%m%d-%H%M%S)"
+PROBE_PRICE="4242.42"
+STATUS="$(request POST /api/products \
+    "{\"name\":\"$PROBE_NAME\",\"description\":\"written by the smoke test to survive a restart\",\"price\":$PROBE_PRICE,\"stockQuantity\":1}")"
+check "a probe product is created for the next run" "201" "$STATUS"
+PROBE_ID="$(jget "d['id']")"
+
+STATUS="$(request GET "/api/products/$PROBE_ID")"
+check "the probe reads back from the database" "200" "$STATUS"
+
+# Quoted, because the name contains spaces and this file is read back with `.` (source).
+printf "PROBE_ID='%s'\nPROBE_NAME='%s'\nPROBE_PRICE='%s'\n" \
+    "$PROBE_ID" "$PROBE_NAME" "$PROBE_PRICE" > "$STATE_FILE"
+pass "probe id $PROBE_ID recorded in $STATE_FILE for the next run"
 
 # --------------------------------------------------------------------------------------------
 # Summary
