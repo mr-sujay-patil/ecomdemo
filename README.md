@@ -8,19 +8,19 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 6: Transactions & Concurrency** — checkout is now **correct when things go wrong**.
-Placing an order is one database transaction, so a failure anywhere in it leaves the catalogue,
-the cart and the order history exactly as they were. `Product` carries a `@Version` column, which
-means two people racing for the last unit can no longer both buy it: the second write is rejected,
-retried up to three times, and answered with 409 if the contention does not clear. Every attempt,
-successful or refused, is written to an `order_audit` table in its own transaction, so a rejection
-leaves evidence even though everything else about it was rolled back.
+**Phase 7: Integration Testing** — the build no longer takes H2's word for it. `./mvnw verify`
+now starts **PostgreSQL 18 in a Docker container**, applies the real migrations to it and drives
+the whole application over HTTP against it: 15 integration tests across the catalogue, the cart
+and checkout, nothing mocked. The oversell race from Phase 6 is one of them, so "the last unit is
+sold exactly once" is finally a claim about PostgreSQL's locking rather than H2's imitation of it.
+Maven runs the two suites separately — Surefire takes `*Test.java` at the `test` phase, Failsafe
+takes `*IT.java` after packaging — so `./mvnw test` is still nine seconds and needs no Docker.
 
-Everything from the earlier phases still stands: a Flyway-managed schema on PostgreSQL with a
-`dev`/`test` profile split, products, a single shared cart and order placement, documented by an
-OpenAPI 3 spec at `/v3/api-docs` and Swagger UI at **<http://localhost:8080/swagger-ui.html>**.
-The 120-test suite still runs on in-memory H2, so `./mvnw clean verify` needs nothing running. No
-security and no Docker Compose yet; those arrive in Phases 8 and 10.
+Everything from the earlier phases still stands: a Flyway-managed schema on PostgreSQL, an atomic
+checkout protected by optimistic locking, products, a single shared cart and order placement,
+documented by an OpenAPI 3 spec at `/v3/api-docs` and Swagger UI at
+**<http://localhost:8080/swagger-ui.html>**. 135 tests in total. No security and no Docker
+Compose yet; those arrive in Phases 8 and 10.
 
 ## Roadmap
 
@@ -38,12 +38,13 @@ ecomdemo/
 ├── src/main/resources/
 │   ├── application.properties       # shared by every profile
 │   ├── application-dev.properties   # PostgreSQL + Hikari (the default profile)
-│   └── db/migration/                # V1 schema, V2 seed catalogue, V3 product category
+│   └── db/migration/                # V1 schema, V2 seed, V3 category, V4 version + audit
 ├── src/test/java/com/ecomdemo/
-│   ├── support/   # TestData fixture builders
-│   └── <feature>/ # *ServiceTest, *ControllerTest, *RepositoryTest per feature
+│   ├── support/   # TestData builders, PostgresContainerConfig, the IntegrationTest base class
+│   └── <feature>/ # *ServiceTest, *ControllerTest, *RepositoryTest and *ApiIT per feature
 ├── src/test/resources/
-│   └── application-test.properties  # in-memory H2 for the suite
+│   ├── application-test.properties  # in-memory H2, for the fast suite (Surefire)
+│   └── application-it.properties    # the container's PostgreSQL, for the *IT tests (Failsafe)
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
 ├── scripts/       # smoke-test.sh
 └── .github/       # Pull Request template (workflows from Phase 11)
@@ -68,6 +69,8 @@ Branches are never deleted — they are the permanent history of the learning jo
 ## Running it
 
 Requires **JDK 21** on the path, and **Docker** (or a native PostgreSQL) for the database.
+Docker is also what `./mvnw verify` starts the integration-test database with, so keep Docker
+Desktop running while you work; `./mvnw test` on its own needs neither.
 
 ### 1. Start PostgreSQL
 
@@ -394,8 +397,19 @@ curl -s -X POST localhost:8080/api/orders
 
 ## Tests
 
-`./mvnw clean verify` runs all 120 tests in about nine seconds, against in-memory H2 — no
-PostgreSQL needed. They sit at five levels, each loading only what it needs:
+There are two suites now, and one command runs both.
+
+```bash
+./mvnw test      # 120 tests, ~9 s, in-memory H2, no Docker
+./mvnw verify    # those 120 PLUS 15 integration tests against a real PostgreSQL, ~17 s
+```
+
+`./mvnw test` is the inner loop: it needs nothing installed and it is what you run constantly.
+`./mvnw verify` additionally starts PostgreSQL in a Docker container and runs the whole
+application against it — it needs **Docker running**, and it is what has to be green before a
+commit is pushed.
+
+The fast suite sits at five levels, each loading only what it needs:
 
 | Level | Annotation | What it loads | Classes |
 |---|---|---|---|
@@ -442,12 +456,78 @@ Conventions, if you add tests:
 ./mvnw test -Dtest=ConcurrentCheckoutTest    # the race, on its own
 ```
 
+### Integration tests: the real database, in a container
+
+Everything above runs on H2. H2 in `MODE=PostgreSQL` is a good imitation, and an imitation is
+still not the thing: it parses and stores in its own way, its locking is its own, and a migration
+or a query it happily accepts can still fail on the real server. So since Phase 7 there is a
+second suite that runs the same application against **PostgreSQL itself**.
+
+| Class | Tests | Covers |
+|---|---|---|
+| `ProductApiIT` | 5 | The catalogue over HTTP: the seeded rows, a create/read round trip, update, delete, 404, 400 |
+| `CartApiIT` | 6 | Add, merge, totals across lines, update, remove, 404, 400 — each read back with a second request, so only committed state counts |
+| `OrderApiIT` | 4 | Checkout end to end, a 409 that rolls back everything, an empty cart, and two simultaneous checkouts for the last unit |
+
+Three pieces make it work, and each replaces something you would otherwise write by hand.
+
+**Testcontainers starts the database.** `PostgresContainerConfig` declares the container as an
+ordinary Spring `@Bean`, pinned to `postgres:18-alpine` — the same tag the `docker run` above
+uses:
+
+```java
+@TestConfiguration(proxyBeanMethods = false)
+public class PostgresContainerConfig {
+    @Bean
+    @ServiceConnection
+    PostgreSQLContainer postgresContainer() {
+        return new PostgreSQLContainer("postgres:18-alpine");
+    }
+}
+```
+
+**`@ServiceConnection` wires it up.** The container comes up on a random free port, and that one
+annotation reads the url, username and password off it and hands them to the auto-configured
+`DataSource`. There is no JDBC url anywhere in the test sources, and `application-it.properties`
+deliberately sets none — if it did, the tests would talk to that database instead of the
+container, most likely your own.
+
+**Spring owns the lifecycle, which is also what makes it fast.** Spring starts the container with
+the context and stops it when the context closes, and it caches a context by the annotations that
+define it. Every `*IT` extends one base class, `IntegrationTest`, so all three ask for the same
+context: **one** container for the whole run. The first class pays about twelve seconds for the
+context and the database; the other two take a tenth of a second each. (Add a `@MockitoBean` or a
+stray `@TestPropertySource` to one subclass and it quietly gets a context — and a container — of
+its own.)
+
+The suites are split by **file name**. Maven's Surefire plugin runs `*Test.java` at the `test`
+phase; its sibling Failsafe runs `*IT.java` after packaging. Failsafe deliberately does not fail
+the build when a test fails — it records the result, lets the build reach
+`post-integration-test` so containers are always torn down, and a separate `verify` goal then
+fails the build. Renaming a class from `FooTest` to `FooIT` is the whole mechanism for moving it
+between suites.
+
+What the integration tests buy, concretely: the migrations V1–V4 are applied to an empty
+**PostgreSQL 18** on every build, `NUMERIC(10,2)` rounds the way the real column rounds, and the
+oversell race is settled by PostgreSQL's own row locking rather than H2's. That last one used to
+be provable only by running the smoke test by hand.
+
+```bash
+./mvnw verify                                 # everything
+./mvnw failsafe:integration-test -Dit.test=OrderApiIT   # one IT class (needs a prior build)
+./mvnw test                                   # skip the containers entirely
+```
+
+H2 did not go away, and that is a choice rather than an oversight: the point of a pyramid is that
+the fast tests stay fast. If every test needed Docker, the suite you run fifty times a day would
+cost a container start each time.
+
 ## Known gaps (closed by later phases)
 
-- **The migrations are only ever tested on H2.** The suite runs V1–V4 against H2 in PostgreSQL
-  mode, which catches drift between the migrations and the entities but not PostgreSQL-specific
-  SQL — and it races two checkouts against H2's locking, not PostgreSQL's. **Phase 7** runs both
-  against a real PostgreSQL container.
+- **The fast suite is still only ever run on H2.** `./mvnw verify` now runs V1–V4 and the
+  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 15
+  integration tests. The other 120 still run on H2, so a PostgreSQL-specific problem in a code
+  path no `*IT` exercises would still reach production.
 - **There is still one cart for the whole world.** Two "simultaneous checkouts" therefore means
   two people checking out the *same* cart, which is a strange thing to want. The locking they
   exercise is not strange at all — it is the same mechanism that protects the catalogue once
@@ -462,6 +542,6 @@ Conventions, if you add tests:
   **Phases 8 and 9** add Spring Security and JWT.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the
   code it reaches. **Phase 12** adds JaCoCo and SonarQube.
-- **Tests run against H2, not the real database.** H2 accepts some SQL PostgreSQL would reject,
-  so a green suite is not yet proof the queries work in production. **Phase 7** adds
-  Testcontainers.
+- **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without
+  Docker can only run `./mvnw test`. That is the deliberate trade for testing against the real
+  engine, and **Phase 11** is where CI has to be given a Docker daemon of its own.

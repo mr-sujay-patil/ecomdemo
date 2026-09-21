@@ -71,8 +71,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 3 | [API Documentation](phases/phase-03-openapi.md) | springdoc-openapi | `feature/phase-03-openapi` | ✅ |
 | 4 | [PostgreSQL](phases/phase-04-postgresql.md) | PostgreSQL | `feature/phase-04-postgresql` | ✅ |
 | 5 | [Database Migrations](phases/phase-05-flyway.md) | Flyway | `feature/phase-05-flyway` | ✅ |
-| 6 | [Transactions & Concurrency](phases/phase-06-transactions.md) | @Transactional + optimistic locking | `feature/phase-06-transactions` | 🔵 |
-| 7 | [Integration Testing](phases/phase-07-testcontainers.md) | Testcontainers | `feature/phase-07-testcontainers` | ⬜ |
+| 6 | [Transactions & Concurrency](phases/phase-06-transactions.md) | @Transactional + optimistic locking | `feature/phase-06-transactions` | ✅ |
+| 7 | [Integration Testing](phases/phase-07-testcontainers.md) | Testcontainers | `feature/phase-07-testcontainers` | 🔵 |
 | 8 | [Spring Security](phases/phase-08-spring-security.md) | Spring Security | `feature/phase-08-spring-security` | ⬜ |
 | 9 | [JWT Authentication](phases/phase-09-jwt.md) | JWT (OAuth2 Resource Server) | `feature/phase-09-jwt` | ⬜ |
 | 10 | [Containerization](phases/phase-10-docker.md) | Docker + Docker Compose | `feature/phase-10-docker` | ⬜ |

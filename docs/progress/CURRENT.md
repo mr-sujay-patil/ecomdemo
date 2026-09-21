@@ -3,86 +3,74 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 6: Transactions & Concurrency (@Transactional + optimistic locking)
-- **Branch:** feature/phase-06-transactions
+- **Phase:** 7: Integration Testing (Testcontainers)
+- **Branch:** feature/phase-07-testcontainers
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #6 — https://github.com/mr-sujay-patil/ecomdemo/pull/6 (open, awaiting review)
-- **Waiting for user:** YES — review and merge PR #6, then say `merged, continue`
+- **PR:** #7 — raised, awaiting review
+- **Waiting for user:** YES — review and merge PR #7, then say `merged, continue`
 
-## Phase 05 merge verification (passed 2026-09-22)
-PR #5 MERGED with a merge commit (67d3453, 2 parents: 1e7818d + 2a05028); branch is an ancestor of
+## Phase 06 merge verification (passed 2026-09-22)
+PR #6 MERGED with a merge commit (cf50c2f, 2 parents: 67d3453 + 344c957); branch is an ancestor of
 `main`; no commits and no file diffs between branch and `main`; local and remote branches intact;
-every "What you'll implement" item present in `main` (`db/migration/V1__init_schema.sql`,
-`V2__seed_products.sql`, `V3__add_product_category.sql`, `ddl-auto=validate` in both
-`application.properties` and `application-test.properties`, the Flyway settings, the smoke test's
-migration/category section, `docs/test-reports/phase-05.md`);
-`./mvnw clean verify` on `main` -> BUILD SUCCESS, 108 tests, 0 failures; the app on `main` started
-with "Successfully validated 3 migrations" / "Current version of schema public: 3";
-`scripts/smoke-test.sh` -> 65 passed, 0 failed, 0 skipped, 0 ERROR in the app log (only springdoc's
-2 advisory WARNs); tag `phase-05-complete` pushed.
+every "What you'll implement" item present in `main` (`OrderPlacementService`, `OrderAudit*`,
+`@Version` on `Product`, `readOnly` on the read services, `REQUIRES_NEW` audit,
+`V4__add_product_version_and_order_audit.sql`, `ConcurrentCheckoutTest`, the smoke test's race
+section, `docs/test-reports/phase-06.md`); `./mvnw clean verify` on `main` -> BUILD SUCCESS,
+120 tests, 0 failures; the app on `main` started with "Successfully validated 4 migrations" /
+"Current version of schema public: 4"; `scripts/smoke-test.sh` -> 78 passed, 0 failed, 0 skipped,
+0 ERROR in the app log (only springdoc's 2 advisory WARNs); tag `phase-06-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] An atomic place-order: any stock failure rolls back everything
-- [x] `@Transactional(readOnly = true)` on read services
-- [x] `@Version` on `Product`; handle `OptimisticLockingFailureException` with a limited retry
-      and a 409 response
-- [x] An `order_audit` table written with `Propagation.REQUIRES_NEW`
-- [x] A concurrency test: two threads buy the last unit, exactly one succeeds
-- [x] Smoke test addition: stock set to 1, two parallel orders -> one success, one 409, stock 0
-- [x] Testing protocol run in full + docs/test-reports/phase-06.md
-- [x] README section, decisions.md, RECENT.md rotation (Phase 04 archived), tracker -> 🔵
-- [x] PR raised (#6)
+- [x] The Testcontainers PostgreSQL module with `@ServiceConnection`
+- [x] One HTTP-level integration test per feature
+- [x] A shared, reusable container configuration
+- [x] Surefire for unit tests and Failsafe for `*IT.java` tests
+- [x] Testing protocol run in full + docs/test-reports/phase-07.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 05 archived), tracker -> 🔵
+- [x] PR raised (#7)
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Tests run: 120, Failures: 0, Errors: 0
-  (12 new: 4 in `ConcurrentCheckoutTest`, 3 added to `OrderPlacementServiceTest`, 4 retry tests
-  replacing 6 moved ones in `OrderServiceTest`, 1 in `FlywayMigrationTest`). Run three times in a
-  row, all green.
-- 2026-09-22: `ConcurrentCheckoutTest` alone, 10 consecutive runs, all green; the log shows the
-  versioned UPDATE losing in both race tests ("Unexpected row count (expected 1 but was 0) ...
-  where id=? and version=?").
-- 2026-09-22: `scripts/smoke-test.sh` against the running app and real PostgreSQL -> 78 passed,
-  0 failed, 0 skipped, three runs in a row; the app log shows the optimistic lock firing exactly
-  once per run, so the race is really being run and not just arriving in sequence.
-- 2026-09-22: failure scenario (a) six simultaneous checkouts of a 1-unit product -> one 201,
-  five 409, stock 0, one order, 0 ERROR. (b) a 2-line cart (bulk 10 / scarce 1) checked out twice
-  at once -> 201 + 409, bulk stock 8 not 6, so the loser's already-written reduction was rolled
-  back. Both against real PostgreSQL. Probe products deleted afterwards.
-- 2026-09-22: the README's copy-paste race snippet was run verbatim -> 201, 409, stockQuantity 0.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 120 tests, 0 failures (unchanged);
+  Failsafe 15 tests, 0 failures (ProductApiIT 5, CartApiIT 6, OrderApiIT 4). One
+  `postgres:18-alpine` container for the whole IT run; PostgreSQL 18.6; the log shows the
+  optimistic lock firing once on a Tomcat thread, so the race really ran over HTTP. Run four
+  times in a row, all green (16.9s / 17.0s / 16.0s / 18.4s).
+- 2026-09-22: `./mvnw clean test` -> 120 tests, 8.7s, zero "Creating container" lines and no
+  *ApiIT class run: the fast suite still needs no Docker.
+- 2026-09-22: a throwaway `TemporarilyFailingIT` proved `failsafe:integration-test` records a
+  failure without stopping the build and `failsafe:verify` is what fails it. File deleted.
+- 2026-09-22: the app started from the jar (dev profile, real PostgreSQL) -> "Successfully
+  validated 4 migrations", schema v4, 0 ERROR; `scripts/smoke-test.sh` twice -> 78 passed,
+  0 failed, 0 skipped both times. App stopped, no Testcontainers containers left behind,
+  `GET /api/products` back to 11.
 
 ## Open issues / blockers
-- none
+- none. One check is ⚠️ manual: "Docker not running fails the build" could not be faked from the
+  build (`~/.testcontainers.properties` pins the unix-socket strategy and both DOCKER_HOST
+  attempts were ignored). Manual steps are in docs/test-reports/phase-07.md §9.
 
 ## Decisions this phase (copied to docs/decisions.md ✅)
-- The retry loop and the transactional unit of work are SEPARATE beans (`OrderService` ->
-  `OrderPlacementService`). Self-invocation would bypass the proxy and run every attempt with no
-  transaction at all; it also has to be a new transaction per attempt, because a failed flush
-  leaves the persistence context unusable and the transaction rollback-only.
-- `order_audit` has NO foreign key to `orders`: written with REQUIRES_NEW, it commits while the
-  order's own insert is still uncommitted, and a REJECTED row names no order at all.
-- The per-line stock pre-check stays even though the transaction would undo a partial reduction:
-  it produces the accurate "3 requested, 2 available" message and saves work the database would
-  only throw away.
-- `CartService` is read-WRITE throughout, `view()` included: the shared cart row is created on
-  first use, and readOnly=true would put Hibernate in manual flush mode and silently drop it.
-- `ProductService` defaults to readOnly at class level with the four writers overriding it, so a
-  new read method is safe by default and a new write fails loudly if it forgets.
-- `FlywayMigrationTest` now scopes its catalogue assertions to V2's ten seeded names: every
-  `@SpringBootTest` shares one H2 database and the new concurrency test creates products of its
-  own (and deletes them again in `@AfterEach`).
+- H2 STAYS. The phase file's plan implied it would go; the two suites answer different questions
+  (fast "is the Java right?" vs "is this true of PostgreSQL?") and deleting H2 would make the
+  inner loop need Docker for every run.
+- The container is a `@Bean` with `@ServiceConnection`, not `@Container` + `@DynamicPropertySource`.
+- `withReuse(true)` is deliberately NOT enabled: a surviving container keeps the last run's rows.
+- Boot 4 moved `TestRestTemplate` to `org.springframework.boot.resttestclient` and registers its
+  auto-configuration only via `@AutoConfigureTestRestTemplate`; it also needs
+  `spring-boot-restclient` on the test classpath (`RestTemplateBuilder`).
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema now at
-**v4**. `docker start ecomdemo-postgres` if it is down. The application itself is stopped, no
-stray Java processes. Every probe product created during testing was deleted through the API;
-`GET /api/products` returns 11 (the ten seeded plus Phase 4's intentional persistence probe).
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v4**.
+`docker start ecomdemo-postgres` if it is down. The application is stopped, no stray Java
+processes. Docker Desktop must stay running from this phase onwards (Testcontainers needs it).
 
 ## Next action
 STOPPED at the mandatory post-PR stop point. Wait for the user.
 - If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
-  `./mvnw clean verify` and `scripts/smoke-test.sh` (needs the `ecomdemo-postgres` container up
-  and the app running), the git-workflow Verification Checklist, then tag and push
-  `phase-06-complete`, then start Phase 7 (`docs/phases/phase-07-testcontainers.md`).
+  `./mvnw clean verify` (needs Docker running) and `scripts/smoke-test.sh` (needs the
+  `ecomdemo-postgres` container up and the app running), the git-workflow Verification Checklist,
+  then tag and push `phase-07-complete`, then start Phase 8
+  (`docs/phases/phase-08-spring-security.md`).
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.

@@ -82,10 +82,16 @@
 		</dependency>
 
 		<!--
-			H2 stays, but only on the test classpath. The application now speaks to a real
-			PostgreSQL server; the test suite still runs against an in-memory H2 so that
-			`./mvnw clean verify` needs nothing installed. Phase 7 (Testcontainers) is where the
-			tests move onto real PostgreSQL and this dependency finally goes.
+			H2, on the test classpath only. Phase 7 was pencilled in as the phase that would
+			delete it; it stays, and that is a deliberate choice rather than an oversight.
+
+			The two suites now answer two different questions. The unit and slice tests
+			(Surefire, `test` profile, H2) ask "is the Java right?" - they run in seconds, on any
+			machine, with no Docker, and they are what a developer runs constantly. The
+			integration tests (Failsafe, `it` profile, Testcontainers) ask "is this true of
+			PostgreSQL?" - they cost a container start and they are where an H2-only truth would
+			be caught. Deleting H2 would buy honesty in the fast suite at the price of making it
+			slow, which is the trade the testing pyramid exists to avoid.
 		-->
 		<dependency>
 			<groupId>com.h2database</groupId>
@@ -105,6 +111,50 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			Testcontainers. `testcontainers-postgresql` starts a real PostgreSQL server in a
+			Docker container for the duration of the tests and throws it away afterwards, so the
+			integration tests run against the same engine production uses instead of an H2
+			imitation of it. In Testcontainers 2.x every database module is named
+			`testcontainers-<engine>`; the 1.x coordinates were `org.testcontainers:postgresql`.
+
+			`spring-boot-testcontainers` is the bridge: it is what makes @ServiceConnection work,
+			so a container declared as a @Bean supplies the JDBC url, username and password to
+			the application context by itself. Without it the container would start and the test
+			would still connect to whatever spring.datasource.url happened to say.
+
+			There is deliberately no `testcontainers-junit-jupiter`: its @Testcontainers/@Container
+			extension is the alternative to letting Spring own the container lifecycle, and this
+			phase lets Spring own it (see PostgresContainerConfig).
+
+			Versions come from the Spring Boot BOM (testcontainers 2.0.5).
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			`TestRestTemplate` - the client the integration tests use to call the running
+			application - is a thin wrapper over `RestTemplate`, and it builds one through
+			`RestTemplateBuilder`. Spring Boot 4 moved that builder into its own
+			`spring-boot-restclient` module, and this application never makes an outbound HTTP
+			call, so nothing else drags it in: without this line the context fails to start with
+			`ClassNotFoundException: org.springframework.boot.restclient.RestTemplateBuilder`.
+			Test scope, because it is the test client that needs it and not the application.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-restclient</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>
@@ -159,6 +209,53 @@
 						<spring.profiles.active>test</spring.profiles.active>
 					</systemPropertyVariables>
 				</configuration>
+			</plugin>
+
+			<!--
+				Failsafe runs the integration tests. It is a separate plugin from Surefire, and
+				the split is not cosmetic:
+
+				* WHAT THEY RUN. The two plugins have different default file patterns and they do
+				  not overlap. Surefire takes `*Test.java` / `Test*.java` / `*Tests.java`;
+				  Failsafe takes `*IT.java` / `IT*.java` / `*ITCase.java`. Naming a class
+				  `SomethingIT` is therefore the entire mechanism by which it moves from the fast
+				  suite to the slow one - there is no annotation and no tag to remember.
+
+				* WHEN THEY RUN. Surefire runs at the `test` phase, BEFORE the jar is built, and
+				  a failure stops the build there. Failsafe runs at `integration-test`, after
+				  `package`, and - this is the point of the name - it does NOT fail the build
+				  when a test fails. It records the result and lets the build continue to
+				  `post-integration-test`, so that whatever a real integration test started
+				  (here a container; in other projects a server, a queue, a leased database) is
+				  always torn down. The separate `verify` goal below then reads those recorded
+				  results and fails the build. Bind only `integration-test` and a broken test is
+				  silently green.
+
+				`./mvnw test` now means "the fast suite"; `./mvnw verify` means both. Docker must
+				be running for the second.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<configuration>
+					<!--
+						The same Java agent Surefire gets. No integration test mocks anything,
+						but spring-test's MockitoTestExecutionListener runs for every test and
+						touches Mockito, which then self-attaches an agent and prints the "this
+						will no longer work in future releases of the JDK" warning. Loading it on
+						the command line is the supported way and keeps this JVM behaving like
+						the Surefire one.
+					-->
+					<argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 		</plugins>
 	</build>
