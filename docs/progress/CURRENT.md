@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 8: Spring Security
 - **Branch:** feature/phase-08-spring-security
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** no
@@ -22,13 +22,13 @@ version of schema public: 4"; `scripts/smoke-test.sh` -> 78 passed, 0 failed, 0 
 in the app log; tag `phase-07-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] `customer` feature: registration (BCrypt), profile, `users` table via Flyway, admin seeded by a migration
-- [ ] Roles `CUSTOMER` and `ADMIN` with HTTP Basic authentication
-- [ ] Rules: product reads public, product writes ADMIN, cart and orders CUSTOMER
-- [ ] Cart per user (replaces the shared cart), orders owned by the user
-- [ ] `@PreAuthorize` so users only see their own orders
-- [ ] 401 and 403 in the standard error format
-- [ ] `@WithMockUser` tests covering allowed and denied access per role
+- [x] `customer` feature: registration (BCrypt), profile, `users` table via Flyway, admin seeded by a migration
+- [x] Roles `CUSTOMER` and `ADMIN` with HTTP Basic authentication
+- [x] Rules: product reads public, product writes ADMIN, cart and orders CUSTOMER
+- [x] Cart per user (replaces the shared cart), orders owned by the user
+- [x] `@PreAuthorize` so users only see their own orders
+- [x] 401 and 403 in the standard error format
+- [x] `@WithMockUser` tests covering allowed and denied access per role
 - [ ] Smoke test additions (anon read 200, anon cart 401, customer create product 403, admin 201,
       customer A cannot read customer B's order, full flow as a logged-in customer)
 - [ ] Testing protocol run in full + docs/test-reports/phase-08.md
@@ -36,13 +36,24 @@ in the app log; tag `phase-07-complete` pushed.
 - [ ] PR raised
 
 ## Last test run
-- none yet this phase. Baseline inherited from `main`: 120 Surefire + 15 Failsafe, smoke 78.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 163 tests (was 120), Failsafe 23
+  tests (was 15), 0 failures. New: CustomerServiceTest (8), CustomerControllerTest (11),
+  AppUserDetailsServiceTest (4), per-controller "access rules" nests, FlywayMigrationTest V5/V6.
 
 ## Open issues / blockers
 - none.
 
 ## Decisions this phase (copied to docs/decisions.md ⬜)
-- none yet.
+- Two migrations, not one: V5 adds `users` + the seeded admin, V6 attaches cart and orders.
+- ADMIN is refused on /api/cart and /api/orders (403). Being an admin does not imply being a
+  customer; the phase file says those endpoints "require CUSTOMER" and this takes it literally.
+- Reading somebody else's order is 403 (`@PostAuthorize`), not 404. The phase file allows either.
+- `@WebMvcTest` does NOT pick up our SecurityConfig; @WithSecurityRules imports it so the slices
+  test the real rules instead of Boot's fallback "deny everything" chain.
+- ApiErrorWriter injects Jackson 3's `tools.jackson.databind.json.JsonMapper` — Boot 4 defines no
+  `com.fasterxml.jackson.databind.ObjectMapper` bean even though Jackson 2 is on the classpath.
+- V6 deletes the existing cart rows (scratch state, no correct owner) but keeps existing orders
+  and attributes them to the seeded admin; orders.user_id is ON DELETE RESTRICT.
 
 ## Environment left behind
 Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v4**.
@@ -50,6 +61,7 @@ Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING,
 processes. Docker Desktop must stay running (Testcontainers needs it for `./mvnw verify`).
 
 ## Next action
-Start step 5 (IMPLEMENTING) of the execution protocol on `feature/phase-08-spring-security`:
-read `docs/phases/phase-08-spring-security.md`, then work the checklist above top-down with small
-Conventional Commits, beginning with the `users` table migration (V5) and the `customer` feature.
+Continue the checklist: smoke test additions (anon read 200, anon cart 401, customer creates a
+product 403 / admin 201, customer A cannot read customer B's order, full flow as a logged-in
+customer), then the full testing protocol + docs/test-reports/phase-08.md, then README +
+decisions.md + RECENT.md rotation (archive Phase 06) + tracker -> 🔵, then the PR.
