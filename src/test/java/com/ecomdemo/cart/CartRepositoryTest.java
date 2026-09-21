@@ -22,12 +22,14 @@ import org.springframework.test.context.TestPropertySource;
  * {@code findCart()} and leaves {@code save} and {@code findById} alone.
  *
  * <p>Each test is wrapped in a transaction that is rolled back afterwards, so tests cannot leak
- * rows into each other. {@code spring.sql.init.mode=never} switches off the {@code data.sql}
- * seed the application uses at runtime: a repository test should set up exactly the rows it
- * asserts on, and would otherwise silently depend on the catalogue file.
+ * rows into each other. The schema comes from Hibernate rather than from the Flyway migrations
+ * (see the property below): {@code @DataJpaTest} hands every slice its own throwaway database
+ * and does not run Flyway, and a repository test should set up exactly the rows it asserts on -
+ * migration V2 would seed ten products it never asked for. The migrations are exercised instead
+ * by {@code FlywayMigrationTest} and by the {@code @SpringBootTest} classes.
  */
 @DataJpaTest
-@TestPropertySource(properties = "spring.sql.init.mode=never")
+@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 class CartRepositoryTest {
 
     @Autowired

@@ -2,10 +2,10 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-21
+- **Updated:** 2026-09-22
 - **Phase:** 5: Database Migrations (Flyway)
 - **Branch:** feature/phase-05-flyway
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -22,9 +22,9 @@ test scope in `pom.xml`, `application-dev.properties`, `src/test/resources/appli
 probe product written before the restart was still present (id=12); tag `phase-04-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] `V1__init_schema.sql` and `V2__seed_products.sql` (replacing `data.sql`)
-- [ ] `spring.jpa.hibernate.ddl-auto=validate`
-- [ ] `V3__add_product_category.sql` (a new column plus an index) to practice schema evolution
+- [x] `V1__init_schema.sql` and `V2__seed_products.sql` (replacing `data.sql`)
+- [x] `spring.jpa.hibernate.ddl-auto=validate`
+- [x] `V3__add_product_category.sql` (a new column plus an index) to practice schema evolution
 - [ ] Smoke test additions: `flyway_schema_history` shows V1–V3 successful; product responses
       include `category`
 - [ ] Testing protocol run in full + docs/test-reports/phase-05.md
@@ -32,25 +32,33 @@ probe product written before the restart was still present (id=12); tag `phase-0
 - [ ] PR raised
 
 ## Last test run
-- none yet this phase
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Tests run: 108, Failures: 0, Errors: 0,
+  Skipped: 0 (6 new: 5 in `FlywayMigrationTest`, 1 in `DatasourceConfigurationTest`)
 
 ## Open issues / blockers
 - none
 
 ## Decisions this phase (copied to docs/decisions.md ⬜)
-- none yet
+- `spring-boot-starter-flyway`, not bare `flyway-core`: Boot 4 splits auto-configuration into a
+  module per technology, so flyway-core alone wires up nothing and the migrations never run.
+- V1 reproduces the Phase 4 schema exactly (validate compares them) but with readable constraint
+  names and explicit ON DELETE rules - Hibernate's validator ignores both.
+- V3's `category` is NULLABLE: expand/contract, so the migration cannot break old instances still
+  inserting during a deploy.
+- The test suite runs the SAME migrations on H2 (MODE=PostgreSQL) with `ddl-auto=validate`, so
+  drift between migrations and entities fails the build. The two `@DataJpaTest` repository slices
+  are the exception - they keep `create-drop` on their own throwaway database, because
+  `@DataJpaTest` does not run Flyway and those tests want empty tables.
+- The database was dropped and recreated rather than baselined (`baseline-on-migrate=false`).
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING and holds the
-Phase 4 data, including smoke-test probe products. `docker start ecomdemo-postgres` if it is down.
-NOTE: that database was built by Hibernate `ddl-auto=update`, so it has no `flyway_schema_history`.
-Flyway will need `baseline-on-migrate` or, cleaner for a learning project, a **fresh** database
-(`docker rm -f ecomdemo-postgres` and recreate) so V1 builds the schema from nothing. Decide this
-as the first implementation step and record it here.
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) still holds the Phase 4
+database, which was built by Hibernate `ddl-auto=update` and has NO `flyway_schema_history`. With
+`baseline-on-migrate=false` Flyway will refuse to start against it. It must be recreated before
+the app is run: `docker rm -f ecomdemo-postgres` then the `docker run` in the README.
 
 ## Next action
-Step 5 (IMPLEMENTING). Write `src/main/resources/db/migration/V1__init_schema.sql` matching the
-current entities (`Product`, `Cart`, `CartItem`, `Order`, `OrderItem` — check the real table and
-column names by starting the app once with `ddl-auto=update`, or by reading the entity classes in
-`src/main/java/com/ecomdemo/**`). Add the `flyway-core` + `flyway-database-postgresql`
-dependencies. Then V2 (seed, replacing `data.sql`), then switch `ddl-auto` to `validate`, then V3.
+Code is done and `./mvnw clean verify` is green. Next: recreate the PostgreSQL container from
+scratch, run `./mvnw spring-boot:run` and confirm Flyway applies V1-V3 to the empty database and
+Hibernate validation passes. Then extend `scripts/smoke-test.sh` with the Phase 5 checks
+(`flyway_schema_history` shows V1-V3 successful; product responses include `category`).

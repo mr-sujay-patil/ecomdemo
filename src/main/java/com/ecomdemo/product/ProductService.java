@@ -33,7 +33,8 @@ public class ProductService {
 
     public ProductResponse create(ProductRequest request) {
         Product product = new Product(
-                request.name(), request.description(), request.price(), request.stockQuantity());
+                request.name(), request.description(), request.price(), request.stockQuantity(),
+                request.category());
         return ProductResponse.from(productRepository.save(product));
     }
 
@@ -43,6 +44,7 @@ public class ProductService {
         product.setDescription(request.description());
         product.setPrice(request.price());
         product.setStockQuantity(request.stockQuantity());
+        product.setCategory(request.category());
         return ProductResponse.from(productRepository.save(product));
     }
 

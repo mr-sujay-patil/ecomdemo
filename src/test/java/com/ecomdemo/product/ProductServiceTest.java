@@ -39,7 +39,7 @@ import org.mockito.stubbing.Answer;
 class ProductServiceTest {
 
     private static final ProductRequest VALID_REQUEST =
-            new ProductRequest("Desk Mat", "Stitched-edge felt mat", new BigDecimal("1299.00"), 12);
+            new ProductRequest("Desk Mat", "Stitched-edge felt mat", new BigDecimal("1299.00"), 12, "ACCESSORIES");
 
     @Mock
     private ProductRepository productRepository;

@@ -26,7 +26,12 @@ public record ProductResponse(
         BigDecimal price,
 
         @Schema(description = "Units currently available. Checkout reduces this.", example = "25")
-        int stockQuantity) {
+        int stockQuantity,
+
+        @Schema(description = "Optional catalogue category. Null for products created before "
+                + "the category column existed, or created without one.",
+                example = "PERIPHERALS", nullable = true)
+        String category) {
 
     public static ProductResponse from(Product product) {
         return new ProductResponse(
@@ -34,6 +39,7 @@ public record ProductResponse(
                 product.getName(),
                 product.getDescription(),
                 product.getPrice(),
-                product.getStockQuantity());
+                product.getStockQuantity(),
+                product.getCategory());
     }
 }

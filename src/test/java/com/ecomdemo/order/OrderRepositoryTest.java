@@ -20,9 +20,13 @@ import org.springframework.test.context.TestPropertySource;
  * one query for the orders and then one more per order to load its lines. The tests below prove
  * the lines come back with the order, and that {@code findAllWithItems} keeps its declared
  * ordering.
+ *
+ * <p>The schema is built by Hibernate, not by the Flyway migrations: {@code @DataJpaTest} hands
+ * every slice its own throwaway database and does not run Flyway, and these tests want a table
+ * with nothing in it. {@code FlywayMigrationTest} covers the migrations.
  */
 @DataJpaTest
-@TestPropertySource(properties = "spring.sql.init.mode=never")
+@TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
 class OrderRepositoryTest {
 
     @Autowired
