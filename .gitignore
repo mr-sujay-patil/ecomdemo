@@ -55,6 +55,11 @@ application-local.properties
 application-local.yml
 application-local.yaml
 
+# ---- Smoke test state ----
+# scripts/smoke-test.sh remembers the id of the product it left behind for the next run here.
+# Local, per-machine and disposable, so it stays out of Git.
+.smoke-state
+
 # ---- Logs and temporary files ----
 *.log
 logs/
