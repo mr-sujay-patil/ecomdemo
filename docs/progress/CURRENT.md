@@ -5,41 +5,44 @@
 - **Updated:** 2026-09-21
 - **Phase:** 1: Baseline Monolith (Spring Boot + H2)
 - **Branch:** feature/phase-01-baseline-monolith
-- **Step:** BRANCHED
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** see link below (raised, awaiting review)
+- **Waiting for user:** YES — review and merge, then say `merged, continue`
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Generate the project (latest stable Spring Boot 4.x) with the Maven Wrapper, base package `com.ecomdemo`
-- [ ] `product` feature: CRUD (id, name, description, price, stockQuantity)
-- [ ] `cart` feature: single shared cart — add, update, remove items, view with server-calculated total
-- [ ] `order` feature: place order from cart (check stock, reduce stock, save, empty cart), list, get by id; status PLACED
-- [ ] `common`: @RestControllerAdvice returning { status, message } for 404, 400, 409
-- [ ] Seed ~10 products via data.sql (defer-datasource-initialization=true); H2 console at /h2-console
-- [ ] Layering Controller → Service → Repository, DTOs as records, all endpoints under /api
-- [ ] One @SpringBootTest verifying the place-order flow
-- [ ] scripts/smoke-test.sh (end-to-end curl, PASS/FAIL per check, non-zero exit on failure)
-- [ ] README: how to run + curl walkthrough
-- [ ] Testing protocol run in full + docs/test-reports/phase-01.md
-- [ ] decisions.md, RECENT.md, tracker → 🔵, PR raised
+- [x] Generate the project (Spring Boot 4.1.1) with the Maven Wrapper, base package `com.ecomdemo`
+- [x] `product` feature: CRUD (id, name, description, price, stockQuantity)
+- [x] `cart` feature: single shared cart — add, update, remove items, view with server-calculated total
+- [x] `order` feature: place order from cart (check stock, reduce stock, save, empty cart), list, get by id; status PLACED
+- [x] `common`: @RestControllerAdvice returning { status, message } for 404, 400, 409
+- [x] Seed 10 products via data.sql (defer-datasource-initialization=true); H2 console at /h2-console
+- [x] Layering Controller → Service → Repository, DTOs as records, all endpoints under /api
+- [x] One @SpringBootTest verifying the place-order flow (PlaceOrderFlowTest)
+- [x] scripts/smoke-test.sh — 34 checks, PASS/FAIL per check, non-zero exit on failure
+- [x] README: how to run + curl walkthrough + API table + known gaps
+- [x] Testing protocol run in full + docs/test-reports/phase-01.md
+- [x] decisions.md, RECENT.md, tracker → 🔵, PR raised
 
 ## Last test run
-- n/a (not yet run)
-
-## Phase 0 merge verification (recorded here per protocol)
-Phase 0 has no PR by design — it bootstraps `main` itself. Verified on 2026-09-21:
-bootstrap commit 6aa351e on origin/main; tag phase-00-complete pushed; repo settings confirmed
-via gh api (merge commit only, squash/rebase off, delete_branch_on_merge false); branch protection
-active with enforce_admins true — a real direct push to main was rejected with GH006.
+- 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 1, Failures: 0, Errors: 0, Skipped: 0
+- 2026-09-21: app cold start → "Started EcomdemoApplication in 1.771 seconds", 0 ERROR/WARN lines
+- 2026-09-21: `scripts/smoke-test.sh` → 34 passed, 0 failed, exit 0
+- Report: `docs/test-reports/phase-01.md`
 
 ## Open issues / blockers
 - none
 
-## Decisions this phase (copy to docs/decisions.md before the PR)
-- (to be filled during implementation)
+## Decisions this phase (copied to docs/decisions.md ✅)
+- Spring Boot 4.1.1 / Java 21; order lines snapshot name+price; cart total always derived;
+  LAZY + JOIN FETCH with a re-read after cart writes; checkout validates-all-then-writes but is
+  not yet atomic (Phase 6); table `orders`; open-in-view disabled.
 
 ## Next action
-Generate the Spring Boot project skeleton (pom.xml + Maven Wrapper + main class), verifying the
-latest stable Spring Boot 4.x version on start.spring.io, then work down the checklist above with
-small Conventional Commits.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` → run merge verification (execution-protocol §5) on `main`:
+  re-run `./mvnw clean verify` and `scripts/smoke-test.sh`, run the git-workflow Verification
+  Checklist, then tag and push `phase-01-complete`, then start Phase 2
+  (`docs/phases/phase-02-testing.md`).
+- If they say `changes: <feedback>` → back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
