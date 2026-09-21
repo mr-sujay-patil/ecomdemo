@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-21
 - **Phase:** 3: API Documentation (springdoc-openapi)
 - **Branch:** feature/phase-03-openapi
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #3 — https://github.com/mr-sujay-patil/ecomdemo/pull/3 (open, awaiting review)
+- **Waiting for user:** YES — review and merge PR #3, then say `merged, continue`
 
 ## Phase 02 merge verification (passed 2026-09-21)
 PR #2 MERGED with a merge commit (513dc40, 2 parents: 85af7b5 + 920caa2); branch is an ancestor
@@ -26,7 +26,7 @@ of `main`; no commits or file diffs between branch and `main`; remote and local 
       `/swagger-ui.html` returns 200 or redirects (14 checks added, 34 → 48)
 - [x] Testing protocol run in full + docs/test-reports/phase-03.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 01 archived), tracker → 🔵
-- [ ] PR raised
+- [x] PR raised (#3)
 
 ## Last test run
 - 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 94, Failures: 0, Errors: 0,
@@ -50,4 +50,16 @@ this session. Verified over HTTP instead: `/swagger-ui.html` → 302 to `/swagge
 PR review.
 
 ## Next action
-Push the branch and raise the PR to `main`, then STOP for the user's review.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` → run merge verification (execution-protocol §5) on `main`:
+  `./mvnw clean verify` and `scripts/smoke-test.sh`, the git-workflow Verification Checklist,
+  then tag and push `phase-03-complete`, then start Phase 4
+  (`docs/phases/phase-04-postgresql.md`).
+- If they say `changes: <feedback>` → back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
+
+## Manual item carried into the review
+"Every endpoint is callable from Swagger UI" is ⚠️ in the test report: Chrome's site permissions
+block `localhost`, so the rendered page was never clicked through from this session. The user
+confirms it during review by pressing *Try it out* → *Execute* at
+http://localhost:8080/swagger-ui.html.
