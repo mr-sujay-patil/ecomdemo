@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 06: Transactions & Concurrency (tag: pending, PR: pending)
+## Phase 06: Transactions & Concurrency (tag: phase-06-complete, PR #6)
 **What exists now:** Checkout is one database transaction, and the last unit of a product can be
 sold exactly once. A failure anywhere in a checkout leaves the catalogue, the cart and the order
 history as they were; two simultaneous checkouts for the same stock end as one 201 and one 409,
