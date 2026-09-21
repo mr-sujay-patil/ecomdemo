@@ -18,7 +18,7 @@ tag `phase-01-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
 - [x] Unit tests for every service class, repositories mocked with Mockito
-- [ ] `@WebMvcTest` controller tests (status codes, JSON body, validation errors)
+- [x] `@WebMvcTest` controller tests (status codes, JSON body, validation errors)
 - [ ] `@DataJpaTest` tests for custom queries
 - [ ] Naming `methodName_condition_expectedResult`, AssertJ assertions, Given/When/Then structure
 - [ ] Every service method has a success **and** a failure test
@@ -26,7 +26,8 @@ tag `phase-01-complete` pushed.
 - [ ] README test section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
 
 ## Last test run
-- 2026-09-21: service unit tests → 35 tests (Product 13, Cart 12, Order 10), 0 failures
+- 2026-09-21: service unit tests → 35 (Product 13, Cart 12, Order 10), 0 failures
+- 2026-09-21: web slices → 33 (Product 15, Cart 11, Order 7), 0 failures
 
 ## Open issues / blockers
 - none
@@ -35,7 +36,7 @@ tag `phase-01-complete` pushed.
 - (none yet)
 
 ## Next action
-Write the three `@WebMvcTest` slices (`ProductControllerTest`, `CartControllerTest`,
-`OrderControllerTest`) with `@MockitoBean` services and `MockMvcTester`: status codes, JSON
-bodies, the Location header on 201, and the 400/404/409 shapes from GlobalExceptionHandler.
-Then the `@DataJpaTest` tests for `CartRepository.findCart` and the two OrderRepository queries.
+Write the `@DataJpaTest` tests against real H2: `CartRepositoryTest` for `findCart()` (empty
+database, empty cart via the left join, a cart with items fetched in one query) and
+`OrderRepositoryTest` for `findAllWithItems()` and `findByIdWithItems()`. Disable data.sql in
+those tests (`spring.sql.init.mode=never`) so each test owns its data.
