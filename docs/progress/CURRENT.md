@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-02-testing
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
+- **PR:** #2 — https://github.com/mr-sujay-patil/ecomdemo/pull/2 (open, awaiting review)
 - **Waiting for user:** YES — review and merge PR #2, then say `merged, continue`
 
 ## Phase 01 merge verification (passed 2026-09-21)
