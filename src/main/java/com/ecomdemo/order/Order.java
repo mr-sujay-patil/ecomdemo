@@ -1,5 +1,6 @@
 package com.ecomdemo.order;
 
+import com.ecomdemo.customer.User;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -9,6 +10,8 @@ import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
@@ -28,6 +31,11 @@ import java.util.List;
  *
  * <p>{@code @Enumerated(STRING)} stores "PLACED" rather than the ordinal 0 — reordering the
  * enum constants later would silently rewrite the meaning of existing rows.
+ *
+ * <p>Since Phase 8 an order also records <em>who</em> placed it. That single field is what makes
+ * "my orders" answerable and what every authorization decision in {@code OrderService} is made
+ * from. The foreign key is {@code ON DELETE RESTRICT} (V6): an order is a financial record and
+ * must outlive attempts to tidy up the accounts table.
  */
 @Entity
 @Table(name = "orders")
@@ -47,6 +55,14 @@ public class Order {
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
 
+    /**
+     * Who placed it. LAZY: listing orders never needs the account row, because the query
+     * already filters by its id, and {@link #getUsername()} is the only thing that reads it.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private User user;
+
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true,
             fetch = FetchType.LAZY)
     private List<OrderItem> items = new ArrayList<>();
@@ -55,8 +71,9 @@ public class Order {
         // required by JPA
     }
 
-    public Order(Instant placedAt) {
+    public Order(Instant placedAt, User user) {
         this.placedAt = placedAt;
+        this.user = user;
         this.status = OrderStatus.PLACED;
         this.totalAmount = BigDecimal.ZERO;
     }
@@ -86,5 +103,19 @@ public class Order {
 
     public List<OrderItem> getItems() {
         return items;
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+    /**
+     * The owner's username, which is what the ownership check in {@code OrderService} compares
+     * against {@code authentication.name}. Reading it initialises the lazy proxy, so it is
+     * called while the order is still attached — inside {@code OrderResponse.from}, which runs
+     * within the service's transaction.
+     */
+    public String getUsername() {
+        return user.getUsername();
     }
 }

@@ -8,6 +8,7 @@ import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
+import com.ecomdemo.security.CurrentUser;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Service;
@@ -36,16 +37,19 @@ class OrderPlacementService {
     private final CartService cartService;
     private final ProductService productService;
     private final OrderAuditService orderAuditService;
+    private final CurrentUser currentUser;
 
     OrderPlacementService(
             OrderRepository orderRepository,
             CartService cartService,
             ProductService productService,
-            OrderAuditService orderAuditService) {
+            OrderAuditService orderAuditService,
+            CurrentUser currentUser) {
         this.orderRepository = orderRepository;
         this.cartService = cartService;
         this.productService = productService;
         this.orderAuditService = orderAuditService;
+        this.currentUser = currentUser;
     }
 
     /**
@@ -83,7 +87,11 @@ class OrderPlacementService {
                 }
             }
 
-            Order order = new Order(Instant.now());
+            // The cart came from currentCart(), which found it by the authenticated user, so
+            // the order is stamped with that same account. Neither is a parameter: there is no
+            // way for a request to check out somebody else's cart or to place an order in
+            // somebody else's name, because neither is ever named in a request.
+            Order order = new Order(Instant.now(), currentUser.require());
             for (CartItem line : lines) {
                 Product product = line.getProduct();
                 order.addItem(

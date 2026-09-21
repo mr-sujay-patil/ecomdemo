@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -20,13 +21,21 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** HTTP entry point for the single shared cart. */
+/**
+ * HTTP entry point for the caller's own cart.
+ *
+ * <p>Notice that no endpoint here takes a cart id. The cart is always "mine", resolved from the
+ * authenticated principal inside {@code CartService}, so there is no identifier for a client to
+ * tamper with and no ownership check to forget.
+ */
 @RestController
 @RequestMapping("/api/cart")
+@SecurityRequirement(name = "basicAuth")
 @Tag(
         name = "Cart",
         description =
-                "The one cart everybody shares. It is created on first use, every endpoint returns the whole cart afterwards, and checkout empties it.")
+                "Your own cart. Requires a CUSTOMER account: it is created on first use, every "
+                        + "endpoint returns the whole cart afterwards, and checkout empties it.")
 public class CartController {
 
     private final CartService cartService;
@@ -37,9 +46,17 @@ public class CartController {
 
     @GetMapping
     @Operation(
-            summary = "View the cart",
-            description = "Creates the shared cart on first call, so this never returns 404.")
+            summary = "View your cart",
+            description = "Creates your cart on first call, so this never returns 404.")
     @ApiResponse(responseCode = "200", description = "The cart, empty if nothing has been added")
+    @ApiResponse(
+            responseCode = "401",
+            description = "No credentials, or the wrong ones",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Authenticated, but not as a CUSTOMER",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse view() {
         return cartService.view();
     }

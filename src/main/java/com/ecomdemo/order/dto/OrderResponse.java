@@ -16,6 +16,9 @@ public record OrderResponse(
         @Schema(description = "When checkout succeeded, UTC.", example = "2026-09-21T18:30:00Z")
         Instant placedAt,
 
+        @Schema(description = "The username of the account that placed it. Present so that a client can tell whose order it is looking at, and because the ownership rule on GET /api/orders/{id} is expressed in terms of it.", example = "asha")
+        String username,
+
         @Schema(description = "Only PLACED exists today; payment and fulfilment states arrive with the saga phase.", example = "PLACED")
         OrderStatus status,
 
@@ -29,6 +32,7 @@ public record OrderResponse(
         return new OrderResponse(
                 order.getId(),
                 order.getPlacedAt(),
+                order.getUsername(),
                 order.getStatus(),
                 order.getTotalAmount(),
                 order.getItems().stream().map(OrderItemResponse::from).toList());

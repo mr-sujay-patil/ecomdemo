@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import java.net.URI;
 import java.util.List;
@@ -20,7 +21,12 @@ import org.springframework.web.bind.annotation.RestController;
 /** HTTP entry point for checkout and order history. */
 @RestController
 @RequestMapping("/api/orders")
-@Tag(name = "Orders", description = "Checkout and order history. An order is immutable once placed.")
+@SecurityRequirement(name = "basicAuth")
+@Tag(
+        name = "Orders",
+        description =
+                "Checkout and your own order history. Requires a CUSTOMER account. An order is "
+                        + "immutable once placed, and is only ever visible to the account that placed it.")
 public class OrderController {
 
     private final OrderService orderService;
@@ -29,13 +35,13 @@ public class OrderController {
         this.orderService = orderService;
     }
 
-    /** Placing an order takes no body: it always checks out the whole shared cart. */
+    /** Placing an order takes no body: it always checks out the caller's own cart. */
     @PostMapping
     @Operation(
             summary = "Check out the cart",
             description =
                     """
-                    Takes no body: it always checks out the whole shared cart. Stock is checked for \
+                    Takes no body: it always checks out your own cart. Stock is checked for \
                     every line first, then reduced, the order is saved with the names and prices \
                     copied in, and the cart is emptied.
 
@@ -48,6 +54,14 @@ public class OrderController {
             responseCode = "201",
             description = "The order was placed. The Location header points at it.")
     @ApiResponse(
+            responseCode = "401",
+            description = "No credentials, or the wrong ones",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Authenticated, but not as a CUSTOMER",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
             responseCode = "409",
             description =
                     "The cart is empty, a line asks for more units than are in stock, or the "
@@ -59,15 +73,39 @@ public class OrderController {
     }
 
     @GetMapping
-    @Operation(summary = "List every order", description = "Ordered by id, oldest first. Unpaged: every order is returned.")
-    @ApiResponse(responseCode = "200", description = "Every order placed so far, possibly empty")
+    @Operation(
+            summary = "List your orders",
+            description =
+                    "Only the authenticated account's own orders, ordered by id, oldest first. "
+                            + "Unpaged. There is no endpoint that lists everybody's orders.")
+    @ApiResponse(responseCode = "200", description = "Your orders, possibly empty")
+    @ApiResponse(
+            responseCode = "401",
+            description = "No credentials, or the wrong ones",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Authenticated, but not as a CUSTOMER",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public List<OrderResponse> list() {
         return orderService.findAll();
     }
 
     @GetMapping("/{id}")
-    @Operation(summary = "Get one order by id")
+    @Operation(
+            summary = "Get one of your orders by id",
+            description =
+                    "Asking for an order that belongs to somebody else is answered 403, not 404: "
+                            + "the order exists, it is simply not yours.")
     @ApiResponse(responseCode = "200", description = "The order")
+    @ApiResponse(
+            responseCode = "401",
+            description = "No credentials, or the wrong ones",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Authenticated, but not as a CUSTOMER, or the order belongs to another account",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "404",
             description = "No order with that id",
