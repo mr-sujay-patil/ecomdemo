@@ -19,15 +19,16 @@ tag `phase-01-complete` pushed.
 ## Checklist (copied from the phase's "What you'll implement")
 - [x] Unit tests for every service class, repositories mocked with Mockito
 - [x] `@WebMvcTest` controller tests (status codes, JSON body, validation errors)
-- [ ] `@DataJpaTest` tests for custom queries
-- [ ] Naming `methodName_condition_expectedResult`, AssertJ assertions, Given/When/Then structure
-- [ ] Every service method has a success **and** a failure test
+- [x] `@DataJpaTest` tests for custom queries
+- [x] Naming `methodName_condition_expectedResult`, AssertJ assertions, Given/When/Then structure
+- [x] Every service method has a success **and** a failure test
 - [ ] Testing protocol run in full + docs/test-reports/phase-02.md
 - [ ] README test section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
 
 ## Last test run
 - 2026-09-21: service unit tests → 35 (Product 13, Cart 12, Order 10), 0 failures
 - 2026-09-21: web slices → 33 (Product 15, Cart 11, Order 7), 0 failures
+- 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 79, Failures: 0, Errors: 0, Skipped: 0
 
 ## Open issues / blockers
 - none
@@ -36,7 +37,6 @@ tag `phase-01-complete` pushed.
 - (none yet)
 
 ## Next action
-Write the `@DataJpaTest` tests against real H2: `CartRepositoryTest` for `findCart()` (empty
-database, empty cart via the left join, a cart with items fetched in one query) and
-`OrderRepositoryTest` for `findAllWithItems()` and `findByIdWithItems()`. Disable data.sql in
-those tests (`spring.sql.init.mode=never`) so each test owns its data.
+Run `docs/process/testing-protocol.md` in full (build, cold start, smoke test), write
+`docs/test-reports/phase-02.md`, then update the README test section, `docs/decisions.md` and
+`RECENT.md`, set the tracker to 🔵, push and raise the PR.
