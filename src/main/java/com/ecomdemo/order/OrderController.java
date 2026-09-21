@@ -38,13 +38,20 @@ public class OrderController {
                     Takes no body: it always checks out the whole shared cart. Stock is checked for \
                     every line first, then reduced, the order is saved with the names and prices \
                     copied in, and the cart is emptied.
+
+                    The whole sequence is one database transaction, so a failure anywhere in it \
+                    leaves the catalogue, the cart and the order history exactly as they were. \
+                    If another checkout changes the same products at the same time, this one is \
+                    retried a few times and then answered with 409.
                     """)
     @ApiResponse(
             responseCode = "201",
             description = "The order was placed. The Location header points at it.")
     @ApiResponse(
             responseCode = "409",
-            description = "The cart is empty, or a line asks for more units than are in stock",
+            description =
+                    "The cart is empty, a line asks for more units than are in stock, or the "
+                            + "request kept losing to concurrent checkouts of the same products",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public ResponseEntity<OrderResponse> place() {
         OrderResponse order = orderService.place();

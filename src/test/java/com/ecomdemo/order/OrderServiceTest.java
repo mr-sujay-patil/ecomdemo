@@ -2,22 +2,18 @@ package com.ecomdemo.order;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.cart.Cart;
-import com.ecomdemo.cart.CartService;
+import com.ecomdemo.common.ConcurrentUpdateException;
 import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.common.NotFoundException;
-import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductService;
-import com.ecomdemo.support.TestData;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -26,20 +22,20 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
-import org.mockito.Captor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.mockito.stubbing.Answer;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
- * Unit tests for {@link OrderService}, the only place in the application where several
- * aggregates change together.
+ * Unit tests for {@link OrderService}: the retry budget around a checkout, and the two read
+ * methods.
  *
- * <p>Stock is asserted on the {@link Product} entities themselves rather than through the mocks:
- * {@code reduceStock} mutates the object the cart holds, so checking the object proves the
- * arithmetic, while {@code verify(productService).save(...)} proves the change was persisted.
+ * <p>The work of a single attempt lives in {@link OrderPlacementService} and is tested in
+ * {@code OrderPlacementServiceTest}. Mocking that collaborator here is what lets these tests
+ * make an attempt lose its optimistic lock on demand — something no amount of real data would
+ * do reliably in a unit test.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -48,129 +44,86 @@ class OrderServiceTest {
     private OrderRepository orderRepository;
 
     @Mock
-    private CartService cartService;
+    private OrderPlacementService orderPlacementService;
 
     @Mock
-    private ProductService productService;
+    private OrderAuditService orderAuditService;
 
     @InjectMocks
     private OrderService orderService;
-
-    @Captor
-    private ArgumentCaptor<Order> orderCaptor;
 
     @Nested
     @DisplayName("place")
     class Place {
 
         @Test
-        void place_whenEveryLineIsInStock_savesTheOrderReducesStockAndEmptiesTheCart() {
-            // Given: 2 x 1500.00 plus 3 x 100.50
-            Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
-            Product cable = TestData.product(11L, "Cable", "100.50", 4);
-            Cart cart = TestData.cart(1L);
-            cart.addItem(lamp, 2);
-            cart.addItem(cable, 3);
-            when(cartService.currentCart()).thenReturn(cart);
-            when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
+        void place_whenTheFirstAttemptSucceeds_returnsItAndAuditsIt() {
+            // Given
+            when(orderPlacementService.placeOnce()).thenReturn(placed(7L));
 
             // When
-            OrderResponse placed = orderService.place();
+            OrderResponse order = orderService.place();
 
             // Then
-            assertThat(placed.status()).isEqualTo(OrderStatus.PLACED);
-            assertThat(placed.totalAmount()).isEqualByComparingTo("3301.50");
-            assertThat(placed.items())
-                    .extracting(OrderItemResponse::productId, OrderItemResponse::quantity)
-                    .containsExactly(tuple(10L, 2), tuple(11L, 3));
-            assertThat(lamp.getStockQuantity()).isEqualTo(7);
-            assertThat(cable.getStockQuantity()).isEqualTo(1);
-            verify(productService).save(lamp);
-            verify(productService).save(cable);
-            verify(cartService).clearCart(cart);
+            assertThat(order.id()).isEqualTo(7L);
+            verify(orderPlacementService, times(1)).placeOnce();
+            verify(orderAuditService)
+                    .record(eq(OrderOutcome.PLACED), eq(7L), eq("Order placed with 1 line(s), total 100.00"));
         }
 
         @Test
-        void place_whenCalled_snapshotsTheNameAndPriceOfEachLine() {
-            // Given
-            Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
-            when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-            when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
+        void place_whenAnAttemptLosesTheOptimisticLock_retriesAndSucceeds() {
+            // Given: the first attempt collides with a concurrent checkout, the second does not.
+            // Each call is a separate transaction, which is the only reason retrying can work:
+            // a failed flush leaves its persistence context unusable.
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new OptimisticLockingFailureException("row was changed"))
+                    .thenReturn(placed(8L));
 
             // When
-            orderService.place();
+            OrderResponse order = orderService.place();
 
-            // Then: the line copies the catalogue values, so a later rename or reprice cannot
-            // rewrite what the customer was charged
-            verify(orderRepository).save(orderCaptor.capture());
-            OrderItem line = orderCaptor.getValue().getItems().getFirst();
-            assertThat(line.getProductId()).isEqualTo(10L);
-            assertThat(line.getProductName()).isEqualTo("Lamp");
-            assertThat(line.getUnitPrice()).isEqualByComparingTo("1500.00");
-            assertThat(line.lineTotal()).isEqualByComparingTo("3000.00");
+            // Then
+            assertThat(order.id()).isEqualTo(8L);
+            verify(orderPlacementService, times(2)).placeOnce();
+            verify(orderAuditService).record(eq(OrderOutcome.PLACED), eq(8L), any());
         }
 
         @Test
-        void place_whenTheCartIsEmpty_throwsConflictAndWritesNothing() {
-            // Given
-            when(cartService.currentCart()).thenReturn(TestData.cart(1L));
+        void place_whenEveryAttemptLosesTheOptimisticLock_givesUpWithA409() {
+            // Given: contention that does not clear
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new OptimisticLockingFailureException("row was changed"));
+
+            // When / Then: a ConflictException, which the exception handler answers with 409.
+            // Not a 500 - nothing is broken, the request simply lost every race it ran.
+            assertThatThrownBy(() -> orderService.place())
+                    .isInstanceOf(ConcurrentUpdateException.class)
+                    .isInstanceOf(ConflictException.class)
+                    .hasMessageContaining("try again");
+            verify(orderPlacementService, times(OrderService.MAX_ATTEMPTS)).placeOnce();
+            verify(orderAuditService)
+                    .record(eq(OrderOutcome.REJECTED), isNull(), eq("Gave up after 3 concurrent-update conflicts"));
+        }
+
+        @Test
+        void place_whenTheAttemptIsRejectedOnItsMerits_doesNotRetry() {
+            // Given: an empty cart or a short line is not going to fix itself
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new ConflictException("Cannot place an order: the cart is empty"));
 
             // When / Then
             assertThatThrownBy(() -> orderService.place())
                     .isInstanceOf(ConflictException.class)
                     .hasMessage("Cannot place an order: the cart is empty");
-            verify(orderRepository, never()).save(any());
-            verify(cartService, never()).clearCart(any());
+            verify(orderPlacementService, times(1)).placeOnce();
+            // The rejection was already audited inside the attempt, by the transaction that then
+            // rolled back; auditing it again here would double-count it.
+            verify(orderAuditService, never()).record(any(), any(), any());
         }
 
-        @Test
-        void place_whenALineExceedsStock_throwsInsufficientStockNamingTheShortfall() {
-            // Given: 3 wanted, only 2 available
-            Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
-            when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 3));
-
-            // When / Then
-            assertThatThrownBy(() -> orderService.place())
-                    .isInstanceOf(InsufficientStockException.class)
-                    .isInstanceOf(ConflictException.class)
-                    .hasMessage("Insufficient stock for 'Lamp': requested 3, available 2");
-            assertThat(lamp.getStockQuantity()).isEqualTo(2);
-            verify(orderRepository, never()).save(any());
-            verify(cartService, never()).clearCart(any());
-        }
-
-        @Test
-        void place_whenALaterLineExceedsStock_leavesTheEarlierLinesStockUntouched() {
-            // Given: line 1 is fine, line 2 is short. Every line is checked before any stock is
-            // written, so a partial reduction must not happen.
-            Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
-            Product cable = TestData.product(11L, "Cable", "100.50", 1);
-            Cart cart = TestData.cart(1L);
-            cart.addItem(lamp, 2);
-            cart.addItem(cable, 3);
-            when(cartService.currentCart()).thenReturn(cart);
-
-            // When / Then
-            assertThatThrownBy(() -> orderService.place())
-                    .isInstanceOf(InsufficientStockException.class);
-            assertThat(lamp.getStockQuantity()).isEqualTo(9);
-            assertThat(cable.getStockQuantity()).isEqualTo(1);
-            verify(productService, never()).save(any());
-        }
-
-        @Test
-        void place_whenALineTakesTheLastUnit_succeedsAndLeavesZeroStock() {
-            // Given: the boundary — requesting exactly what is available is allowed
-            Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
-            when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-            when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
-
-            // When
-            OrderResponse placed = orderService.place();
-
-            // Then
-            assertThat(lamp.getStockQuantity()).isZero();
-            assertThat(placed.totalAmount()).isEqualByComparingTo("3000.00");
+        private static OrderResponse placed(long id) {
+            return OrderResponse.from(order("100.00", id));
         }
     }
 
@@ -248,7 +201,10 @@ class OrderServiceTest {
         return order;
     }
 
-    private static Answer<Order> saveReturnsItsArgument() {
-        return invocation -> invocation.getArgument(0);
+    /** As above, but with the id the database would have assigned. */
+    private static Order order(String total, long id) {
+        Order order = order(total);
+        ReflectionTestUtils.setField(order, "id", id);
+        return order;
     }
 }

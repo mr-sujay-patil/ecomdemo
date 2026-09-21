@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 
 /**
@@ -49,6 +50,28 @@ public class Product {
      */
     @Column(length = 50)
     private String category;
+
+    /**
+     * The optimistic lock, maintained by Hibernate and never touched by application code.
+     *
+     * <p>Every UPDATE of a product carries {@code AND version = ?} and raises the counter. If two
+     * checkouts read the same product and both reduce its stock, the second UPDATE matches no row
+     * and Hibernate throws {@code OptimisticLockException} (Spring translates it to
+     * {@link org.springframework.dao.OptimisticLockingFailureException}) instead of quietly
+     * overwriting the first one's change. That is the lost update the phase exists to prevent.
+     *
+     * <p>Optimistic, not pessimistic. No lock is taken and no transaction waits; the conflict is
+     * detected at write time and the loser retries. That is the right trade when conflicts are
+     * rare, and on a catalogue that is browsed far more often than it is sold from they are.
+     * Pessimistic locking ({@code SELECT ... FOR UPDATE}) would instead serialise every checkout
+     * of a popular product behind one row lock.
+     *
+     * <p>There is no getter on purpose. Nothing outside persistence has any business reading it,
+     * and the tests that need to see it read the field or the column directly.
+     */
+    @Version
+    @Column(nullable = false)
+    private long version;
 
     protected Product() {
         // required by JPA
