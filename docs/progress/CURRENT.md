@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-01-baseline-monolith
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** see link below (raised, awaiting review)
+- **PR:** #1 — https://github.com/mr-sujay-patil/ecomdemo/pull/1 (open, awaiting review)
 - **Waiting for user:** YES — review and merge, then say `merged, continue`
 
 ## Checklist (copied from the phase's "What you'll implement")
