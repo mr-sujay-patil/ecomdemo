@@ -1,6 +1,7 @@
 package com.ecomdemo.common;
 
 import java.util.stream.Collectors;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -29,6 +30,24 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> handleConflict(ConflictException ex) {
         return build(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * 409: an optimistic lock was lost and nothing retried it.
+     *
+     * <p>Checkout never reaches here — {@code OrderService} retries and then throws
+     * {@link ConcurrentUpdateException} — but any other versioned write (editing a product while
+     * an order is reducing its stock, for instance) would otherwise surface as a 500. It is not
+     * a server error: the request was fine, it simply lost a race, and 409 tells the client that
+     * repeating it is worth a try. Without this the stack trace of a Hibernate internal would be
+     * the client's only clue.
+     */
+    @ExceptionHandler(OptimisticLockingFailureException.class)
+    public ResponseEntity<ApiError> handleOptimisticLock(OptimisticLockingFailureException ex) {
+        return build(
+                HttpStatus.CONFLICT,
+                "The record was changed by another request while this one was in flight. "
+                        + "Please re-read it and try again.");
     }
 
     /** 400: Bean Validation rejected the request body (@Valid on a @RequestBody record). */

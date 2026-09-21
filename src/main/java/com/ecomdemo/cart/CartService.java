@@ -7,9 +7,25 @@ import com.ecomdemo.common.NotFoundException;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
-/** Business rules for the single shared cart. */
+/**
+ * Business rules for the single shared cart.
+ *
+ * <p>Every method here runs in a read-write transaction, including {@link #view()}. That looks
+ * wrong for a read until you notice that the cart is created on first use: the very first GET
+ * inserts a row. A {@code readOnly = true} transaction puts Hibernate into manual flush mode, so
+ * that insert would be prepared and then silently dropped. The read paths that really only read
+ * are on {@code ProductService} and {@code OrderService}.
+ *
+ * <p>Transactions also fixed something that used to be worked around here. Before this phase
+ * each repository call committed on its own, so the cart handed back by {@code save()} was a
+ * freshly merged copy with uninitialised lazy associations and a closed session behind it, and
+ * the service had to re-read the whole cart to render a response. Inside one transaction the
+ * entity stays managed and the session stays open, so the round trip is gone.
+ */
 @Service
+@Transactional
 public class CartService {
 
     private final CartRepository cartRepository;
@@ -25,20 +41,21 @@ public class CartService {
     }
 
     /**
-     * Saves the cart and then re-reads it before mapping to a response.
+     * Saves the cart and maps that same instance to a response.
      *
-     * <p>The cart handed to {@code save()} is detached (its transaction ended when the previous
-     * repository call returned), so Spring Data performs a <em>merge</em>: it loads a fresh
-     * managed copy and returns that, not the instance we passed. In that copy the LAZY
-     * associations are uninitialised proxies, and the session is already closed by the time we
-     * try to read a product name — a LazyInitializationException. Re-reading through
-     * {@link CartRepository#findCart()} costs one extra query and gives us a fully populated
-     * object graph. Phase 6 makes the whole operation a single transaction, which removes the
-     * need for this round trip.
+     * <p>It used to save and then re-read the whole cart. Outside a transaction it had to: each
+     * repository call committed on its own, so the cart passed to {@code save()} was detached and
+     * Spring Data performed a <em>merge</em> — loading a fresh managed copy and returning that,
+     * with uninitialised lazy proxies and a session that closed before anything could read a
+     * product name. Inside one transaction the instance stays managed and the session stays open,
+     * so mapping it directly is correct and the extra query is gone.
+     *
+     * <p>{@code save()} itself is now barely a call: Hibernate's dirty checking would flush these
+     * changes at commit with or without it. It stays because it says plainly where the write is.
      */
     private CartResponse saveAndView(Cart cart) {
         cartRepository.save(cart);
-        return view();
+        return CartResponse.from(cart);
     }
 
     /** Adding a product already in the cart increases that line rather than duplicating it. */
@@ -69,6 +86,11 @@ public class CartService {
      * <p>Public because the order feature checks out this exact instance; it still goes through
      * the service rather than reaching for {@code CartRepository} directly, so the "one cart"
      * rule stays in one place.
+     *
+     * <p>It is called from inside {@code OrderPlacementService}'s transaction as well as from
+     * this class's own. Propagation is {@code REQUIRED}, the default: an existing transaction is
+     * joined rather than a second one started, so the cart the order reads and the cart it later
+     * empties are the same managed instance in the same unit of work.
      */
     public Cart currentCart() {
         return cartRepository.findCart().orElseGet(() -> cartRepository.save(new Cart()));

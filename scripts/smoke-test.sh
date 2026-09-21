@@ -328,7 +328,7 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V3, all successful" "1:ok,2:ok,3:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V4, all successful" "1:ok,2:ok,3:ok,4:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -338,11 +338,23 @@ if HISTORY="$(psql_query \
         "SELECT count(*) FROM pg_indexes \
          WHERE schemaname = 'public' AND indexname = 'idx_product_category';" | tr -d '\r ')"
     check "V3's idx_product_category index exists" "1" "$CATEGORY_INDEX"
+
+    AUDIT_TABLE="$(psql_query \
+        "SELECT count(*) FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_name = 'order_audit';" | tr -d '\r ')"
+    check "V4's order_audit table exists" "1" "$AUDIT_TABLE"
+
+    VERSION_COLUMN="$(psql_query \
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_name = 'product' AND column_name = 'version';" | tr -d '\r ')"
+    check "V4's product.version column exists" "1" "$VERSION_COLUMN"
 else
-    skip "flyway_schema_history shows V1-V3, all successful" \
+    skip "flyway_schema_history shows V1-V4, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V3's idx_product_category index exists" "same as above"
+    skip "V4's order_audit table exists" "same as above"
+    skip "V4's product.version column exists" "same as above"
 fi
 
 # The column V3 added has to reach the API, not just the database. The seeded product is looked
@@ -372,6 +384,70 @@ check "and comes back with category null" "True" "$(jget "d['category'] is None"
 request DELETE "/api/products/$CATEGORISED_ID" >/dev/null
 request DELETE "/api/products/$UNCATEGORISED_ID" >/dev/null
 pass "the two category probe products are cleaned up"
+
+# --------------------------------------------------------------------------------------------
+# Transactions and concurrency (Phase 6)
+# --------------------------------------------------------------------------------------------
+# The oversell race, against the running application and a real PostgreSQL rather than a test
+# harness and H2. A product with exactly one unit in stock, two checkouts of the shared cart
+# fired at the same moment, and only one of them may come back with a 201. Before this phase both
+# would: each read stock 1, each decided there was enough, and each wrote 0.
+section "Transactions and concurrency"
+
+STATUS="$(request POST /api/products \
+    '{"name":"Race Probe","description":"one unit, two buyers","price":25.00,"stockQuantity":1,"category":"TEST"}')"
+check "a product with exactly one unit in stock is created" "201" "$STATUS"
+RACE_ID="$(jget "d['id']")"
+
+request DELETE "/api/cart/items/$RACE_ID" >/dev/null
+STATUS="$(request POST /api/cart/items "{\"productId\":$RACE_ID,\"quantity\":1}")"
+check "the last unit is in the cart" "200" "$STATUS"
+
+# One curl, two transfers, --parallel-immediate so it starts the second without waiting for the
+# first. Two backgrounded curls would also work, but each pays ~10ms of process start-up while a
+# checkout takes ~5ms, so the second usually arrives after the first has already committed - the
+# statuses would still be right, for the wrong reason. Inside one process the two requests really
+# do overlap, and the application log shows the versioned UPDATE being rejected.
+# -o is given twice because -o applies to one transfer each; -w prints per transfer.
+RACE_RESULT="$(curl -sS --parallel --parallel-immediate -X POST \
+    -o /dev/null -o /dev/null -w '%{http_code}\n' \
+    "$BASE_URL/api/orders" "$BASE_URL/api/orders" | sort | paste -sd, -)"
+check "two simultaneous checkouts return exactly one 201 and one 409" "201,409" "$RACE_RESULT"
+
+request GET "/api/products/$RACE_ID" >/dev/null
+check "the one unit was sold once, so stock is 0" "0" "$(jget "d['stockQuantity']")"
+
+request GET /api/orders >/dev/null
+check "exactly one order holds that product" "1" \
+    "$(jget "sum(1 for o in d for i in o['items'] if i['productId'] == $RACE_ID)")"
+
+request GET /api/cart >/dev/null
+check "the cart is empty after the race" "0" "$(jget "len(d['items'])")"
+
+# The loser's transaction rolled back everything it had done, including emptying the cart - and
+# then found the cart already empty on its retry, which is the 409 it returned.
+if AUDIT="$(psql_query \
+    "SELECT outcome FROM order_audit ORDER BY id DESC LIMIT 2;" | tr -d '\r ' | sort | paste -sd, -)"; then
+    check "the race left one PLACED and one REJECTED audit row" "PLACED,REJECTED" "$AUDIT"
+
+    ORPHANS="$(psql_query \
+        "SELECT count(*) FROM order_audit WHERE outcome = 'REJECTED' AND order_id IS NOT NULL;" \
+        | tr -d '\r ')"
+    check "no rejected attempt claims to have created an order" "0" "$ORPHANS"
+else
+    skip "the race left one PLACED and one REJECTED audit row" \
+        "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
+    skip "no rejected attempt claims to have created an order" "same as above"
+fi
+
+# An order that is refused on its merits must leave nothing behind either: the cart is empty now,
+# so this checkout is rejected before it writes anything.
+STATUS="$(request POST /api/orders)"
+check "checking out an empty cart returns 409" "409" "$STATUS"
+check "and says why" "True" "$(jget "'cart is empty' in d['message']")"
+
+request DELETE "/api/products/$RACE_ID" >/dev/null
+pass "the race probe product is cleaned up"
 
 # --------------------------------------------------------------------------------------------
 # Summary

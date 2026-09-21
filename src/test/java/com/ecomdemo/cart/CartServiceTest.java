@@ -34,9 +34,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * repository in with it. Mocking at the service boundary is what keeps a failure here pointing
  * at {@code CartService} and nothing else.
  *
- * <p>Note that {@code findCart()} is stubbed once but called more than once per operation: every
- * write goes through {@code saveAndView}, which saves and then re-reads the cart. Returning the
- * same instance mirrors what the database would do.
+ * <p>{@code findCart()} is stubbed once and returns the same instance every time, which is what
+ * a transaction would give the service: inside one unit of work the cart is a managed entity, so
+ * every lookup and the save that follows are all the same object.
  */
 @ExtendWith(MockitoExtension.class)
 class CartServiceTest {
