@@ -8,7 +8,7 @@
 - **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES — decide what to do about `server.port=9090` (see Open issues)
 
 ## Phase 01 merge verification (passed 2026-09-21)
 PR #1 MERGED with a merge commit (85af7b5, 2 parents); branch is an ancestor of `main`;
@@ -29,14 +29,20 @@ tag `phase-01-complete` pushed.
 - 2026-09-21: service unit tests → 35 (Product 13, Cart 12, Order 10), 0 failures
 - 2026-09-21: web slices → 33 (Product 15, Cart 11, Order 7), 0 failures
 - 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 79, Failures: 0, Errors: 0, Skipped: 0
+- 2026-09-21: `./mvnw spring-boot:run` → "Started EcomdemoApplication in 1.716 seconds", 0 ERROR/WARN
+- 2026-09-21: `BASE_URL=http://localhost:9090 scripts/smoke-test.sh` → 34 passed, 0 failed, exit 0
 
 ## Open issues / blockers
-- none
+- `server.port=9090` was added to `src/main/resources/application.properties` from outside this
+  session (the working tree was also switched to `main` mid-phase and switched back; no work was
+  lost). A blanket `git add -A` swept the line into commit 3ee9f5d, which is a production change
+  inside a test-only phase. Waiting for the user to say whether to keep 9090 or restore 8080.
+  Nothing else in the phase depends on the answer.
 
 ## Decisions this phase (copied to docs/decisions.md ⬜)
 - (none yet)
 
 ## Next action
-Run `docs/process/testing-protocol.md` in full (build, cold start, smoke test), write
-`docs/test-reports/phase-02.md`, then update the README test section, `docs/decisions.md` and
-`RECENT.md`, set the tracker to 🔵, push and raise the PR.
+Testing protocol has been run in full and passed (see "Last test run"). Once the user has
+decided on the port, write `docs/test-reports/phase-02.md`, update the README test section,
+`docs/decisions.md` and `RECENT.md`, set the tracker to 🔵, push and raise the PR.
