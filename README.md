@@ -4,14 +4,15 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · H2 (in-memory) · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · H2 (in-memory) · springdoc-openapi · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 2: Automated Testing** — the Phase 1 application (products, a single shared cart and
-order placement on in-memory H2) now under a 79-test safety net: Mockito unit tests, `@WebMvcTest`
-web slices and `@DataJpaTest` persistence slices. No security, no real database and no Docker yet;
-those arrive in Phases 8, 4 and 10.
+**Phase 3: API Documentation** — the Phase 1 application (products, a single shared cart and
+order placement on in-memory H2), under a 94-test safety net, now describes itself: an OpenAPI 3
+document at `/v3/api-docs` and Swagger UI at
+**<http://localhost:8080/swagger-ui.html>**, where every endpoint can be called from the browser.
+No security, no real database and no Docker yet; those arrive in Phases 8, 4 and 10.
 
 ## Roadmap
 
@@ -65,9 +66,12 @@ fetches Maven itself.
 In a second terminal:
 
 ```bash
-./mvnw clean verify             # build and run all 79 tests
-scripts/smoke-test.sh           # 34 end-to-end checks against the running app
+./mvnw clean verify             # build and run all 94 tests
+scripts/smoke-test.sh           # 48 end-to-end checks against the running app
 ```
+
+Swagger UI is at <http://localhost:8080/swagger-ui.html> — every endpoint is listed with its
+parameters, example bodies and error responses, and *Try it out* calls the running application.
 
 The H2 console is at <http://localhost:8080/h2-console> — JDBC URL `jdbc:h2:mem:ecomdemo`, user
 `sa`, empty password. The schema is recreated and re-seeded on every start, so anything you change
@@ -93,6 +97,28 @@ is gone on restart. Phase 4 swaps H2 for PostgreSQL and Phase 5 adds Flyway migr
 Errors always come back as `{ "status": ..., "message": ... }`: **404** for a missing entity,
 **400** for a request that fails validation, **409** for a valid request that conflicts with the
 current state (empty cart, not enough stock).
+
+The table above is a summary; the API describes itself in full:
+
+| Path | What it serves |
+|---|---|
+| `/swagger-ui.html` | Swagger UI — every endpoint, browsable and callable |
+| `/v3/api-docs` | The OpenAPI 3 document as JSON |
+| `/v3/api-docs.yaml` | The same document as YAML |
+
+The document is **generated from the code** at startup, not hand-written: springdoc scans the
+controllers for `@Tag`, `@Operation` and `@ApiResponse`, the DTO records for `@Schema`, and the
+Bean Validation annotations for `required`, `maxLength` and `minimum`. That is the *code-first*
+approach — the code is the source of truth, so the description cannot drift away from it. The
+alternative, *contract-first*, means writing the specification first and generating stubs from it;
+it earns its keep when several teams have to agree on an API before anyone writes code.
+
+Feed the document to anything that speaks OpenAPI:
+
+```bash
+curl -s localhost:8080/v3/api-docs | python3 -m json.tool | head -40
+curl -s localhost:8080/v3/api-docs.yaml -o ecomdemo-api.yaml   # e.g. for a generated client
+```
 
 ## Walkthrough
 
@@ -138,7 +164,7 @@ curl -s -X POST localhost:8080/api/orders
 
 ## Tests
 
-`./mvnw clean verify` runs all 79 tests in about nine seconds. They sit at four levels, each
+`./mvnw clean verify` runs all 94 tests in about eight seconds. They sit at four levels, each
 loading only what it needs:
 
 | Level | Annotation | What it loads | Classes |
@@ -146,7 +172,7 @@ loading only what it needs:
 | Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest` |
 | Web slice | `@WebMvcTest` | The controller, JSON conversion, validation and the error handler; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest` |
 | Persistence slice | `@DataJpaTest` | JPA and an H2 database; no web layer | `CartRepositoryTest`, `OrderRepositoryTest` |
-| Full context | `@SpringBootTest` | The whole application | `PlaceOrderFlowTest` |
+| Full context | `@SpringBootTest` | The whole application | `PlaceOrderFlowTest`, `OpenApiDocumentationTest` |
 
 That shape is the **test pyramid**: many fast tests where the logic lives, fewer slow ones as more
 of the framework is loaded. A failing unit test can only mean the service is wrong; a failing

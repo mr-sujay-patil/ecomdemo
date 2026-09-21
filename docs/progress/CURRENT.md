@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-21
 - **Phase:** 3: API Documentation (springdoc-openapi)
 - **Branch:** feature/phase-03-openapi
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -22,15 +22,18 @@ of `main`; no commits or file diffs between branch and `main`; remote and local 
 - [x] `@Tag`, `@Operation`, `@ApiResponse` on all three controllers
 - [x] `@Schema` examples on the DTOs
 - [x] Documented error responses (404/400/409, the `{status, message}` shape)
-- [ ] Smoke test additions: `/v3/api-docs` returns 200 and contains every `/api` path;
-      `/swagger-ui.html` returns 200 or redirects
-- [ ] Testing protocol run in full + docs/test-reports/phase-03.md
-- [ ] README section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
+- [x] Smoke test additions: `/v3/api-docs` returns 200 and contains every `/api` path;
+      `/swagger-ui.html` returns 200 or redirects (14 checks added, 34 → 48)
+- [x] Testing protocol run in full + docs/test-reports/phase-03.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 01 archived), tracker → 🔵
+- [ ] PR raised
 
 ## Last test run
-- 2026-09-21: manual spec check against a running app — 12 operations across 7 `/api` paths, each
-  with a summary; 2xx schemas intact; 400/404/409 all point at `ApiError`; 9 component schemas.
-- baseline on `main`: 79 tests green, smoke 34/34
+- 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 94, Failures: 0, Errors: 0,
+  Skipped: 0 (15 new in `OpenApiDocumentationTest`)
+- 2026-09-21: `./mvnw spring-boot:run` → "Started EcomdemoApplication in 2.226 seconds",
+  0 ERROR, 2 WARN (springdoc's own advisory about the docs endpoints being enabled)
+- 2026-09-21: `scripts/smoke-test.sh` → 48 passed, 0 failed, exit 0
 
 ## Open issues / blockers
 - none
@@ -47,5 +50,4 @@ this session. Verified over HTTP instead: `/swagger-ui.html` → 302 to `/swagge
 PR review.
 
 ## Next action
-Add the smoke-test checks (`/v3/api-docs` 200 + every `/api` path present; `/swagger-ui.html`
-200-or-redirect), then write the web-slice test for the spec, then run the testing protocol.
+Push the branch and raise the PR to `main`, then STOP for the user's review.
