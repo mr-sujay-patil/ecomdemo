@@ -65,8 +65,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 
 | # | Phase | Technology | Branch | Status |
 |---|---|---|---|---|
-| 0 | [Repository Bootstrap](phases/phase-00-bootstrap.md) | Git + GitHub + GitHub CLI | `main` | ⬜ |
-| 1 | [Baseline Monolith](phases/phase-01-baseline-monolith.md) | Spring Boot + H2 | `feature/phase-01-baseline-monolith` | ⬜ |
+| 0 | [Repository Bootstrap](phases/phase-00-bootstrap.md) | Git + GitHub + GitHub CLI | `main` | ✅ |
+| 1 | [Baseline Monolith](phases/phase-01-baseline-monolith.md) | Spring Boot + H2 | `feature/phase-01-baseline-monolith` | 🟡 |
 | 2 | [Automated Testing](phases/phase-02-testing.md) | JUnit 5 + Mockito + MockMvc | `feature/phase-02-testing` | ⬜ |
 | 3 | [API Documentation](phases/phase-03-openapi.md) | springdoc-openapi | `feature/phase-03-openapi` | ⬜ |
 | 4 | [PostgreSQL](phases/phase-04-postgresql.md) | PostgreSQL | `feature/phase-04-postgresql` | ⬜ |
