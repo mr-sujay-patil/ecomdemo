@@ -29,7 +29,7 @@ with "Successfully validated 3 migrations" / "Current version of schema public: 
       and a 409 response
 - [x] An `order_audit` table written with `Propagation.REQUIRES_NEW`
 - [x] A concurrency test: two threads buy the last unit, exactly one succeeds
-- [ ] Smoke test addition: stock set to 1, two parallel orders -> one success, one 409, stock 0
+- [x] Smoke test addition: stock set to 1, two parallel orders -> one success, one 409, stock 0
 - [ ] Testing protocol run in full + docs/test-reports/phase-06.md
 - [ ] README section, decisions.md, RECENT.md rotation (Phase 04 archived), tracker -> 🔵
 - [ ] PR raised
@@ -42,6 +42,9 @@ with "Successfully validated 3 migrations" / "Current version of schema public: 
 - 2026-09-22: `ConcurrentCheckoutTest` alone, 10 consecutive runs, all green; the log shows the
   versioned UPDATE losing in both race tests ("Unexpected row count (expected 1 but was 0) ...
   where id=? and version=?").
+- 2026-09-22: `scripts/smoke-test.sh` against the running app and real PostgreSQL -> 78 passed,
+  0 failed, 0 skipped, three runs in a row; the app log shows the optimistic lock firing exactly
+  once per run, so the race is really being run and not just arriving in sequence.
 
 ## Open issues / blockers
 - none
