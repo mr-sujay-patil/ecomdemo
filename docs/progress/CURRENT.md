@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-21
 - **Phase:** 4: PostgreSQL
 - **Branch:** feature/phase-04-postgresql
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #4 — https://github.com/mr-sujay-patil/ecomdemo/pull/4 (open, awaiting review)
+- **Waiting for user:** YES — review and merge PR #4, then say `merged, continue`
 
 ## Phase 03 merge verification (passed 2026-09-21)
 PR #3 MERGED with a merge commit (3955176, 2 parents: 513dc40 + c5480bb); branch is an ancestor
@@ -29,7 +29,7 @@ tag `phase-03-complete` pushed.
 - [x] Smoke test addition: create a product, restart the application, confirm it still exists
 - [x] Testing protocol run in full + docs/test-reports/phase-04.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 02 archived), tracker → 🔵
-- [ ] PR raised
+- [x] PR raised (#4)
 
 ## Last test run
 - 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 102, Failures: 0, Errors: 0,
@@ -55,5 +55,10 @@ Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is left RUN
 data, so the app can be started immediately. `docker start ecomdemo-postgres` if it is down.
 
 ## Next action
-Push the branch and raise the PR (execution-protocol §3 step 8), then STOP for the user's
-review.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` → run merge verification (execution-protocol §5) on `main`:
+  `./mvnw clean verify` and `scripts/smoke-test.sh` (needs the `ecomdemo-postgres` container up
+  and the app running), the git-workflow Verification Checklist, then tag and push
+  `phase-04-complete`, then start Phase 5 (`docs/phases/phase-05-flyway.md`).
+- If they say `changes: <feedback>` → back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
