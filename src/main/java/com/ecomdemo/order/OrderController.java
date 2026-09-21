@@ -1,6 +1,13 @@
 package com.ecomdemo.order;
 
+import com.ecomdemo.common.ApiError;
 import com.ecomdemo.order.dto.OrderResponse;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import java.net.URI;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** HTTP entry point for checkout and order history. */
 @RestController
 @RequestMapping("/api/orders")
+@Tag(name = "Orders", description = "Checkout and order history. An order is immutable once placed.")
 public class OrderController {
 
     private final OrderService orderService;
@@ -23,18 +31,42 @@ public class OrderController {
 
     /** Placing an order takes no body: it always checks out the whole shared cart. */
     @PostMapping
+    @Operation(
+            summary = "Check out the cart",
+            description =
+                    """
+                    Takes no body: it always checks out the whole shared cart. Stock is checked for \
+                    every line first, then reduced, the order is saved with the names and prices \
+                    copied in, and the cart is emptied.
+                    """)
+    @ApiResponse(
+            responseCode = "201",
+            description = "The order was placed. The Location header points at it.")
+    @ApiResponse(
+            responseCode = "409",
+            description = "The cart is empty, or a line asks for more units than are in stock",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
     public ResponseEntity<OrderResponse> place() {
         OrderResponse order = orderService.place();
         return ResponseEntity.created(URI.create("/api/orders/" + order.id())).body(order);
     }
 
     @GetMapping
+    @Operation(summary = "List every order", description = "Ordered by id, oldest first. Unpaged: every order is returned.")
+    @ApiResponse(responseCode = "200", description = "Every order placed so far, possibly empty")
     public List<OrderResponse> list() {
         return orderService.findAll();
     }
 
     @GetMapping("/{id}")
-    public OrderResponse get(@PathVariable Long id) {
+    @Operation(summary = "Get one order by id")
+    @ApiResponse(responseCode = "200", description = "The order")
+    @ApiResponse(
+            responseCode = "404",
+            description = "No order with that id",
+            content = @Content(schema = @Schema(implementation = ApiError.class)))
+    public OrderResponse get(
+            @Parameter(description = "Id of the order", example = "1") @PathVariable Long id) {
         return orderService.findById(id);
     }
 }
