@@ -12,6 +12,42 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 07: Integration Testing (tag: pending, PR: pending)
+**What exists now:** `./mvnw verify` starts PostgreSQL 18 in a Testcontainers container, applies
+V1-V4 to it and drives the whole application over real HTTP against it. 135 tests: 120 under
+Surefire (unchanged, H2, ~9 s) and 15 under Failsafe (`*IT`, PostgreSQL, ~8 s including the
+container). The Phase 6 oversell race is now proven against PostgreSQL's own locking in the
+build, not just against H2 and the hand-run smoke test.
+**Key code:** `support/PostgresContainerConfig` declares `PostgreSQLContainer` as a
+`@TestConfiguration` `@Bean` with `@ServiceConnection` (image pinned `postgres:18-alpine`).
+`support/IntegrationTest` is the base class every `*IT` extends: `@SpringBootTest(RANDOM_PORT)` +
+`@AutoConfigureTestRestTemplate` + `@Import(PostgresContainerConfig.class)` +
+`@ActiveProfiles("it")`, and it holds the `protected TestRestTemplate rest`. `ProductApiIT` (5),
+`CartApiIT` (6), `OrderApiIT` (4, including the race).
+**Config & infrastructure:** New test-scope dependencies: `spring-boot-testcontainers`,
+`org.testcontainers:testcontainers-postgresql` (2.0.5 from the BOM), and
+`org.springframework.boot:spring-boot-restclient` (TestRestTemplate needs `RestTemplateBuilder`).
+`maven-failsafe-plugin` bound to BOTH `integration-test` and `verify`, with the same Mockito
+`-javaagent` argLine Surefire uses. `src/test/resources/application-it.properties` sets a small
+Hikari pool and deliberately NO datasource url. Docker must be running for `verify`; `./mvnw test`
+still needs nothing.
+**Tests:** +15, all new files; no existing test was edited, moved or deleted. Test report:
+`docs/test-reports/phase-07.md`. The smoke test is unchanged at 78 checks.
+**Gotchas:** In Testcontainers 2.x the module is `testcontainers-postgresql` (1.x called it
+`postgresql`) and the class is `org.testcontainers.postgresql.PostgreSQLContainer`, non-generic;
+the old `org.testcontainers.containers.PostgreSQLContainer` is still on the classpath and is the
+wrong one. Spring Boot 4 moved `TestRestTemplate` to `org.springframework.boot.resttestclient`
+and registers its auto-configuration ONLY through `@AutoConfigureTestRestTemplate` — without it
+the field is simply not injected. Every annotation on `IntegrationTest` is part of the context
+cache key: add a `@MockitoBean` to one subclass and that class silently gets its own context AND
+its own container. Failsafe bound to `integration-test` alone does NOT fail the build; the
+separate `verify` goal is what does. Surefire's `*Test.java` and Failsafe's `*IT.java` patterns
+do not overlap, so the file name is the whole mechanism for choosing a suite.
+**Follow-ups (not done, out of scope):** giving CI a Docker daemon so `verify` can run there -
+Phase 11. Migrating `ConcurrentCheckoutTest`/`FlywayMigrationTest` onto Testcontainers, and
+`withReuse(true)` for the inner loop - not planned. Per-user carts would remove the shared-cart
+cleanup dance in `CartApiIT` and `OrderApiIT` - Phase 8.
+
 ## Phase 06: Transactions & Concurrency (tag: phase-06-complete, PR #6)
 **What exists now:** Checkout is one database transaction, and the last unit of a product can be
 sold exactly once. A failure anywhere in a checkout leaves the catalogue, the cart and the order
@@ -47,34 +83,3 @@ backgrounded `curl`s do not reliably race; `curl --parallel --parallel-immediate
 rather than by hand — Phase 7 (Testcontainers). An endpoint over `order_audit`, a
 `CHECK (stock_quantity >= 0)`, and backoff between retries — not planned. Per-user carts remove
 the "two checkouts of one shared cart" oddity — Phase 8.
-
-## Phase 05: Database Migrations (tag: phase-05-complete, PR #5)
-**What exists now:** The schema is version-controlled. Three Flyway migrations build the database
-from nothing; Hibernate creates and alters nothing and only validates (`ddl-auto=validate`),
-failing startup if the entities and the schema disagree. `Product` gained an optional `category`,
-exposed on `ProductRequest`/`ProductResponse`.
-**Key code:** `src/main/resources/db/migration/V1__init_schema.sql` (the five tables, readable
-constraint names, explicit `ON DELETE`, two FK indexes), `V2__seed_products.sql` (the catalogue,
-replacing the deleted `data.sql`), `V3__add_product_category.sql` (nullable column + backfill +
-`idx_product_category`). `FlywayMigrationTest` (`@SpringBootTest`) asserts the applied versions,
-the checksums, the history table, the seed and V3's effects.
-**Config & infrastructure:** `spring-boot-starter-flyway` + `org.flywaydb:flyway-database-postgresql`
-(12.4.0 from the BOM). `application.properties`: `ddl-auto=validate`,
-`spring.flyway.locations=classpath:db/migration`, `baseline-on-migrate=false`,
-`validate-on-migrate=true`; `spring.sql.init.mode` and `defer-datasource-initialization` are gone.
-`application-test.properties` also uses `validate` — the suite runs the same migrations on H2. The
-`ecomdemo-postgres` container was recreated from scratch this phase.
-**Tests:** 108 total, was 102 — `FlywayMigrationTest` adds 5 and `DatasourceConfigurationTest` 1.
-The smoke test grows from 52–54 checks to 62–65 and gained a SKIP state for checks it cannot run.
-**Gotchas:** Spring Boot 4 splits auto-configuration per technology, so bare `flyway-core` wires
-up NOTHING — the migrations silently never run. Use `spring-boot-starter-flyway`. `@DataJpaTest`
-does not include Flyway either: both repository slices keep `ddl-auto=create-drop` on their own
-throwaway database (their old `spring.sql.init.mode=never` override became that). Flyway creates
-`flyway_schema_history` and its columns in lower case, so SQL against it must quote every
-identifier — H2 folds unquoted names to upper case. On H2 (not PostgreSQL) Flyway also writes a
-rank-0 row with a null version for creating the history table; filter it out with
-`version IS NOT NULL`. V3's column is nullable on purpose (expand/contract) — making it `NOT NULL`
-later is a separate migration.
-**Follow-ups (not done, out of scope):** running the migrations against real PostgreSQL —
-Phase 7. Tightening `category` to `NOT NULL`, and a `category` filter on `GET /api/products` —
-not planned. Flyway community has no `undo`; a bad migration is fixed by the next one.
