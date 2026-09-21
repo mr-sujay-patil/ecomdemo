@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 6: Transactions & Concurrency (@Transactional + optimistic locking)
 - **Branch:** feature/phase-06-transactions
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #6 — https://github.com/mr-sujay-patil/ecomdemo/pull/6 (open, awaiting review)
+- **Waiting for user:** YES — review and merge PR #6, then say `merged, continue`
 
 ## Phase 05 merge verification (passed 2026-09-22)
 PR #5 MERGED with a merge commit (67d3453, 2 parents: 1e7818d + 2a05028); branch is an ancestor of
@@ -32,7 +32,7 @@ with "Successfully validated 3 migrations" / "Current version of schema public: 
 - [x] Smoke test addition: stock set to 1, two parallel orders -> one success, one 409, stock 0
 - [x] Testing protocol run in full + docs/test-reports/phase-06.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 04 archived), tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#6)
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Tests run: 120, Failures: 0, Errors: 0
@@ -73,9 +73,16 @@ with "Successfully validated 3 migrations" / "Current version of schema public: 
   own (and deletes them again in `@AfterEach`).
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at v3.
-`docker start ecomdemo-postgres` if it is down. The application itself is stopped.
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema now at
+**v4**. `docker start ecomdemo-postgres` if it is down. The application itself is stopped, no
+stray Java processes. Every probe product created during testing was deleted through the API;
+`GET /api/products` returns 11 (the ten seeded plus Phase 4's intentional persistence probe).
 
 ## Next action
-Start step 5 (IMPLEMENTING): read the current order/cart/product services, then work the checklist
-top to bottom with small Conventional Commits, ticking each item here as it lands.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
+  `./mvnw clean verify` and `scripts/smoke-test.sh` (needs the `ecomdemo-postgres` container up
+  and the app running), the git-workflow Verification Checklist, then tag and push
+  `phase-06-complete`, then start Phase 7 (`docs/phases/phase-07-testcontainers.md`).
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
