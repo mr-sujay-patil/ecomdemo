@@ -45,7 +45,7 @@ public class OrderController {
     @ApiResponse(
             responseCode = "409",
             description = "The cart is empty, or a line asks for more units than are in stock",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public ResponseEntity<OrderResponse> place() {
         OrderResponse order = orderService.place();
         return ResponseEntity.created(URI.create("/api/orders/" + order.id())).body(order);
@@ -64,7 +64,7 @@ public class OrderController {
     @ApiResponse(
             responseCode = "404",
             description = "No order with that id",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public OrderResponse get(
             @Parameter(description = "Id of the order", example = "1") @PathVariable Long id) {
         return orderService.findById(id);

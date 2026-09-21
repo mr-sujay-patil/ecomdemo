@@ -184,6 +184,42 @@ STATUS="$(request DELETE /api/cart/items/999999)"
 check "removing a product that is not in the cart returns 404" "404" "$STATUS"
 
 # --------------------------------------------------------------------------------------------
+# 3. API documentation (Phase 3)
+# --------------------------------------------------------------------------------------------
+section "API documentation"
+
+STATUS="$(request GET /v3/api-docs)"
+check "GET /v3/api-docs returns 200" "200" "$STATUS"
+check "the spec is titled EcomDemo API" "EcomDemo API" "$(jget "d['info']['title']")"
+
+# Every path the API serves must appear in the spec. Listed explicitly rather than derived from
+# the spec itself, so that an endpoint springdoc fails to pick up is caught instead of ignored.
+API_PATHS="/api/products /api/products/{id} /api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id}"
+for path in $API_PATHS; do
+    check "the spec documents $path" "True" "$(jget "'$path' in d['paths']")"
+done
+
+check "every operation has a summary" "True" \
+    "$(jget "all('summary' in op for ops in d['paths'].values() for op in ops.values())")"
+# chr(36) is "$": the JSON key is "$ref", and writing it literally would be eaten by the shell
+# on its way through jget's python -c.
+check "every error response uses the ApiError schema" "True" \
+    "$(jget "all(r['content']['application/json']['schema'][chr(36) + 'ref'].endswith('/ApiError') for ops in d['paths'].values() for op in ops.values() for c, r in op['responses'].items() if c >= '400')")"
+
+# curl does not follow redirects here, so a 302 to /swagger-ui/index.html is the raw status.
+STATUS="$(request GET /swagger-ui.html)"
+case "$STATUS" in
+    200 | 30*) pass "GET /swagger-ui.html returns 200 or a redirect (got $STATUS)" ;;
+    *) fail "GET /swagger-ui.html returns 200 or a redirect" "200 or 3xx" "$STATUS" ;;
+esac
+
+STATUS="$(request GET /swagger-ui/index.html)"
+check "the Swagger UI page itself returns 200" "200" "$STATUS"
+
+STATUS="$(request GET /swagger-ui/swagger-ui-bundle.js)"
+check "the Swagger UI javascript bundle is served" "200" "$STATUS"
+
+# --------------------------------------------------------------------------------------------
 # Summary
 # --------------------------------------------------------------------------------------------
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASSED" "$FAILED"

@@ -49,7 +49,7 @@ public class ProductController {
     @ApiResponse(
             responseCode = "404",
             description = "No product with that id",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public ProductResponse get(
             @Parameter(description = "Id of the product", example = "1") @PathVariable Long id) {
         return productService.findById(id);
@@ -66,7 +66,7 @@ public class ProductController {
     @ApiResponse(
             responseCode = "400",
             description = "A field failed validation, or the body was not readable JSON",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public ResponseEntity<ProductResponse> create(@Valid @RequestBody ProductRequest request) {
         ProductResponse created = productService.create(request);
         return ResponseEntity.created(URI.create("/api/products/" + created.id())).body(created);
@@ -80,11 +80,11 @@ public class ProductController {
     @ApiResponse(
             responseCode = "400",
             description = "A field failed validation, or the body was not readable JSON",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "404",
             description = "No product with that id",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public ProductResponse update(
             @Parameter(description = "Id of the product to replace", example = "1") @PathVariable Long id,
             @Valid @RequestBody ProductRequest request) {
@@ -99,7 +99,7 @@ public class ProductController {
     @ApiResponse(
             responseCode = "404",
             description = "No product with that id",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public ResponseEntity<Void> delete(
             @Parameter(description = "Id of the product to delete", example = "1") @PathVariable Long id) {
         productService.delete(id);

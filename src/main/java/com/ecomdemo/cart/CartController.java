@@ -52,11 +52,11 @@ public class CartController {
     @ApiResponse(
             responseCode = "400",
             description = "productId or quantity is missing, or quantity is below 1",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "404",
             description = "No product with that id",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse addItem(@Valid @RequestBody AddCartItemRequest request) {
         return cartService.addItem(request);
     }
@@ -69,11 +69,11 @@ public class CartController {
     @ApiResponse(
             responseCode = "400",
             description = "quantity is missing or below 1",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "404",
             description = "That product is not in the cart",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse updateItem(
             @Parameter(description = "Id of the product whose line is being changed", example = "1")
             @PathVariable Long productId,
@@ -87,7 +87,7 @@ public class CartController {
     @ApiResponse(
             responseCode = "404",
             description = "That product is not in the cart",
-            content = @Content(schema = @Schema(implementation = ApiError.class)))
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse removeItem(
             @Parameter(description = "Id of the product to remove", example = "1") @PathVariable Long productId) {
         return cartService.removeItem(productId);
