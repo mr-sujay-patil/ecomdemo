@@ -62,6 +62,38 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+
+			<!--
+				Resolves dependency coordinates into properties, so that the surefire
+				configuration below can point at the mockito-core jar in the local repository
+				without hard-coding a path or a version.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>properties</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+
+			<!--
+				Mockito rewrites bytecode to build mocks, which needs a Java agent. Left alone it
+				attaches one to the running JVM at the first mock, and recent JDKs warn that
+				self-attaching will stop working; a future JDK will refuse it outright and the
+				whole unit-test suite would fail. Loading the agent up front on the command line
+				is the supported way to do it, and it silences the warning today.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 
