@@ -2,6 +2,11 @@ package com.ecomdemo.common;
 
 import java.util.stream.Collectors;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.AuthenticationTrustResolver;
+import org.springframework.security.authentication.AuthenticationTrustResolverImpl;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -19,6 +24,13 @@ import org.springframework.web.method.annotation.HandlerMethodValidationExceptio
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * Tells an anonymous authentication apart from a real one. Spring Security always puts
+     * <em>something</em> in the context — an {@code AnonymousAuthenticationToken} when nobody
+     * has logged in — so a null check alone is not enough.
+     */
+    private final AuthenticationTrustResolver trustResolver = new AuthenticationTrustResolverImpl();
 
     /** 404: the entity does not exist. */
     @ExceptionHandler(NotFoundException.class)
@@ -48,6 +60,37 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT,
                 "The record was changed by another request while this one was in flight. "
                         + "Please re-read it and try again.");
+    }
+
+    /**
+     * 403 (or 401): method security refused the call.
+     *
+     * <p>Two different things produce an {@code AccessDeniedException} and they are answered in
+     * two different places. A URL rule in {@code SecurityConfig} is evaluated in the filter
+     * chain, before Spring MVC exists, and is answered by {@code ApiErrorAccessDeniedHandler}.
+     * A {@code @PreAuthorize} or {@code @PostAuthorize} is evaluated much later, on a proxy
+     * around a service that a controller has already called — so the exception travels back up
+     * through the handler method and lands here, where {@code @RestControllerAdvice} can see it.
+     * Both paths produce the same body; only the shapes of the two are worth remembering.
+     *
+     * <p>The status is not unconditionally 403. Spring Security's filter chain answers 401 when
+     * an <em>anonymous</em> caller is denied, because the denial might simply be a missing
+     * login, and that distinction has to be preserved here too — otherwise a client with no
+     * credentials would be told "forbidden" and have nothing to retry with. Every method-secured
+     * path in this application is already behind an {@code authenticated()} URL rule, so the 401
+     * branch should be unreachable; it exists so that a future endpoint that is not stays
+     * correct.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || trustResolver.isAnonymous(authentication)) {
+            return build(
+                    HttpStatus.UNAUTHORIZED,
+                    "Authentication required. Send HTTP Basic credentials with this request.");
+        }
+        return build(
+                HttpStatus.FORBIDDEN, "Your account does not have permission to perform this action.");
     }
 
     /** 400: Bean Validation rejected the request body (@Valid on a @RequestBody record). */
