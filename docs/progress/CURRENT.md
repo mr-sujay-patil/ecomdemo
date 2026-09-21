@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 5: Database Migrations (Flyway)
 - **Branch:** feature/phase-05-flyway
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -25,20 +25,28 @@ probe product written before the restart was still present (id=12); tag `phase-0
 - [x] `V1__init_schema.sql` and `V2__seed_products.sql` (replacing `data.sql`)
 - [x] `spring.jpa.hibernate.ddl-auto=validate`
 - [x] `V3__add_product_category.sql` (a new column plus an index) to practice schema evolution
-- [ ] Smoke test additions: `flyway_schema_history` shows V1–V3 successful; product responses
+- [x] Smoke test additions: `flyway_schema_history` shows V1–V3 successful; product responses
       include `category`
-- [ ] Testing protocol run in full + docs/test-reports/phase-05.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 03 archived), tracker → 🔵
+- [x] Testing protocol run in full + docs/test-reports/phase-05.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 03 archived), tracker → 🔵
 - [ ] PR raised
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Tests run: 108, Failures: 0, Errors: 0,
   Skipped: 0 (6 new: 5 in `FlywayMigrationTest`, 1 in `DatasourceConfigurationTest`)
+- 2026-09-22: `./mvnw spring-boot:run` against a DROPPED AND RECREATED database -> Flyway
+  "Successfully applied 3 migrations ... now at version v3", then "Started EcomdemoApplication in
+  2.838 seconds", 0 ERROR, 2 WARN (springdoc's). Restart -> "Successfully validated 3 migrations",
+  "Current version of schema public: 3", nothing re-applied.
+- 2026-09-22: `scripts/smoke-test.sh` -> run 1: 62 passed / 0 failed / 0 skipped; real restart;
+  run 2: 65 passed / 0 failed / 0 skipped, exit 0.
+- 2026-09-22: failure scenario - appending a line to the applied V1 makes startup fail with
+  "Migration checksum mismatch for migration version 1" and exit 1. V1 restored, suite green.
 
 ## Open issues / blockers
 - none
 
-## Decisions this phase (copied to docs/decisions.md ⬜)
+## Decisions this phase (copied to docs/decisions.md ✅)
 - `spring-boot-starter-flyway`, not bare `flyway-core`: Boot 4 splits auto-configuration into a
   module per technology, so flyway-core alone wires up nothing and the migrations never run.
 - V1 reproduces the Phase 4 schema exactly (validate compares them) but with readable constraint
@@ -52,13 +60,10 @@ probe product written before the restart was still present (id=12); tag `phase-0
 - The database was dropped and recreated rather than baselined (`baseline-on-migrate=false`).
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) still holds the Phase 4
-database, which was built by Hibernate `ddl-auto=update` and has NO `flyway_schema_history`. With
-`baseline-on-migrate=false` Flyway will refuse to start against it. It must be recreated before
-the app is run: `docker rm -f ecomdemo-postgres` then the `docker run` in the README.
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) was RECREATED this phase and
+is left RUNNING, migrated to v3. `docker start ecomdemo-postgres` if it is down. The application
+itself is stopped.
 
 ## Next action
-Code is done and `./mvnw clean verify` is green. Next: recreate the PostgreSQL container from
-scratch, run `./mvnw spring-boot:run` and confirm Flyway applies V1-V3 to the empty database and
-Hibernate validation passes. Then extend `scripts/smoke-test.sh` with the Phase 5 checks
-(`flyway_schema_history` shows V1-V3 successful; product responses include `category`).
+Commit the docs, push, and raise the PR (`gh pr create --base main`), then STOP and send the
+Phase Review Report. Do NOT merge.

@@ -12,7 +12,38 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 04: PostgreSQL (tag: pending, PR: pending)
+## Phase 05: Database Migrations (tag: pending, PR: pending)
+**What exists now:** The schema is version-controlled. Three Flyway migrations build the database
+from nothing; Hibernate creates and alters nothing and only validates (`ddl-auto=validate`),
+failing startup if the entities and the schema disagree. `Product` gained an optional `category`,
+exposed on `ProductRequest`/`ProductResponse`.
+**Key code:** `src/main/resources/db/migration/V1__init_schema.sql` (the five tables, readable
+constraint names, explicit `ON DELETE`, two FK indexes), `V2__seed_products.sql` (the catalogue,
+replacing the deleted `data.sql`), `V3__add_product_category.sql` (nullable column + backfill +
+`idx_product_category`). `FlywayMigrationTest` (`@SpringBootTest`) asserts the applied versions,
+the checksums, the history table, the seed and V3's effects.
+**Config & infrastructure:** `spring-boot-starter-flyway` + `org.flywaydb:flyway-database-postgresql`
+(12.4.0 from the BOM). `application.properties`: `ddl-auto=validate`,
+`spring.flyway.locations=classpath:db/migration`, `baseline-on-migrate=false`,
+`validate-on-migrate=true`; `spring.sql.init.mode` and `defer-datasource-initialization` are gone.
+`application-test.properties` also uses `validate` — the suite runs the same migrations on H2. The
+`ecomdemo-postgres` container was recreated from scratch this phase.
+**Tests:** 108 total, was 102 — `FlywayMigrationTest` adds 5 and `DatasourceConfigurationTest` 1.
+The smoke test grows from 52–54 checks to 62–65 and gained a SKIP state for checks it cannot run.
+**Gotchas:** Spring Boot 4 splits auto-configuration per technology, so bare `flyway-core` wires
+up NOTHING — the migrations silently never run. Use `spring-boot-starter-flyway`. `@DataJpaTest`
+does not include Flyway either: both repository slices keep `ddl-auto=create-drop` on their own
+throwaway database (their old `spring.sql.init.mode=never` override became that). Flyway creates
+`flyway_schema_history` and its columns in lower case, so SQL against it must quote every
+identifier — H2 folds unquoted names to upper case. On H2 (not PostgreSQL) Flyway also writes a
+rank-0 row with a null version for creating the history table; filter it out with
+`version IS NOT NULL`. V3's column is nullable on purpose (expand/contract) — making it `NOT NULL`
+later is a separate migration.
+**Follow-ups (not done, out of scope):** running the migrations against real PostgreSQL —
+Phase 7. Tightening `category` to `NOT NULL`, and a `category` filter on `GET /api/products` —
+not planned. Flyway community has no `undo`; a bad migration is fixed by the next one.
+
+## Phase 04: PostgreSQL (tag: phase-04-complete, PR #4)
 **What exists now:** The application stores its data in a real PostgreSQL 18 server; data survives
 a restart. Configuration is split into profiles — `dev` (PostgreSQL, the default) and `test`
 (in-memory H2), so `./mvnw clean verify` still needs nothing running. No production Java changed
@@ -44,28 +75,3 @@ regardless of profile, which is why the repository slices never needed changing.
 **Follow-ups (not done, out of scope):** Flyway instead of `ddl-auto=update` — Phase 5.
 `@Transactional` and the oversell race — Phase 6. Tests against real PostgreSQL with
 Testcontainers — Phase 7. Bringing the database up with the app — Phase 10 (Docker Compose).
-
-## Phase 03: API Documentation (tag: phase-03-complete, PR #3)
-**What exists now:** The unchanged Phase 1 API now describes itself. springdoc-openapi builds an
-OpenAPI 3 document from the code at startup, served at `/v3/api-docs` (and `.yaml`) and rendered
-by Swagger UI at `/swagger-ui.html`. No production logic changed this phase.
-**Key code:** `com.ecomdemo.common.OpenApiConfig` holds the document metadata as an `OpenAPI`
-bean. Controllers carry `@Tag` (one per feature), `@Operation` and `@ApiResponse`; the DTO records
-carry `@Schema` with descriptions and examples; every error response points at `ApiError`.
-`OpenApiDocumentationTest` (`@SpringBootTest`, PER_CLASS lifecycle) asserts the document.
-**Config & infrastructure:** `springdoc.api-docs.path`, `springdoc.swagger-ui.path`,
-`tags-sorter`, `operations-sorter` and `try-it-out-enabled` in `application.properties`. One new
-dependency, `org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1`, pinned through a
-`springdoc.version` property — 3.x is the Boot 4 line, 2.x is Boot 3. It drags Jackson 2 onto the
-classpath beside Boot 4's Jackson 3; harmless, but `tools.jackson.databind` is the one to import.
-**Tests:** 94 total, was 79 — `OpenApiDocumentationTest` adds 15 (8 plus one per API path). The
-smoke test grows from 34 checks to 48.
-**Gotchas:** springdoc logs two WARNs at startup saying the docs endpoints are enabled —
-advisory, deliberate, and Phase 8 decides access. `@Content` without `mediaType` documents an
-error body as `*/*`, so always write `mediaType = "application/json"`. An `@ApiResponse` for a 2xx
-does **not** wipe the schema springdoc derives from the return type, as long as it carries no
-`@Content` of its own. A `@WebMvcTest` slice cannot see `/v3/api-docs`: it comes from
-auto-configuration, so the spec test has to be a `@SpringBootTest`.
-**Follow-ups (not done, out of scope):** securing or disabling the docs endpoints — Phase 8.
-Splitting the spec into groups per module — Phases 19–20. Generating a client from the YAML —
-not planned.
