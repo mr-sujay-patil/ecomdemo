@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 01: Baseline Monolith (tag: pending, PR: pending)
+## Phase 01: Baseline Monolith (tag: phase-01-complete, PR #1)
 **What exists now:** A running Spring Boot 4.1.1 monolith on H2 in-memory: product CRUD, one
 shared cart with a server-calculated total, and checkout that validates stock, reduces it, saves
 the order and empties the cart. All endpoints under `/api`, errors as `{status, message}`.
