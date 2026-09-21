@@ -69,7 +69,7 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 1 | [Baseline Monolith](phases/phase-01-baseline-monolith.md) | Spring Boot + H2 | `feature/phase-01-baseline-monolith` | ✅ |
 | 2 | [Automated Testing](phases/phase-02-testing.md) | JUnit 5 + Mockito + MockMvc | `feature/phase-02-testing` | ✅ |
 | 3 | [API Documentation](phases/phase-03-openapi.md) | springdoc-openapi | `feature/phase-03-openapi` | ✅ |
-| 4 | [PostgreSQL](phases/phase-04-postgresql.md) | PostgreSQL | `feature/phase-04-postgresql` | 🟡 |
+| 4 | [PostgreSQL](phases/phase-04-postgresql.md) | PostgreSQL | `feature/phase-04-postgresql` | 🔵 |
 | 5 | [Database Migrations](phases/phase-05-flyway.md) | Flyway | `feature/phase-05-flyway` | ⬜ |
 | 6 | [Transactions & Concurrency](phases/phase-06-transactions.md) | @Transactional + optimistic locking | `feature/phase-06-transactions` | ⬜ |
 | 7 | [Integration Testing](phases/phase-07-testcontainers.md) | Testcontainers | `feature/phase-07-testcontainers` | ⬜ |

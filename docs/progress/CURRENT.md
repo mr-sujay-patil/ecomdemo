@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-21
 - **Phase:** 4: PostgreSQL
 - **Branch:** feature/phase-04-postgresql
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -21,27 +21,39 @@ the four `springdoc.*` properties, `@Tag`/`@Operation`/`@ApiResponse` on all thr
 tag `phase-03-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Replace H2 with the PostgreSQL driver; run PostgreSQL via a single `docker run` documented
+- [x] Replace H2 with the PostgreSQL driver; run PostgreSQL via a single `docker run` documented
       in the README
-- [ ] Profiles: `application-dev.properties` and `application-test.properties`
-- [ ] Credentials from environment variables, with local defaults in the dev profile
-- [ ] Keep `ddl-auto=update` for now
-- [ ] Smoke test addition: create a product, restart the application, confirm it still exists
-- [ ] Testing protocol run in full + docs/test-reports/phase-04.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 02 archived), tracker → 🔵
+- [x] Profiles: `application-dev.properties` and `application-test.properties`
+- [x] Credentials from environment variables, with local defaults in the dev profile
+- [x] Keep `ddl-auto=update` for now
+- [x] Smoke test addition: create a product, restart the application, confirm it still exists
+- [x] Testing protocol run in full + docs/test-reports/phase-04.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 02 archived), tracker → 🔵
 - [ ] PR raised
 
 ## Last test run
-- none yet this phase (baseline on `main`: 94 tests, smoke 48 checks)
+- 2026-09-21: `./mvnw clean verify` → BUILD SUCCESS, Tests run: 102, Failures: 0, Errors: 0,
+  Skipped: 0 (8 new in `DatasourceConfigurationTest`)
+- 2026-09-21: `./mvnw spring-boot:run` on a fresh database → "Started EcomdemoApplication in
+  2.261 seconds", 0 ERROR, 2 WARN (springdoc's, carried over from Phase 3); 5 tables created,
+  10 products seeded
+- 2026-09-21: `scripts/smoke-test.sh` → run 1: 52 passed / 0 failed; restart; run 2: 54 passed /
+  0 failed, exit 0 — the probe created before the restart was still there
 
 ## Open issues / blockers
 - none
 
-## Decisions this phase (copied to docs/decisions.md ⬜)
-- (none yet)
+## Decisions this phase (copied to docs/decisions.md ✅)
+- postgres:18-alpine via one `docker run`; the app on PostgreSQL but the suite still on H2 until
+  Phase 7; the `test` profile activated by surefire rather than a test-classpath
+  application.properties (which would shadow the main one); `${POSTGRES_*:default}` placeholders
+  with throwaway local defaults in Git; `data.sql` guarded by `WHERE NOT EXISTS` as one statement;
+  H2 in `MODE=PostgreSQL`; the persistence check spans two smoke runs via `.smoke-state`.
+
+## Environment left behind
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is left RUNNING with its
+data, so the app can be started immediately. `docker start ecomdemo-postgres` if it is down.
 
 ## Next action
-Step 5 (IMPLEMENTING): swap the H2 dependency for the PostgreSQL driver in `pom.xml`, then split
-`application.properties` into the shared base plus `application-dev.properties` and
-`application-test.properties`. PostgreSQL runs locally via `docker run` (Docker Desktop was
-started from this session; confirm the daemon is up before the first test run).
+Push the branch and raise the PR (execution-protocol §3 step 8), then STOP for the user's
+review.
