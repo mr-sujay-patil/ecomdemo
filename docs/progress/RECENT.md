@@ -12,7 +12,43 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 05: Database Migrations (tag: pending, PR: pending)
+## Phase 06: Transactions & Concurrency (tag: pending, PR: pending)
+**What exists now:** Checkout is one database transaction, and the last unit of a product can be
+sold exactly once. A failure anywhere in a checkout leaves the catalogue, the cart and the order
+history as they were; two simultaneous checkouts for the same stock end as one 201 and one 409,
+never two orders. Every attempt, successful or refused, is recorded in `order_audit`.
+**Key code:** `OrderPlacementService.placeOnce()` (`@Transactional`, the whole unit of work) and
+`OrderService.place()` (no transaction, three attempts, then `ConcurrentUpdateException` -> 409)
+are SEPARATE beans, so the retry crosses the proxy. `OrderAuditService.record(...)` is
+`Propagation.REQUIRES_NEW`. `Product.version` is `@Version` with no getter. `ProductService` is
+class-level `readOnly = true` with four writers overriding it; `CartService` is read-write
+throughout. `ConcurrentUpdateException extends ConflictException`; `GlobalExceptionHandler` also
+maps a raw `OptimisticLockingFailureException` to 409.
+**Config & infrastructure:** No new dependencies and no new properties. Migration
+`V4__add_product_version_and_order_audit.sql` adds `product.version BIGINT NOT NULL DEFAULT 0`
+and the `order_audit` table (no foreign key, `order_id` nullable, `idx_order_audit_recorded_at`).
+It applied incrementally to the live Phase 5 database: "Successfully applied 1 migration ... now
+at version v4".
+**Tests:** 120 total, was 108. `ConcurrentCheckoutTest` (`@SpringBootTest`, real threads and a
+CountDownLatch) adds 4; `OrderPlacementServiceTest` holds the 6 place-order unit tests moved out
+of `OrderServiceTest` plus 3 on auditing; `OrderServiceTest` is rewritten around the retry budget
+(8, was 10); `FlywayMigrationTest` adds 1. The smoke test grows from 65 checks to 78.
+**Gotchas:** `@Transactional` does nothing when a method is called from its own class — that is
+why the retry and the unit of work are two beans, and why `CartService.view()` cannot be
+`readOnly` (it calls `currentCart()`, which creates the cart on first use, and manual flush mode
+would silently drop that insert). A `readOnly` transaction that JOINS a read-write one does not
+make it read-only: the outer transaction's settings win, which is what lets
+`ProductService.requireProduct` hand back a product the checkout then modifies. Every
+`@SpringBootTest` shares one H2 database, so a test that creates rows pollutes the next class —
+`FlywayMigrationTest` now counts V2's ten seeded names instead of the whole table, and
+`ConcurrentCheckoutTest` deletes its own products in `@AfterEach`. In the smoke test two
+backgrounded `curl`s do not reliably race; `curl --parallel --parallel-immediate` does.
+**Follow-ups (not done, out of scope):** running the race against real PostgreSQL in the build
+rather than by hand — Phase 7 (Testcontainers). An endpoint over `order_audit`, a
+`CHECK (stock_quantity >= 0)`, and backoff between retries — not planned. Per-user carts remove
+the "two checkouts of one shared cart" oddity — Phase 8.
+
+## Phase 05: Database Migrations (tag: phase-05-complete, PR #5)
 **What exists now:** The schema is version-controlled. Three Flyway migrations build the database
 from nothing; Hibernate creates and alters nothing and only validates (`ddl-auto=validate`),
 failing startup if the entities and the schema disagree. `Product` gained an optional `category`,
@@ -42,36 +78,3 @@ later is a separate migration.
 **Follow-ups (not done, out of scope):** running the migrations against real PostgreSQL —
 Phase 7. Tightening `category` to `NOT NULL`, and a `category` filter on `GET /api/products` —
 not planned. Flyway community has no `undo`; a bad migration is fixed by the next one.
-
-## Phase 04: PostgreSQL (tag: phase-04-complete, PR #4)
-**What exists now:** The application stores its data in a real PostgreSQL 18 server; data survives
-a restart. Configuration is split into profiles — `dev` (PostgreSQL, the default) and `test`
-(in-memory H2), so `./mvnw clean verify` still needs nothing running. No production Java changed
-this phase; it is all dependencies, configuration and the seed script.
-**Key code:** Nothing in `src/main/java` changed. `DatasourceConfigurationTest` asserts what each
-profile resolves to using `ApplicationContextRunner` + `ConfigDataApplicationContextInitializer`,
-without connecting to anything.
-**Config & infrastructure:** `application.properties` keeps only what every profile shares and
-sets `spring.profiles.active=dev`. `application-dev.properties` (main resources) holds the
-PostgreSQL URL as `${POSTGRES_HOST:localhost}` / `PORT` / `DB` / `USER` / `PASSWORD` placeholders
-plus the Hikari pool (`EcomdemoPool`, max 10). `application-test.properties` lives in **test**
-resources and points at `jdbc:h2:mem:ecomdemo;MODE=PostgreSQL`. `ddl-auto` is `update` for the app
-and `create-drop` for tests. Dependencies: `org.postgresql:postgresql` (runtime, version from the
-Boot BOM) replaces H2 at runtime; H2 drops to `test` scope; `spring-boot-h2console` is gone. Start
-the database with `docker run --name ecomdemo-postgres -e POSTGRES_DB=ecomdemo -e
-POSTGRES_USER=ecomdemo -e POSTGRES_PASSWORD=ecomdemo -p 5432:5432 -d postgres:18-alpine`, then
-`docker start/stop ecomdemo-postgres` after that.
-**Tests:** 102 total, was 94 — `DatasourceConfigurationTest` adds 8. The smoke test grows from 48
-checks to 52 on a first run and 54 once a probe from a previous run exists.
-**Gotchas:** The `test` profile is activated by surefire's `<systemPropertyVariables>` in
-`pom.xml`, **not** by a `src/test/resources/application.properties` — a file of that name shadows
-the main one instead of merging with it, so every shared setting would be lost. That same system
-property also means a test cannot observe the file's default profile; assert the file instead.
-`spring.sql.init.mode` must be `always` for PostgreSQL (`embedded` means in-memory only), which is
-why `data.sql` is now guarded by `WHERE NOT EXISTS` as one statement — an unguarded INSERT would
-re-seed ten products on every restart. `@DataJpaTest` replaces the datasource with an embedded one
-regardless of profile, which is why the repository slices never needed changing. Values written to
-`.smoke-state` must be quoted: the probe name contains spaces and the file is read back with `.`.
-**Follow-ups (not done, out of scope):** Flyway instead of `ddl-auto=update` — Phase 5.
-`@Transactional` and the oversell race — Phase 6. Tests against real PostgreSQL with
-Testcontainers — Phase 7. Bringing the database up with the app — Phase 10 (Docker Compose).

@@ -8,17 +8,19 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 5: Database Migrations** — the schema is now **version-controlled**. Three Flyway
-migrations in `src/main/resources/db/migration` build the database from nothing; Hibernate no
-longer creates or alters anything, it only validates (`ddl-auto=validate`) and refuses to start
-if the entities and the schema disagree. V3 adds a `category` column to products, backfills it
-and indexes it, so the repository also shows what changing a live schema looks like.
+**Phase 6: Transactions & Concurrency** — checkout is now **correct when things go wrong**.
+Placing an order is one database transaction, so a failure anywhere in it leaves the catalogue,
+the cart and the order history exactly as they were. `Product` carries a `@Version` column, which
+means two people racing for the last unit can no longer both buy it: the second write is rejected,
+retried up to three times, and answered with 409 if the contention does not clear. Every attempt,
+successful or refused, is written to an `order_audit` table in its own transaction, so a rejection
+leaves evidence even though everything else about it was rolled back.
 
-Everything from the earlier phases still stands: PostgreSQL with a `dev`/`test` profile split,
-products, a single shared cart and order placement, documented by an OpenAPI 3 spec at
-`/v3/api-docs` and Swagger UI at **<http://localhost:8080/swagger-ui.html>**. The 108-test suite
-still runs on in-memory H2, so `./mvnw clean verify` needs nothing running. No security and no
-Docker Compose yet; those arrive in Phases 8 and 10.
+Everything from the earlier phases still stands: a Flyway-managed schema on PostgreSQL with a
+`dev`/`test` profile split, products, a single shared cart and order placement, documented by an
+OpenAPI 3 spec at `/v3/api-docs` and Swagger UI at **<http://localhost:8080/swagger-ui.html>**.
+The 120-test suite still runs on in-memory H2, so `./mvnw clean verify` needs nothing running. No
+security and no Docker Compose yet; those arrive in Phases 8 and 10.
 
 ## Roadmap
 
@@ -103,7 +105,7 @@ Hibernate then checks the schema against the entities and fails the startup if t
 In a second terminal:
 
 ```bash
-./mvnw clean verify             # build and run all 108 tests (no database needed)
+./mvnw clean verify             # build and run all 120 tests (no database needed)
 scripts/smoke-test.sh           # 62-65 end-to-end checks against the running app
 ```
 
@@ -212,6 +214,99 @@ SELECT * FROM product;           -- the catalogue V2 seeded
 SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;
 ```
 
+### Transactions and the oversell race
+
+Placing an order touches three things: stock goes down on every product, an order and its lines
+are inserted, and the cart is emptied. Until Phase 6 each of those committed on its own, which
+left two holes.
+
+**The first hole is a crash in the middle.** Stock already sold, no order to show for it, and no
+way to tell afterwards. `OrderPlacementService.placeOnce()` is now `@Transactional`, so the whole
+sequence is one unit: it all commits, or the database is left exactly as it was found. Spring
+rolls back on an unchecked exception and commits on a checked one — every failure here is a
+`RuntimeException`, so the default is what we want.
+
+**The second hole is two people at once**, and no transaction fixes it on its own:
+
+```
+Alice                              Bob
+------                             ------
+read stock = 1                     read stock = 1
+1 >= 1, fine                       1 >= 1, fine
+write stock = 0                    write stock = 0
+COMMIT                             COMMIT          -> one unit, two orders
+```
+
+Neither transaction did anything illegal; they simply could not see each other. That is the
+**lost update**, and no isolation level below SERIALIZABLE prevents it. `Product` therefore
+carries a `@Version` column, so Hibernate writes
+
+```sql
+UPDATE product SET stock_quantity = ?, version = version + 1 WHERE id = ? AND version = ?
+```
+
+Bob's `WHERE` no longer matches — Alice raised the version — so the UPDATE changes 0 rows and
+Hibernate raises `OptimisticLockException` instead of overwriting her. Nobody waited on a lock;
+the loser is simply told to try again. `OrderService.place()` does try again, up to three times,
+and answers **409** if the contention does not clear. 409 and not 500: nothing is broken, the
+request just lost a race and repeating it is reasonable.
+
+**Two beans, on purpose.** `@Transactional` is applied by a proxy wrapped around the bean, and a
+call from one method of a class to another method of the *same* class never crosses that proxy —
+`this.placeOnce()` goes straight to the target object and the annotation is silently ignored.
+That is the **self-invocation pitfall**, and it is why the retry loop (`OrderService`) and the
+unit of work (`OrderPlacementService`) are separate beans. It is not a style choice: a
+self-invoked `placeOnce()` would run with no transaction at all while looking perfectly correct.
+Retrying also *needs* a new transaction each attempt — once a flush has failed the persistence
+context is unusable and the transaction is already marked rollback-only.
+
+**The audit is the exception that proves the rule.** A rejected checkout rolls back, so an audit
+row written by that same transaction would vanish along with the failure — the one case anyone
+wants a record of. `OrderAuditService.record(...)` is `Propagation.REQUIRES_NEW`: it suspends the
+caller's transaction, opens a second one, commits it, and resumes the first. The row is already
+durable when the caller rolls back. That independence is also why `order_audit` has **no foreign
+key** to `orders`: a PLACED row names an order whose INSERT has not committed yet, and a REJECTED
+row names no order at all.
+
+Try it. The `--parallel-immediate` matters — two separate `curl` processes start about 10 ms
+apart, while a checkout takes about 5, so they would not actually overlap:
+
+```bash
+# a product with exactly one unit, in the cart
+ID=$(curl -s -X POST http://localhost:8080/api/products -H 'Content-Type: application/json' \
+  -d '{"name":"Last One","description":"only one in stock","price":25.00,"stockQuantity":1}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -s -X POST http://localhost:8080/api/cart/items -H 'Content-Type: application/json' \
+  -d "{\"productId\":$ID,\"quantity\":1}" > /dev/null
+
+# two checkouts at once -> one 201 and one 409, never two 201s
+curl -s --parallel --parallel-immediate -X POST -o /dev/null -o /dev/null -w '%{http_code}\n' \
+  http://localhost:8080/api/orders http://localhost:8080/api/orders
+
+curl -s http://localhost:8080/api/products/$ID      # stockQuantity is 0, not -1
+```
+
+The application log shows the loser being rejected, with the statement that did it:
+
+```
+WARN  c.ecomdemo.order.OrderService : Checkout attempt 1 of 3 lost an optimistic lock:
+Unexpected row count (expected row count 1 but was 0)
+[update product set ... version=? where id=? and version=?]
+```
+
+And the audit trail shows both halves of the race:
+
+```bash
+docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo \
+  -c "SELECT id, order_id, outcome, detail FROM order_audit ORDER BY id DESC LIMIT 2;"
+```
+
+**Why not lock the row instead?** `SELECT ... FOR UPDATE` — pessimistic locking — would also
+prevent the oversell, by making every checkout of a popular product queue behind one row lock.
+Optimistic locking takes no lock and makes nobody wait; it only costs something when a conflict
+actually happens, which on a catalogue browsed far more often than it is sold from is rare. That
+is the trade, and the retry budget is what makes it honest.
+
 ## API
 
 | Method | Path | Purpose |
@@ -299,15 +394,15 @@ curl -s -X POST localhost:8080/api/orders
 
 ## Tests
 
-`./mvnw clean verify` runs all 108 tests in about eight seconds, against in-memory H2 — no
-PostgreSQL needed. They sit at four levels, each loading only what it needs:
+`./mvnw clean verify` runs all 120 tests in about nine seconds, against in-memory H2 — no
+PostgreSQL needed. They sit at five levels, each loading only what it needs:
 
 | Level | Annotation | What it loads | Classes |
 |---|---|---|---|
-| Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest` |
+| Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest`, `OrderPlacementServiceTest` |
 | Web slice | `@WebMvcTest` | The controller, JSON conversion, validation and the error handler; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest` |
 | Persistence slice | `@DataJpaTest` | JPA and its own throwaway H2 database; no web layer, no Flyway | `CartRepositoryTest`, `OrderRepositoryTest` |
-| Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest` |
+| Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest`, `ConcurrentCheckoutTest` |
 | Configuration | `ApplicationContextRunner` | Only the properties files, resolved as at startup | `DatasourceConfigurationTest` |
 
 The suite runs the **same migrations the application does**, then has Hibernate validate the
@@ -317,7 +412,20 @@ tests want empty tables, so they let Hibernate build a throwaway schema instead.
 
 That shape is the **test pyramid**: many fast tests where the logic lives, fewer slow ones as more
 of the framework is loaded. A failing unit test can only mean the service is wrong; a failing
-`@SpringBootTest` could mean anything, which is why there is one of them and not eighty.
+`@SpringBootTest` could mean anything, which is why there is a handful of them and not eighty.
+
+One test is deliberately at the top of that pyramid and could not be anywhere else.
+`ConcurrentCheckoutTest` starts real threads and races two checkouts through a `CountDownLatch`,
+because the bug it guards against is not in any single method — every step of `placeOnce()` is
+correct on its own. It exists only in the interleaving, so proving it is gone means running the
+interleaving. For the same reason it is **not** `@Transactional`: a test transaction would wrap
+both threads' work in one unit and roll it back at the end, and the two checkouts would never
+commit against each other. It cleans up after itself instead.
+
+A unit test cannot check a transaction at all. `@Transactional` is applied by a proxy, and a
+service built with `new` in a Mockito test has no proxy around it — so in `OrderPlacementServiceTest`
+the annotation does exactly nothing. Atomicity is only ever proven against a real context and a
+real database.
 
 Conventions, if you add tests:
 
@@ -331,17 +439,22 @@ Conventions, if you add tests:
 ```bash
 ./mvnw test -Dtest=OrderServiceTest          # one class
 ./mvnw test -Dtest='*ControllerTest'         # all web slices
+./mvnw test -Dtest=ConcurrentCheckoutTest    # the race, on its own
 ```
 
 ## Known gaps (closed by later phases)
 
-- **Checkout is not atomic.** Each save commits on its own, so a crash mid-checkout can reduce
-  stock without producing an order, and two simultaneous checkouts can oversell the last unit.
-  Stock is validated for every line before anything is written, which keeps the common case
-  clean, but the race is real. **Phase 6** fixes it with `@Transactional` and optimistic locking.
-- **The migrations are only ever tested on H2.** The suite runs V1–V3 against H2 in PostgreSQL
+- **The migrations are only ever tested on H2.** The suite runs V1–V4 against H2 in PostgreSQL
   mode, which catches drift between the migrations and the entities but not PostgreSQL-specific
-  SQL. **Phase 7** runs them against a real PostgreSQL container.
+  SQL — and it races two checkouts against H2's locking, not PostgreSQL's. **Phase 7** runs both
+  against a real PostgreSQL container.
+- **There is still one cart for the whole world.** Two "simultaneous checkouts" therefore means
+  two people checking out the *same* cart, which is a strange thing to want. The locking they
+  exercise is not strange at all — it is the same mechanism that protects the catalogue once
+  **Phase 8** gives each user a cart of their own.
+- **Nothing rate-limits a stampede.** Three retries then 409 is the right answer for a momentary
+  collision; under sustained contention every attempt still costs a transaction. Backoff and
+  bulkheads arrive with **Phase 22**.
 - **Nothing rolls a migration back.** Flyway's community edition has no `undo`, so a bad
   migration is corrected by writing the next one. That is the normal production answer; it is
   worth knowing it is the *only* answer here.

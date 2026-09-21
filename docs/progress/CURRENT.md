@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 6: Transactions & Concurrency (@Transactional + optimistic locking)
 - **Branch:** feature/phase-06-transactions
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -30,8 +30,8 @@ with "Successfully validated 3 migrations" / "Current version of schema public: 
 - [x] An `order_audit` table written with `Propagation.REQUIRES_NEW`
 - [x] A concurrency test: two threads buy the last unit, exactly one succeeds
 - [x] Smoke test addition: stock set to 1, two parallel orders -> one success, one 409, stock 0
-- [ ] Testing protocol run in full + docs/test-reports/phase-06.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 04 archived), tracker -> 🔵
+- [x] Testing protocol run in full + docs/test-reports/phase-06.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 04 archived), tracker -> 🔵
 - [ ] PR raised
 
 ## Last test run
@@ -45,11 +45,16 @@ with "Successfully validated 3 migrations" / "Current version of schema public: 
 - 2026-09-22: `scripts/smoke-test.sh` against the running app and real PostgreSQL -> 78 passed,
   0 failed, 0 skipped, three runs in a row; the app log shows the optimistic lock firing exactly
   once per run, so the race is really being run and not just arriving in sequence.
+- 2026-09-22: failure scenario (a) six simultaneous checkouts of a 1-unit product -> one 201,
+  five 409, stock 0, one order, 0 ERROR. (b) a 2-line cart (bulk 10 / scarce 1) checked out twice
+  at once -> 201 + 409, bulk stock 8 not 6, so the loser's already-written reduction was rolled
+  back. Both against real PostgreSQL. Probe products deleted afterwards.
+- 2026-09-22: the README's copy-paste race snippet was run verbatim -> 201, 409, stockQuantity 0.
 
 ## Open issues / blockers
 - none
 
-## Decisions this phase (copied to docs/decisions.md ⬜)
+## Decisions this phase (copied to docs/decisions.md ✅)
 - The retry loop and the transactional unit of work are SEPARATE beans (`OrderService` ->
   `OrderPlacementService`). Self-invocation would bypass the proxy and run every attempt with no
   transaction at all; it also has to be a new transaction per attempt, because a failed flush
