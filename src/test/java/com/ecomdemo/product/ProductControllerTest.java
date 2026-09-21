@@ -8,14 +8,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.CREATED;
+import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.NO_CONTENT;
 import static org.springframework.http.HttpStatus.OK;
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 import com.ecomdemo.common.GlobalExceptionHandler;
 import com.ecomdemo.common.NotFoundException;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.support.WithSecurityRules;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -23,8 +26,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithAnonymousUser;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
@@ -41,9 +45,15 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
  * the same {@code DispatcherServlet} without a real socket, but the result is asserted with
  * {@code assertThat(...)} rather than Hamcrest matchers, which keeps every test in this project
  * written in one assertion style.
+ *
+ * <p>Since Phase 8 the slice carries the real security rules, so the class runs as an ADMIN —
+ * otherwise every write below would be a 403 and the JSON assertions would never be reached.
+ * {@link Access} then checks that the reads really are public and that the writes really are
+ * not.
  */
 @WebMvcTest(ProductController.class)
-@Import(GlobalExceptionHandler.class)
+@WithSecurityRules
+@WithMockUser(username = "admin", roles = "ADMIN")
 class ProductControllerTest {
 
     @Autowired
@@ -302,6 +312,69 @@ class ProductControllerTest {
 
             // When / Then
             assertThat(mvc.delete().uri("/api/products/404")).hasStatus(NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("access rules")
+    class Access {
+
+        @Test
+        @WithAnonymousUser
+        void browsing_whenAnonymous_isAllowed() {
+            // Given
+            when(productService.findAll()).thenReturn(List.of(KEYBOARD));
+
+            // Then: the catalogue is the shop window — no account needed to look at it
+            assertThat(mvc.get().uri("/api/products")).hasStatus(OK);
+            assertThat(mvc.get().uri("/api/products/1")).hasStatus(OK);
+        }
+
+        @Test
+        @WithAnonymousUser
+        void writing_whenAnonymous_returns401() {
+            assertThat(mvc.post().uri("/api/products").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+                    .hasStatus(UNAUTHORIZED);
+            assertThat(mvc.put().uri("/api/products/1").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+                    .hasStatus(UNAUTHORIZED);
+            assertThat(mvc.delete().uri("/api/products/1")).hasStatus(UNAUTHORIZED);
+            verify(productService, never()).create(any());
+            verify(productService, never()).update(any(), any());
+            verify(productService, never()).delete(any());
+        }
+
+        @Test
+        @WithMockUser(username = "shopper", roles = "CUSTOMER")
+        void writing_whenAuthenticatedAsACustomer_returns403() {
+            // A customer is authenticated and still refused: this is authorization, not
+            // authentication, and sending the same credentials again will never help.
+            assertThat(mvc.post().uri("/api/products").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+                    .hasStatus(FORBIDDEN);
+            assertThat(mvc.put().uri("/api/products/1").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
+                    .hasStatus(FORBIDDEN);
+            assertThat(mvc.delete().uri("/api/products/1")).hasStatus(FORBIDDEN);
+            verify(productService, never()).create(any());
+        }
+
+        @Test
+        @WithMockUser(username = "shopper", roles = "CUSTOMER")
+        void browsing_whenAuthenticatedAsACustomer_isStillAllowed() {
+            // Given
+            when(productService.findAll()).thenReturn(List.of(KEYBOARD));
+
+            // Then: opening the writes to ADMIN must not have closed the reads to everyone else
+            assertThat(mvc.get().uri("/api/products")).hasStatus(OK);
+        }
+
+        @Test
+        @WithMockUser(username = "shopper", roles = "CUSTOMER")
+        void refusedWrite_returnsTheStandardErrorShape() {
+            assertThat(mvc.delete().uri("/api/products/1"))
+                    .hasStatus(FORBIDDEN)
+                    .bodyJson()
+                    .isLenientlyEqualTo("""
+                            {"status":403,"message":"Your account does not have permission to perform this action."}
+                            """);
         }
     }
 }

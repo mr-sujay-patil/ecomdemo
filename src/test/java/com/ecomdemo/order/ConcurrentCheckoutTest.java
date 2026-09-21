@@ -7,11 +7,15 @@ import com.ecomdemo.cart.CartService;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.customer.Role;
+import com.ecomdemo.customer.User;
+import com.ecomdemo.customer.UserRepository;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.product.ProductService;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.support.TestAuthentication;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,15 +66,31 @@ class ConcurrentCheckoutTest {
     @Autowired
     private OrderAuditRepository orderAuditRepository;
 
+    @Autowired
+    private UserRepository userRepository;
+
+    /**
+     * The shopper both racing threads act as. They share one account deliberately: the race is
+     * two checkouts of the SAME cart, which is only possible if they are the same person — two
+     * different accounts now have two different carts and could not collide at all.
+     */
+    private User shopper;
+
     /** Every product this class creates is named with it, so the cleanup can find them all. */
     private static final String PRODUCT_PREFIX = "Concurrency ";
 
     /**
-     * The cart is a single shared row and this test class does not roll anything back, so it
+     * The cart is one row per account and this test class does not roll anything back, so it
      * starts from a known state instead of assuming one.
      */
     @BeforeEach
-    void emptyTheSharedCart() {
+    void signInAndEmptyTheCart() {
+        shopper = TestAuthentication.account(userRepository, "race-test-shopper", Role.CUSTOMER);
+        TestAuthentication.authenticateAs(shopper);
+        emptyTheCart();
+    }
+
+    private void emptyTheCart() {
         cartService.view().items().stream()
                 .map(CartItemResponse::productId)
                 .forEach(cartService::removeItem);
@@ -85,10 +105,11 @@ class ConcurrentCheckoutTest {
      */
     @AfterEach
     void deleteTheProductsThisTestCreated() {
-        emptyTheSharedCart();
+        emptyTheCart();
         productService.findAll().stream()
                 .filter(product -> product.name().startsWith(PRODUCT_PREFIX))
                 .forEach(product -> productService.delete(product.id()));
+        TestAuthentication.clear();
     }
 
     @Test
@@ -187,6 +208,10 @@ class ConcurrentCheckoutTest {
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
             Callable<Outcome> checkout = () -> {
+                // SecurityContextHolder is a ThreadLocal, so each worker thread starts with an
+                // empty context and has to sign in for itself. Skipping this is how a race test
+                // fails with "no authenticated user" instead of with the race it meant to test.
+                TestAuthentication.authenticateAs(shopper);
                 start.await(5, TimeUnit.SECONDS);
                 try {
                     return new Outcome(orderService.place(), null);

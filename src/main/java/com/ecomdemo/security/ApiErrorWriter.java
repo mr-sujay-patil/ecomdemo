@@ -1,12 +1,12 @@
 package com.ecomdemo.security;
 
 import com.ecomdemo.common.ApiError;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Writes an {@link ApiError} straight onto the servlet response.
@@ -24,20 +24,26 @@ import org.springframework.stereotype.Component;
  * every other failure in the API is a {@code {"status": ..., "message": ...}} object. One error
  * shape for every failure is the contract; these two statuses are not allowed to be exceptions
  * to it.
+ *
+ * <p>The injected mapper is {@code tools.jackson.databind.json.JsonMapper} — Jackson 3, the
+ * mapper Spring Boot 4 auto-configures and the one Spring MVC serialises every other response
+ * with. Jackson 2's {@code com.fasterxml.jackson.databind.ObjectMapper} is still on the
+ * classpath (other libraries pull it in) but no bean of that type exists, and using it here
+ * would mean these two responses were formatted by a different mapper from all the rest.
  */
 @Component
 public class ApiErrorWriter {
 
-    private final ObjectMapper objectMapper;
+    private final JsonMapper jsonMapper;
 
-    public ApiErrorWriter(ObjectMapper objectMapper) {
-        this.objectMapper = objectMapper;
+    public ApiErrorWriter(JsonMapper jsonMapper) {
+        this.jsonMapper = jsonMapper;
     }
 
     void write(HttpServletResponse response, HttpStatus status, String message) throws IOException {
         response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        objectMapper.writeValue(response.getWriter(), new ApiError(status.value(), message));
+        jsonMapper.writeValue(response.getWriter(), new ApiError(status.value(), message));
     }
 }
