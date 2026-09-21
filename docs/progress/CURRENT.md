@@ -17,7 +17,7 @@ no commits or file diffs between branch and `main`; remote branch intact;
 tag `phase-01-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [~] Unit tests for every service class, repositories mocked with Mockito (ProductService ✅)
+- [x] Unit tests for every service class, repositories mocked with Mockito
 - [ ] `@WebMvcTest` controller tests (status codes, JSON body, validation errors)
 - [ ] `@DataJpaTest` tests for custom queries
 - [ ] Naming `methodName_condition_expectedResult`, AssertJ assertions, Given/When/Then structure
@@ -26,7 +26,7 @@ tag `phase-01-complete` pushed.
 - [ ] README test section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
 
 ## Last test run
-- 2026-09-21: `ProductServiceTest` → 13 tests, 0 failures
+- 2026-09-21: service unit tests → 35 tests (Product 13, Cart 12, Order 10), 0 failures
 
 ## Open issues / blockers
 - none
@@ -35,6 +35,7 @@ tag `phase-01-complete` pushed.
 - (none yet)
 
 ## Next action
-Write `CartServiceTest` (mock `CartRepository` + `ProductService`) covering view, addItem
-(new line / existing line / unknown product), updateItem, removeItem, currentCart and clearCart.
-Then `OrderServiceTest`, then the three `@WebMvcTest` classes, then the `@DataJpaTest` ones.
+Write the three `@WebMvcTest` slices (`ProductControllerTest`, `CartControllerTest`,
+`OrderControllerTest`) with `@MockitoBean` services and `MockMvcTester`: status codes, JSON
+bodies, the Location header on 201, and the 400/404/409 shapes from GlobalExceptionHandler.
+Then the `@DataJpaTest` tests for `CartRepository.findCart` and the two OrderRepository queries.

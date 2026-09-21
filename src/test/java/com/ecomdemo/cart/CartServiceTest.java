@@ -1,0 +1,258 @@
+package com.ecomdemo.cart;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.ecomdemo.cart.dto.AddCartItemRequest;
+import com.ecomdemo.cart.dto.CartItemResponse;
+import com.ecomdemo.cart.dto.CartResponse;
+import com.ecomdemo.cart.dto.UpdateCartItemRequest;
+import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.product.Product;
+import com.ecomdemo.product.ProductService;
+import com.ecomdemo.support.TestData;
+import java.util.Optional;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+/**
+ * Unit tests for {@link CartService}.
+ *
+ * <p>Two collaborators are mocked here, and they are mocked for different reasons.
+ * {@code CartRepository} is replaced to keep the database out; {@code ProductService} is
+ * replaced because this test is about cart rules, and a real product lookup would drag its own
+ * repository in with it. Mocking at the service boundary is what keeps a failure here pointing
+ * at {@code CartService} and nothing else.
+ *
+ * <p>Note that {@code findCart()} is stubbed once but called more than once per operation: every
+ * write goes through {@code saveAndView}, which saves and then re-reads the cart. Returning the
+ * same instance mirrors what the database would do.
+ */
+@ExtendWith(MockitoExtension.class)
+class CartServiceTest {
+
+    @Mock
+    private CartRepository cartRepository;
+
+    @Mock
+    private ProductService productService;
+
+    @InjectMocks
+    private CartService cartService;
+
+    @Nested
+    @DisplayName("view")
+    class View {
+
+        @Test
+        void view_whenTheCartHasLines_returnsThemWithAServerCalculatedTotal() {
+            // Given: 2 x 1500.00 plus 3 x 100.50
+            Cart cart = TestData.cart(1L);
+            cart.addItem(TestData.product(10L, "Lamp", "1500.00", 9), 2);
+            cart.addItem(TestData.product(11L, "Cable", "100.50", 9), 3);
+            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+
+            // When
+            CartResponse view = cartService.view();
+
+            // Then
+            assertThat(view.id()).isEqualTo(1L);
+            assertThat(view.items())
+                    .extracting(CartItemResponse::productId, CartItemResponse::quantity)
+                    .containsExactly(tuple(10L, 2), tuple(11L, 3));
+            assertThat(view.totalAmount()).isEqualByComparingTo("3301.50");
+        }
+
+        @Test
+        void view_whenTheCartIsEmpty_returnsNoLinesAndAZeroTotal() {
+            // Given
+            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+
+            // When
+            CartResponse view = cartService.view();
+
+            // Then
+            assertThat(view.items()).isEmpty();
+            assertThat(view.totalAmount()).isEqualByComparingTo("0");
+        }
+    }
+
+    @Nested
+    @DisplayName("addItem")
+    class AddItem {
+
+        @Test
+        void addItem_whenTheProductIsNotYetInTheCart_addsANewLine() {
+            // Given
+            Cart cart = TestData.cart(1L);
+            Product product = TestData.product(10L, "Lamp", "1500.00", 9);
+            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            when(productService.requireProduct(10L)).thenReturn(product);
+
+            // When
+            CartResponse view = cartService.addItem(new AddCartItemRequest(10L, 2));
+
+            // Then
+            assertThat(view.items()).hasSize(1);
+            assertThat(view.items().getFirst().quantity()).isEqualTo(2);
+            assertThat(view.totalAmount()).isEqualByComparingTo("3000.00");
+            verify(cartRepository).save(cart);
+        }
+
+        @Test
+        void addItem_whenTheProductIsAlreadyInTheCart_increasesThatLineInsteadOfDuplicatingIt() {
+            // Given: the cart already holds 2 of product 10
+            Product product = TestData.product(10L, "Lamp", "1500.00", 9);
+            Cart cart = TestData.cartWith(1L, product, 2);
+            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            when(productService.requireProduct(10L)).thenReturn(product);
+
+            // When
+            CartResponse view = cartService.addItem(new AddCartItemRequest(10L, 3));
+
+            // Then
+            assertThat(view.items()).hasSize(1);
+            assertThat(view.items().getFirst().quantity()).isEqualTo(5);
+            assertThat(view.totalAmount()).isEqualByComparingTo("7500.00");
+        }
+
+        @Test
+        void addItem_whenTheProductDoesNotExist_throwsNotFoundAndSavesNothing() {
+            // Given
+            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+            when(productService.requireProduct(404L)).thenThrow(NotFoundException.product(404L));
+
+            // When / Then
+            assertThatThrownBy(() -> cartService.addItem(new AddCartItemRequest(404L, 1)))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessage("Product 404 not found");
+            verify(cartRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("updateItem")
+    class UpdateItem {
+
+        @Test
+        void updateItem_whenTheLineExists_replacesTheQuantity() {
+            // Given
+            Product product = TestData.product(10L, "Lamp", "1500.00", 9);
+            Cart cart = TestData.cartWith(1L, product, 2);
+            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+
+            // When
+            CartResponse view = cartService.updateItem(10L, new UpdateCartItemRequest(5));
+
+            // Then: replaced, not added to
+            assertThat(view.items().getFirst().quantity()).isEqualTo(5);
+            assertThat(view.totalAmount()).isEqualByComparingTo("7500.00");
+            verify(cartRepository).save(cart);
+        }
+
+        @Test
+        void updateItem_whenTheProductIsNotInTheCart_throwsNotFoundAndSavesNothing() {
+            // Given
+            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+
+            // When / Then
+            assertThatThrownBy(() -> cartService.updateItem(10L, new UpdateCartItemRequest(5)))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessage("Product 10 is not in the cart");
+            verify(cartRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("removeItem")
+    class RemoveItem {
+
+        @Test
+        void removeItem_whenTheLineExists_dropsItAndLeavesTheOthers() {
+            // Given
+            Cart cart = TestData.cart(1L);
+            cart.addItem(TestData.product(10L, "Lamp", "1500.00", 9), 2);
+            cart.addItem(TestData.product(11L, "Cable", "100.50", 9), 3);
+            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+
+            // When
+            CartResponse view = cartService.removeItem(10L);
+
+            // Then
+            assertThat(view.items())
+                    .extracting(CartItemResponse::productId)
+                    .containsExactly(11L);
+            assertThat(view.totalAmount()).isEqualByComparingTo("301.50");
+            verify(cartRepository).save(cart);
+        }
+
+        @Test
+        void removeItem_whenTheProductIsNotInTheCart_throwsNotFoundAndSavesNothing() {
+            // Given
+            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+
+            // When / Then
+            assertThatThrownBy(() -> cartService.removeItem(10L))
+                    .isInstanceOf(NotFoundException.class)
+                    .hasMessage("Product 10 is not in the cart");
+            verify(cartRepository, never()).save(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("currentCart and clearCart (the entry points the order feature uses)")
+    class SharedHelpers {
+
+        @Test
+        void currentCart_whenACartAlreadyExists_returnsItWithoutCreatingAnother() {
+            // Given
+            Cart existing = TestData.cart(1L);
+            when(cartRepository.findCart()).thenReturn(Optional.of(existing));
+
+            // When
+            Cart found = cartService.currentCart();
+
+            // Then
+            assertThat(found).isSameAs(existing);
+            verify(cartRepository, never()).save(any());
+        }
+
+        @Test
+        void currentCart_whenNoCartExistsYet_createsAndSavesTheOneSharedCart() {
+            // Given
+            Cart created = TestData.cart(1L);
+            when(cartRepository.findCart()).thenReturn(Optional.empty());
+            when(cartRepository.save(any(Cart.class))).thenReturn(created);
+
+            // When
+            Cart found = cartService.currentCart();
+
+            // Then
+            assertThat(found).isSameAs(created);
+            verify(cartRepository).save(any(Cart.class));
+        }
+
+        @Test
+        void clearCart_whenCalled_emptiesTheCartAndSavesIt() {
+            // Given
+            Cart cart = TestData.cartWith(1L, TestData.product(10L, "Lamp", "1500.00", 9), 2);
+
+            // When
+            cartService.clearCart(cart);
+
+            // Then
+            assertThat(cart.isEmpty()).isTrue();
+            verify(cartRepository).save(cart);
+        }
+    }
+}
