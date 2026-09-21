@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-21
 - **Phase:** 2: Automated Testing (JUnit 5 + Mockito + MockMvc)
 - **Branch:** feature/phase-02-testing
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -17,7 +17,7 @@ no commits or file diffs between branch and `main`; remote branch intact;
 tag `phase-01-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Unit tests for every service class, repositories mocked with Mockito
+- [~] Unit tests for every service class, repositories mocked with Mockito (ProductService ✅)
 - [ ] `@WebMvcTest` controller tests (status codes, JSON body, validation errors)
 - [ ] `@DataJpaTest` tests for custom queries
 - [ ] Naming `methodName_condition_expectedResult`, AssertJ assertions, Given/When/Then structure
@@ -26,7 +26,7 @@ tag `phase-01-complete` pushed.
 - [ ] README test section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
 
 ## Last test run
-- (none yet this phase)
+- 2026-09-21: `ProductServiceTest` → 13 tests, 0 failures
 
 ## Open issues / blockers
 - none
@@ -35,6 +35,6 @@ tag `phase-01-complete` pushed.
 - (none yet)
 
 ## Next action
-Inventory the service, controller and repository classes under `src/main/java/com/ecomdemo`,
-then write unit tests for `ProductService` first (Mockito-mocked repository, success + failure
-per method), committing each feature's tests separately.
+Write `CartServiceTest` (mock `CartRepository` + `ProductService`) covering view, addItem
+(new line / existing line / unknown product), updateItem, removeItem, currentCart and clearCart.
+Then `OrderServiceTest`, then the three `@WebMvcTest` classes, then the `@DataJpaTest` ones.
