@@ -39,15 +39,32 @@ public class Product {
     @Column(name = "stock_quantity", nullable = false)
     private int stockQuantity;
 
+    /**
+     * Optional catalogue category, added by Flyway migration V3.
+     *
+     * <p>Nullable on purpose. V3 adds the column to a table that already has rows and to a
+     * system whose running instances know nothing about it, so a {@code NOT NULL} column would
+     * have broken every insert from the old code during the deploy. Products created before the
+     * migration - and any created without one since - simply have no category.
+     */
+    @Column(length = 50)
+    private String category;
+
     protected Product() {
         // required by JPA
     }
 
     public Product(String name, String description, BigDecimal price, int stockQuantity) {
+        this(name, description, price, stockQuantity, null);
+    }
+
+    public Product(String name, String description, BigDecimal price, int stockQuantity,
+            String category) {
         this.name = name;
         this.description = description;
         this.price = price;
         this.stockQuantity = stockQuantity;
+        this.category = category;
     }
 
     /**
@@ -103,5 +120,13 @@ public class Product {
 
     public void setStockQuantity(int stockQuantity) {
         this.stockQuantity = stockQuantity;
+    }
+
+    public String getCategory() {
+        return category;
+    }
+
+    public void setCategory(String category) {
+        this.category = category;
     }
 }

@@ -27,6 +27,7 @@ trap 'rm -f "$BODY"' EXIT
 
 PASSED=0
 FAILED=0
+SKIPPED=0
 
 pass() {
     printf '  \033[32mPASS\033[0m  %s\n' "$1"
@@ -40,6 +41,13 @@ fail() {
 
 check() { # check <name> <expected> <actual>
     if [ "$2" = "$3" ]; then pass "$1"; else fail "$1" "$2" "$3"; fi
+}
+
+# A check that could not be RUN is never reported as a pass. It is counted separately and the
+# summary says so, so a missing psql can never be mistaken for a green result.
+skip() {
+    printf '  \033[33mSKIP\033[0m  %s\n        reason:   %s\n' "$1" "$2"
+    SKIPPED=$((SKIPPED + 1))
 }
 
 section() {
@@ -287,9 +295,94 @@ printf "PROBE_ID='%s'\nPROBE_NAME='%s'\nPROBE_PRICE='%s'\n" \
 pass "probe id $PROBE_ID recorded in $STATE_FILE for the next run"
 
 # --------------------------------------------------------------------------------------------
+# 5. Flyway migrations (Phase 5)
+# --------------------------------------------------------------------------------------------
+#
+# Two things to prove: that the schema this application is running on was built by Flyway and
+# recorded, and that migration V3's new column reaches the API.
+#
+# The history check needs SQL, not HTTP, so it wants a psql. It uses one on PATH if there is one,
+# otherwise it runs psql inside the PostgreSQL container (POSTGRES_CONTAINER, default
+# ecomdemo-postgres). With neither, the check is SKIPPED and says so - never silently passed.
+section "Flyway migrations"
+
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-ecomdemo-postgres}"
+PGDB="${POSTGRES_DB:-ecomdemo}"
+PGUSER_="${POSTGRES_USER:-ecomdemo}"
+
+# psql_query <sql> -> prints the result, one row per line, no headers or padding
+psql_query() {
+    if command -v psql >/dev/null 2>&1; then
+        PGPASSWORD="${POSTGRES_PASSWORD:-ecomdemo}" psql -qtAX \
+            -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+            -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
+    elif command -v docker >/dev/null 2>&1 \
+        && docker exec "$POSTGRES_CONTAINER" true >/dev/null 2>&1; then
+        docker exec "$POSTGRES_CONTAINER" psql -qtAX -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+if HISTORY="$(psql_query \
+    "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
+     FROM flyway_schema_history WHERE version IS NOT NULL \
+     ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
+    check "flyway_schema_history shows V1-V3, all successful" "1:ok,2:ok,3:ok" "$HISTORY"
+
+    PENDING="$(psql_query \
+        "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
+    check "no migration is recorded as failed" "0" "$PENDING"
+
+    CATEGORY_INDEX="$(psql_query \
+        "SELECT count(*) FROM pg_indexes \
+         WHERE schemaname = 'public' AND indexname = 'idx_product_category';" | tr -d '\r ')"
+    check "V3's idx_product_category index exists" "1" "$CATEGORY_INDEX"
+else
+    skip "flyway_schema_history shows V1-V3, all successful" \
+        "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
+    skip "no migration is recorded as failed" "same as above"
+    skip "V3's idx_product_category index exists" "same as above"
+fi
+
+# The column V3 added has to reach the API, not just the database. The seeded product is looked
+# up by name rather than by id, so the check does not depend on which ids happen to be free.
+STATUS="$(request GET /api/products)"
+check "GET /api/products returns 200" "200" "$STATUS"
+check "every product in the list carries a category field" "True" \
+    "$(jget "all('category' in p for p in d)")"
+check "the seeded keyboard was backfilled by V3" "PERIPHERALS" \
+    "$(jget "next(p['category'] for p in d if p['name'] == 'Mechanical Keyboard')")"
+
+# A category can be set through the API on the way in, and comes back out again.
+STATUS="$(request POST /api/products \
+    '{"name":"Category Probe","description":"created with a category","price":10.00,"stockQuantity":1,"category":"STORAGE"}')"
+check "a product can be created with a category" "201" "$STATUS"
+CATEGORISED_ID="$(jget "d['id']")"
+check "and the category comes back" "STORAGE" "$(jget "d['category']")"
+
+# The column is nullable ON PURPOSE: V3 had to stay safe for instances of the old application
+# version that were still inserting products while it ran. A create without a category must work.
+STATUS="$(request POST /api/products \
+    '{"name":"Uncategorised Probe","description":"created without a category","price":10.00,"stockQuantity":1}')"
+check "a product can be created without one" "201" "$STATUS"
+UNCATEGORISED_ID="$(jget "d['id']")"
+check "and comes back with category null" "True" "$(jget "d['category'] is None")"
+
+request DELETE "/api/products/$CATEGORISED_ID" >/dev/null
+request DELETE "/api/products/$UNCATEGORISED_ID" >/dev/null
+pass "the two category probe products are cleaned up"
+
+# --------------------------------------------------------------------------------------------
 # Summary
 # --------------------------------------------------------------------------------------------
-printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASSED" "$FAILED"
+printf '\n\033[1mSummary:\033[0m %d passed, %d failed, %d skipped\n' \
+    "$PASSED" "$FAILED" "$SKIPPED"
+
+if [ "$SKIPPED" -gt 0 ]; then
+    printf '\033[33mNote: %d check(s) could not be run - see the SKIP lines above.\033[0m\n' \
+        "$SKIPPED"
+fi
 
 if [ "$FAILED" -gt 0 ]; then
     printf '\033[31mSMOKE TEST FAILED\033[0m\n'

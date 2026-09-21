@@ -14,7 +14,7 @@ import org.springframework.core.env.Environment;
 import org.springframework.core.io.ClassPathResource;
 
 /**
- * Guards the profile configuration added in Phase 4.
+ * Guards the profile configuration added in Phase 4 and the Flyway settings added in Phase 5.
  *
  * <p>These assertions are about resolved configuration, not about a running database. The
  * {@link ConfigDataApplicationContextInitializer} loads the same application.properties and
@@ -71,11 +71,11 @@ class DatasourceConfigurationTest {
         }
 
         @Test
-        @DisplayName("keeps the schema and its data across restarts")
-        void doesNotDropTheSchemaOnShutdown() {
+        @DisplayName("never lets Hibernate touch the schema: Flyway owns it")
+        void leavesTheSchemaToFlyway() {
             dev().run(context -> assertThat(
                             context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
-                    .isEqualTo("update"));
+                    .isEqualTo("validate"));
         }
 
         @Test
@@ -91,11 +91,13 @@ class DatasourceConfigurationTest {
         }
 
         @Test
-        @DisplayName("seeds the catalogue, which data.sql's guard makes safe to repeat")
-        void runsTheSeedScript() {
-            dev().run(context -> assertThat(
-                            context.getEnvironment().getProperty("spring.sql.init.mode"))
-                    .isEqualTo("always"));
+        @DisplayName("has no script-based initialisation left: the catalogue is migration V2")
+        void doesNotRunASeedScript() {
+            dev().run(context -> {
+                Environment env = context.getEnvironment();
+                assertThat(env.getProperty("spring.sql.init.mode")).isNull();
+                assertThat(env.getProperty("spring.jpa.defer-datasource-initialization")).isNull();
+            });
         }
     }
 
@@ -116,11 +118,30 @@ class DatasourceConfigurationTest {
         }
 
         @Test
-        @DisplayName("builds and drops the schema for every run")
-        void recreatesTheSchema() {
+        @DisplayName("validates against the migrated schema, exactly as the application does")
+        void validatesTheSchema() {
             test().run(context -> assertThat(
                             context.getEnvironment().getProperty("spring.jpa.hibernate.ddl-auto"))
-                    .isEqualTo("create-drop"));
+                    .isEqualTo("validate"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Flyway")
+    class FlywayConfiguration {
+
+        @Test
+        @DisplayName("refuses to baseline an existing schema instead of migrating it")
+        void neverBaselinesSilently() {
+            runner.withPropertyValues("spring.profiles.active=dev").run(context -> {
+                Environment env = context.getEnvironment();
+                assertThat(env.getProperty("spring.flyway.baseline-on-migrate", Boolean.class))
+                        .isFalse();
+                assertThat(env.getProperty("spring.flyway.validate-on-migrate", Boolean.class))
+                        .isTrue();
+                assertThat(env.getProperty("spring.flyway.locations"))
+                        .isEqualTo("classpath:db/migration");
+            });
         }
     }
 

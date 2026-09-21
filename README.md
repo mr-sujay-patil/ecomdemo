@@ -4,20 +4,21 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · springdoc-openapi · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · springdoc-openapi · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 4: PostgreSQL** — the application now stores its data in a real PostgreSQL server
-instead of an in-memory database, so **a product you create is still there after a restart**.
-Configuration is split into profiles: `dev` talks to PostgreSQL and is the default, `test` keeps
-the 102-test suite on in-memory H2 so `./mvnw clean verify` needs nothing running. Connection
-details come from environment variables with local defaults.
+**Phase 5: Database Migrations** — the schema is now **version-controlled**. Three Flyway
+migrations in `src/main/resources/db/migration` build the database from nothing; Hibernate no
+longer creates or alters anything, it only validates (`ddl-auto=validate`) and refuses to start
+if the entities and the schema disagree. V3 adds a `category` column to products, backfills it
+and indexes it, so the repository also shows what changing a live schema looks like.
 
-Everything from the earlier phases still stands: products, a single shared cart and order
-placement, documented by an OpenAPI 3 spec at `/v3/api-docs` and Swagger UI at
-**<http://localhost:8080/swagger-ui.html>**. No schema migrations, no security and no Docker
-Compose yet; those arrive in Phases 5, 8 and 10.
+Everything from the earlier phases still stands: PostgreSQL with a `dev`/`test` profile split,
+products, a single shared cart and order placement, documented by an OpenAPI 3 spec at
+`/v3/api-docs` and Swagger UI at **<http://localhost:8080/swagger-ui.html>**. The 108-test suite
+still runs on in-memory H2, so `./mvnw clean verify` needs nothing running. No security and no
+Docker Compose yet; those arrive in Phases 8 and 10.
 
 ## Roadmap
 
@@ -35,7 +36,7 @@ ecomdemo/
 ├── src/main/resources/
 │   ├── application.properties       # shared by every profile
 │   ├── application-dev.properties   # PostgreSQL + Hikari (the default profile)
-│   └── data.sql                     # 10 seed products, guarded so re-running is a no-op
+│   └── db/migration/                # V1 schema, V2 seed catalogue, V3 product category
 ├── src/test/java/com/ecomdemo/
 │   ├── support/   # TestData fixture builders
 │   └── <feature>/ # *ServiceTest, *ControllerTest, *RepositoryTest per feature
@@ -94,15 +95,16 @@ on port 5432 works — or point the application somewhere else with the environm
 ./mvnw spring-boot:run          # starts on http://localhost:8080, dev profile
 ```
 
-On the first start Hibernate creates the five tables and `data.sql` seeds ten products. On every
-start after that the schema is left alone and the seed does nothing, because it is guarded — see
-[`data.sql`](src/main/resources/data.sql).
+On the first start **Flyway** finds an empty database, applies V1, V2 and V3 in order and records
+them; the log says `Successfully applied 3 migrations`. On every start after that it finds the
+schema already at version 3, says `Successfully validated 3 migrations` and applies nothing.
+Hibernate then checks the schema against the entities and fails the startup if they disagree.
 
 In a second terminal:
 
 ```bash
-./mvnw clean verify             # build and run all 102 tests (no database needed)
-scripts/smoke-test.sh           # 52-54 end-to-end checks against the running app
+./mvnw clean verify             # build and run all 108 tests (no database needed)
+scripts/smoke-test.sh           # 62-65 end-to-end checks against the running app
 ```
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html> — every endpoint is listed with its
@@ -136,6 +138,59 @@ That split is why `./mvnw clean verify` passes with no PostgreSQL running. It al
 do not yet prove the application works on PostgreSQL — "works on H2" is not "works on
 PostgreSQL", which is exactly what Phase 7 fixes with Testcontainers.
 
+### Database migrations
+
+The schema lives in Git, as ordinary SQL files:
+
+```
+src/main/resources/db/migration/
+├── V1__init_schema.sql          # the five tables, their keys and indexes
+├── V2__seed_products.sql        # the starting catalogue (was data.sql)
+└── V3__add_product_category.sql # a new column, a backfill and an index
+```
+
+The name is a contract: `V<version>__<description>.sql`. Flyway applies the versions a database
+has not seen yet, in order, each in a transaction, and writes a row per migration into a table it
+owns:
+
+```bash
+docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo \
+  -c 'SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;'
+```
+
+**Adding a change.** Write a new file with the next version number and restart the application.
+Never edit a file that has already run: Flyway stores a checksum of each applied migration and
+refuses to start when one no longer matches.
+
+```
+Validate failed: Migrations have failed validation
+Migration checksum mismatch for migration version 1
+-> Applied to database : -1645725570
+-> Resolved locally    : 1764594157
+```
+
+That is the guard working, not a bug — the database that already ran the old text would otherwise
+disagree, for ever, with one that runs the new text. Correct a mistake with a *new* migration.
+
+**Making changes safe to deploy.** V3 adds `category` as a **nullable** column on purpose. During
+a rolling deploy the new schema is live while instances of the old version are still inserting
+products with no idea the column exists; a `NOT NULL` column with no default would fail every one
+of those inserts. Adding it nullable first, backfilling, and only tightening it once every
+instance writes the column is the expand/contract pattern — and the reason migrations come in
+small steps rather than one large `ALTER`.
+
+**Two kinds of migration.** These three are *versioned*: applied once, in order, never again.
+Flyway also has *repeatable* migrations (`R__*.sql`), re-applied whenever their checksum changes —
+the right tool for views, functions and stored procedures, which can simply be redefined. None are
+needed yet.
+
+**Why `ddl-auto=update` had to go.** It asks Hibernate to diff the entities against whatever
+database it is pointed at and run the `ALTER`s it invents, unreviewed. It only ever adds, so a
+renamed field leaves the old column behind still holding the real data; it cannot move data; it
+runs different statements in every environment; and it records nothing, so nobody can say what it
+did or undo it. `validate` turns that guesswork into a check that fails fast, and the `ALTER`s
+become reviewed files in Git.
+
 ### Seeing that the data is real
 
 ```bash
@@ -151,9 +206,10 @@ container:
 ```bash
 docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo
 
-\dt                              -- the five tables Hibernate generated
-\d product                       -- the columns and types it chose
-SELECT * FROM product;           -- the seeded catalogue
+\dt                              -- five tables, plus flyway_schema_history
+\d product                       -- the columns V1 and V3 created
+SELECT * FROM product;           -- the catalogue V2 seeded
+SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;
 ```
 
 ## API
@@ -243,16 +299,21 @@ curl -s -X POST localhost:8080/api/orders
 
 ## Tests
 
-`./mvnw clean verify` runs all 102 tests in about eight seconds, against in-memory H2 — no
+`./mvnw clean verify` runs all 108 tests in about eight seconds, against in-memory H2 — no
 PostgreSQL needed. They sit at four levels, each loading only what it needs:
 
 | Level | Annotation | What it loads | Classes |
 |---|---|---|---|
 | Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest` |
 | Web slice | `@WebMvcTest` | The controller, JSON conversion, validation and the error handler; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest` |
-| Persistence slice | `@DataJpaTest` | JPA and an H2 database; no web layer | `CartRepositoryTest`, `OrderRepositoryTest` |
-| Full context | `@SpringBootTest` | The whole application | `PlaceOrderFlowTest`, `OpenApiDocumentationTest` |
+| Persistence slice | `@DataJpaTest` | JPA and its own throwaway H2 database; no web layer, no Flyway | `CartRepositoryTest`, `OrderRepositoryTest` |
+| Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest` |
 | Configuration | `ApplicationContextRunner` | Only the properties files, resolved as at startup | `DatasourceConfigurationTest` |
+
+The suite runs the **same migrations the application does**, then has Hibernate validate the
+result, so a migration that drifts from the entities fails the build rather than the next deploy.
+The two `@DataJpaTest` slices are the exception: `@DataJpaTest` does not run Flyway, and those
+tests want empty tables, so they let Hibernate build a throwaway schema instead.
 
 That shape is the **test pyramid**: many fast tests where the logic lives, fewer slow ones as more
 of the framework is loaded. A failing unit test can only mean the service is wrong; a failing
@@ -278,10 +339,12 @@ Conventions, if you add tests:
   stock without producing an order, and two simultaneous checkouts can oversell the last unit.
   Stock is validated for every line before anything is written, which keeps the common case
   clean, but the race is real. **Phase 6** fixes it with `@Transactional` and optimistic locking.
-- **The schema is generated, not migrated.** `ddl-auto=update` lets Hibernate add tables and
-  columns at startup, and it will never drop or rename anything — so a change that needs one is
-  silently not applied, and nothing records which version of the schema a database is on.
-  **Phase 5** replaces it with Flyway migrations.
+- **The migrations are only ever tested on H2.** The suite runs V1–V3 against H2 in PostgreSQL
+  mode, which catches drift between the migrations and the entities but not PostgreSQL-specific
+  SQL. **Phase 7** runs them against a real PostgreSQL container.
+- **Nothing rolls a migration back.** Flyway's community edition has no `undo`, so a bad
+  migration is corrected by writing the next one. That is the normal production answer; it is
+  worth knowing it is the *only* answer here.
 - **No authentication.** Every endpoint is open and there is one cart for the whole world.
   **Phases 8 and 9** add Spring Security and JWT.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the

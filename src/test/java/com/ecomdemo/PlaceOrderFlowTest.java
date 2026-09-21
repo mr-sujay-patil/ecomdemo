@@ -42,7 +42,7 @@ class PlaceOrderFlowTest {
     void placingAnOrderChargesTheCartTotalReducesStockAndEmptiesTheCart() {
         // A product of our own, so the test does not depend on the seeded catalogue.
         ProductResponse product = productService.create(
-                new ProductRequest("Test Widget", "Created by the flow test", new BigDecimal("19.99"), 10));
+                new ProductRequest("Test Widget", "Created by the flow test", new BigDecimal("19.99"), 10, "ACCESSORIES"));
 
         CartResponse cart = cartService.addItem(new AddCartItemRequest(product.id(), 3));
         assertThat(cart.items()).hasSize(1);

@@ -55,6 +55,33 @@
 		</dependency>
 
 		<!--
+			Flyway. On startup it scans classpath:db/migration, works out from its own
+			`flyway_schema_history` table which versioned scripts this database has not run yet,
+			and applies them in order, each inside a transaction.
+
+			Two artifacts, for two different reasons:
+
+			* `spring-boot-starter-flyway` brings `flyway-core` AND Spring Boot's Flyway
+			  auto-configuration. Spring Boot 4 split auto-configuration out of one fat jar into
+			  a module per technology, so - unlike Boot 3 - putting `flyway-core` on the
+			  classpath by itself wires up nothing at all: the migrations are simply never run
+			  and the application starts against whatever schema it happens to find.
+			* Since Flyway 10, each database engine lives in its own module, so
+			  `flyway-database-postgresql` carries the PostgreSQL dialect. (H2, which the test
+			  suite uses, is one of the two still bundled inside flyway-core.)
+
+			Both versions come from the Spring Boot BOM, so they match each other and the driver.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+
+		<!--
 			H2 stays, but only on the test classpath. The application now speaks to a real
 			PostgreSQL server; the test suite still runs against an in-memory H2 so that
 			`./mvnw clean verify` needs nothing installed. Phase 7 (Testcontainers) is where the

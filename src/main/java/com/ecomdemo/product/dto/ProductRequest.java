@@ -39,5 +39,11 @@ public record ProductRequest(
         @Schema(description = "Units available to sell. Zero is allowed; negative is not.", example = "25")
         @NotNull(message = "is required")
         @PositiveOrZero(message = "must not be negative")
-        Integer stockQuantity) {
+        Integer stockQuantity,
+
+        @Schema(description = "Optional catalogue category. Omitting it is allowed: the column "
+                + "is nullable so that the migration that added it could not break clients "
+                + "written before it existed.", example = "PERIPHERALS")
+        @Size(max = 50, message = "must be at most 50 characters")
+        String category) {
 }
