@@ -8,9 +8,10 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 1: Baseline Monolith** — a running Spring Boot application with products, a single shared
-cart and order placement, backed by an in-memory H2 database. No security, no real database and no
-Docker yet; those arrive in Phases 8, 4 and 10.
+**Phase 2: Automated Testing** — the Phase 1 application (products, a single shared cart and
+order placement on in-memory H2) now under a 79-test safety net: Mockito unit tests, `@WebMvcTest`
+web slices and `@DataJpaTest` persistence slices. No security, no real database and no Docker yet;
+those arrive in Phases 8, 4 and 10.
 
 ## Roadmap
 
@@ -28,6 +29,9 @@ ecomdemo/
 ├── src/main/resources/
 │   ├── application.properties
 │   └── data.sql   # 10 seed products
+├── src/test/java/com/ecomdemo/
+│   ├── support/   # TestData fixture builders
+│   └── <feature>/ # *ServiceTest, *ControllerTest, *RepositoryTest per feature
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
 ├── scripts/       # smoke-test.sh
 └── .github/       # Pull Request template (workflows from Phase 11)
@@ -61,7 +65,7 @@ fetches Maven itself.
 In a second terminal:
 
 ```bash
-./mvnw clean verify             # build and run all tests
+./mvnw clean verify             # build and run all 79 tests
 scripts/smoke-test.sh           # 34 end-to-end checks against the running app
 ```
 
@@ -132,6 +136,36 @@ curl -s -X POST localhost:8080/api/cart/items \
 curl -s -X POST localhost:8080/api/orders
 ```
 
+## Tests
+
+`./mvnw clean verify` runs all 79 tests in about nine seconds. They sit at four levels, each
+loading only what it needs:
+
+| Level | Annotation | What it loads | Classes |
+|---|---|---|---|
+| Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest` |
+| Web slice | `@WebMvcTest` | The controller, JSON conversion, validation and the error handler; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest` |
+| Persistence slice | `@DataJpaTest` | JPA and an H2 database; no web layer | `CartRepositoryTest`, `OrderRepositoryTest` |
+| Full context | `@SpringBootTest` | The whole application | `PlaceOrderFlowTest` |
+
+That shape is the **test pyramid**: many fast tests where the logic lives, fewer slow ones as more
+of the framework is loaded. A failing unit test can only mean the service is wrong; a failing
+`@SpringBootTest` could mean anything, which is why there is one of them and not eighty.
+
+Conventions, if you add tests:
+
+- Name them `methodName_condition_expectedResult`, and structure the body Given / When / Then.
+- Assert with AssertJ (`assertThat(...)`). Compare money with `isEqualByComparingTo`, never
+  `isEqualTo` — `BigDecimal.equals()` compares the scale too, so `8999.00` and `8999.0` are
+  "different". For the same reason web tests assert the JSON body rather than a deserialised DTO.
+- Build entities with `com.ecomdemo.support.TestData` rather than adding setters to them.
+- Mock at the service boundary, so a failure names one class.
+
+```bash
+./mvnw test -Dtest=OrderServiceTest          # one class
+./mvnw test -Dtest='*ControllerTest'         # all web slices
+```
+
 ## Known gaps (closed by later phases)
 
 - **Checkout is not atomic.** Each save commits on its own, so a crash mid-checkout can reduce
@@ -141,3 +175,8 @@ curl -s -X POST localhost:8080/api/orders
 - **Everything is in-memory.** Restarting loses all data. **Phase 4** introduces PostgreSQL.
 - **No authentication.** Every endpoint is open and there is one cart for the whole world.
   **Phases 8 and 9** add Spring Security and JWT.
+- **No coverage report.** The suite is broad but nothing measures or enforces how much of the
+  code it reaches. **Phase 12** adds JaCoCo and SonarQube.
+- **Tests run against H2, not the real database.** H2 accepts some SQL PostgreSQL would reject,
+  so a green suite is not yet proof the queries work in production. **Phase 7** adds
+  Testcontainers.

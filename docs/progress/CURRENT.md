@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-21
 - **Phase:** 2: Automated Testing (JUnit 5 + Mockito + MockMvc)
 - **Branch:** feature/phase-02-testing
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES — decide what to do about `server.port=9090` (see Open issues)
+- **Waiting for user:** YES — review and merge PR #2, then say `merged, continue`
 
 ## Phase 01 merge verification (passed 2026-09-21)
 PR #1 MERGED with a merge commit (85af7b5, 2 parents); branch is an ancestor of `main`;
@@ -22,8 +22,8 @@ tag `phase-01-complete` pushed.
 - [x] `@DataJpaTest` tests for custom queries
 - [x] Naming `methodName_condition_expectedResult`, AssertJ assertions, Given/When/Then structure
 - [x] Every service method has a success **and** a failure test
-- [ ] Testing protocol run in full + docs/test-reports/phase-02.md
-- [ ] README test section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
+- [x] Testing protocol run in full + docs/test-reports/phase-02.md
+- [x] README test section, decisions.md, RECENT.md rotation, tracker → 🔵, PR raised
 
 ## Last test run
 - 2026-09-21: service unit tests → 35 (Product 13, Cart 12, Order 10), 0 failures
@@ -33,16 +33,22 @@ tag `phase-01-complete` pushed.
 - 2026-09-21: `BASE_URL=http://localhost:9090 scripts/smoke-test.sh` → 34 passed, 0 failed, exit 0
 
 ## Open issues / blockers
-- `server.port=9090` was added to `src/main/resources/application.properties` from outside this
-  session (the working tree was also switched to `main` mid-phase and switched back; no work was
-  lost). A blanket `git add -A` swept the line into commit 3ee9f5d, which is a production change
-  inside a test-only phase. Waiting for the user to say whether to keep 9090 or restore 8080.
-  Nothing else in the phase depends on the answer.
+- none. (`server.port=9090` appeared from outside this session and was swept into commit 3ee9f5d
+  by a blanket `git add -A`; reverted in dd09d10 on the user's instruction. The working tree was
+  also switched to `main` mid-phase by something outside this session and switched back — no work
+  was lost.)
 
-## Decisions this phase (copied to docs/decisions.md ⬜)
-- (none yet)
+## Decisions this phase (copied to docs/decisions.md ✅)
+- Four test levels, each loading only what it tests; `MockMvcTester` over Hamcrest MockMvc;
+  web tests assert JSON not DTOs (BigDecimal scale); `@DataJpaTest` only for hand-written
+  `@Query` methods, with `spring.sql.init.mode=never`; ids set reflectively in `TestData`;
+  Mockito agent loaded by surefire.
 
 ## Next action
-Testing protocol has been run in full and passed (see "Last test run"). Once the user has
-decided on the port, write `docs/test-reports/phase-02.md`, update the README test section,
-`docs/decisions.md` and `RECENT.md`, set the tracker to 🔵, push and raise the PR.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` → run merge verification (execution-protocol §5) on `main`:
+  re-run `./mvnw clean verify` and `scripts/smoke-test.sh`, run the git-workflow Verification
+  Checklist, then tag and push `phase-02-complete`, then start Phase 3
+  (`docs/phases/phase-03-openapi.md`).
+- If they say `changes: <feedback>` → back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.

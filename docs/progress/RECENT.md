@@ -12,6 +12,31 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 02: Automated Testing (tag: pending, PR: pending)
+**What exists now:** A four-level test suite over the unchanged Phase 1 code: 79 tests, 0
+skipped, ~9s. No production code changed this phase apart from reverting a stray `server.port`.
+**Key code:** `com.ecomdemo.support.TestData` builds entities and sets generated ids
+reflectively — use it rather than adding setters. `{Product,Cart,Order}ServiceTest` (Mockito),
+`{Product,Cart,Order}ControllerTest` (`@WebMvcTest` + `@MockitoBean` + `MockMvcTester`),
+`{Cart,Order}RepositoryTest` (`@DataJpaTest` + `TestEntityManager`).
+**Config & infrastructure:** Boot 4 moved the slice annotations —
+`org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest`,
+`org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest`,
+`org.springframework.boot.jpa.test.autoconfigure.TestEntityManager`. `@MockBean` is gone; use
+`@MockitoBean` from `org.springframework.test.context.bean.override.mockito`. Surefire loads the
+Mockito agent via `-javaagent` (needs `maven-dependency-plugin:properties`). No new dependencies:
+JUnit Jupiter 6, Mockito 5.23 and AssertJ 3.27 all arrive with the Boot 4 test starters.
+**Tests:** 35 unit · 33 web slice · 10 persistence slice · 1 `@SpringBootTest`. Smoke test
+unchanged at 34 checks.
+**Gotchas:** `BigDecimal.equals()` compares scale, so `8999.00 != 8999.0` — assert money with
+`isEqualByComparingTo`, and assert web bodies as JSON (JSONAssert compares numerically).
+`new BigDecimal("1.00")` keeps its scale; `BigDecimal.valueOf(1.00)` does not. Repository tests
+set `spring.sql.init.mode=never` so `data.sql` does not seed them. A `@WebMvcTest` needs
+`@Import(GlobalExceptionHandler.class)` for the error-shape assertions to see the advice.
+**Follow-ups (not done, out of scope):** coverage reporting — Phase 12. Tests against a real
+PostgreSQL — Phase 7. The oversell race in checkout still has no test, because it cannot be
+fixed until Phase 6.
+
 ## Phase 01: Baseline Monolith (tag: phase-01-complete, PR #1)
 **What exists now:** A running Spring Boot 4.1.1 monolith on H2 in-memory: product CRUD, one
 shared cart with a server-calculated total, and checkout that validates stock, reduces it, saves
@@ -31,15 +56,3 @@ mapping. `open-in-view=false` means repositories must fetch everything the calle
 table is `orders` (ORDER is reserved). Order lines snapshot name and price on purpose.
 **Follow-ups (not done, out of scope):** checkout is not atomic and can oversell under
 concurrency — Phase 6 (`@Transactional` + `@Version`). No unit/slice tests yet — Phase 2.
-
-## Phase 00: Repository Bootstrap (tag: phase-00-complete, no PR by design)
-**What exists now:** Public repo github.com/mr-sujay-patil/ecomdemo with the docs package,
-README, .gitignore, PR template and `scripts/`. `main` protected: PR required, force pushes and
-deletions blocked, `enforce_admins: true`, merge commits only (squash and rebase disabled).
-**Key code:** none (no application code in this phase).
-**Config & infrastructure:** GitHub settings applied via `gh api`; a direct push to `main` is
-rejected with GH006 (verified, not assumed).
-**Tests:** none applicable; no build exists yet.
-**Gotchas:** the earlier attempt at this roadmap was renamed to `EcomDemo-archive` to free the
-name. Phase 0 is the only phase permitted to commit to `main`.
-**Follow-ups (not done, out of scope):** CI checks on the protected branch — Phase 11.
