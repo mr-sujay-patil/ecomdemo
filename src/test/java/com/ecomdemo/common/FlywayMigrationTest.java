@@ -37,6 +37,13 @@ class FlywayMigrationTest {
     @Autowired
     private DataSource dataSource;
 
+    /** The ten products V2 inserts, as a SQL list. See {@link #seedsTheCatalogueOnce()}. */
+    private static final String SEEDED_NAMES = """
+            'Mechanical Keyboard', 'Wireless Mouse', 'Webcam 1080p', '27" 4K Monitor', \
+            'Noise-Cancelling Headphones', 'Portable SSD 1TB', 'USB-C Hub', 'Laptop Stand', \
+            'Desk Mat', 'Laptop Sleeve 16"'\
+            """;
+
     @Test
     @DisplayName("V1 to V4 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
@@ -90,7 +97,14 @@ class FlywayMigrationTest {
     void seedsTheCatalogueOnce() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        assertThat(jdbc.queryForObject("SELECT count(*) FROM product", Integer.class))
+        // Counted over the seeded names, not over the whole table. Every @SpringBootTest in the
+        // suite shares one context and therefore one H2 database, and several of them create
+        // products of their own; a bare count(*) would be asserting on their leftovers as much as
+        // on V2. Ten rows across V2's ten names still proves exactly what this test is for: the
+        // seed ran, and it ran once.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM product WHERE name IN (" + SEEDED_NAMES + ")",
+                        Integer.class))
                 .isEqualTo(10);
         assertThat(jdbc.queryForObject(
                         "SELECT count(*) FROM product WHERE name = 'Mechanical Keyboard'",
@@ -108,7 +122,9 @@ class FlywayMigrationTest {
                         String.class))
                 .isEqualTo("PERIPHERALS");
         assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM product WHERE category IS NULL", Integer.class))
+                        "SELECT count(*) FROM product "
+                                + "WHERE category IS NULL AND name IN (" + SEEDED_NAMES + ")",
+                        Integer.class))
                 .as("every seeded product was backfilled")
                 .isZero();
 
@@ -146,8 +162,9 @@ class FlywayMigrationTest {
                         String.class))
                 .isEqualTo("NO");
         assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM product WHERE version <> 0", Integer.class))
-                .as("every seeded product starts at version 0")
+                        "SELECT version FROM product WHERE name = 'Mechanical Keyboard'",
+                        Long.class))
+                .as("rows that already existed were backfilled with the column default")
                 .isZero();
 
         assertThat(jdbc.queryForObject(
