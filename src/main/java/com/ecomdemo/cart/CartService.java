@@ -24,26 +24,43 @@ public class CartService {
         return CartResponse.from(currentCart());
     }
 
+    /**
+     * Saves the cart and then re-reads it before mapping to a response.
+     *
+     * <p>The cart handed to {@code save()} is detached (its transaction ended when the previous
+     * repository call returned), so Spring Data performs a <em>merge</em>: it loads a fresh
+     * managed copy and returns that, not the instance we passed. In that copy the LAZY
+     * associations are uninitialised proxies, and the session is already closed by the time we
+     * try to read a product name — a LazyInitializationException. Re-reading through
+     * {@link CartRepository#findCart()} costs one extra query and gives us a fully populated
+     * object graph. Phase 6 makes the whole operation a single transaction, which removes the
+     * need for this round trip.
+     */
+    private CartResponse saveAndView(Cart cart) {
+        cartRepository.save(cart);
+        return view();
+    }
+
     /** Adding a product already in the cart increases that line rather than duplicating it. */
     public CartResponse addItem(AddCartItemRequest request) {
         Cart cart = currentCart();
         Product product = productService.requireProduct(request.productId());
         cart.addItem(product, request.quantity());
-        return CartResponse.from(cartRepository.save(cart));
+        return saveAndView(cart);
     }
 
     public CartResponse updateItem(Long productId, UpdateCartItemRequest request) {
         Cart cart = currentCart();
         CartItem item = cart.findItem(productId).orElseThrow(() -> NotFoundException.cartItem(productId));
         cart.updateQuantity(item, request.quantity());
-        return CartResponse.from(cartRepository.save(cart));
+        return saveAndView(cart);
     }
 
     public CartResponse removeItem(Long productId) {
         Cart cart = currentCart();
         CartItem item = cart.findItem(productId).orElseThrow(() -> NotFoundException.cartItem(productId));
         cart.removeItem(item);
-        return CartResponse.from(cartRepository.save(cart));
+        return saveAndView(cart);
     }
 
     /**
