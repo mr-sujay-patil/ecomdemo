@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 07: Integration Testing (tag: pending, PR: pending)
+## Phase 07: Integration Testing (tag: phase-07-complete, PR #7)
 **What exists now:** `./mvnw verify` starts PostgreSQL 18 in a Testcontainers container, applies
 V1-V4 to it and drives the whole application over real HTTP against it. 135 tests: 120 under
 Surefire (unchanged, H2, ~9 s) and 15 under Failsafe (`*IT`, PostgreSQL, ~8 s including the
