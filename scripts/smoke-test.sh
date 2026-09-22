@@ -1525,12 +1525,28 @@ print('app' in json.load(sys.stdin).get('data', []))" 2>/dev/null)"
         "$([ "$(loki_count "{service_name=\"app\"} |= \`@timestamp\`")" -gt 0 ] \
             && echo True || echo False)"
 
-    check "PostgreSQL and Redis are shipped as well, for the context an app log lacks" "True" \
-        "$(curl -sS "$LOKI_URL/loki/api/v1/label/service_name/values" \
-            | python3 -c "
+    # OVER AN EXPLICIT 24-HOUR WINDOW, and that is the whole subtlety. Loki's label endpoints
+    # answer for a default window of the recent past, and PostgreSQL and Redis say almost nothing
+    # once they are up - so a stack that has been running quietly for a few hours has no db or
+    # cache lines in that default window and the label values come back as just the noisy
+    # services. The first version of this check asked for label values with no window and failed
+    # on a perfectly healthy stack. Ask for the lines themselves, over a window long enough to
+    # contain a start-up.
+    INFRA_SINCE="$(python3 -c "import time; print(int((time.time() - 86400) * 1e9))")"
+    INFRA_LINES="$(curl -sSG "$LOKI_URL/loki/api/v1/query_range" \
+        --data-urlencode 'query={service_name=~"db|cache"}' \
+        --data-urlencode "start=$INFRA_SINCE" \
+        --data-urlencode 'limit=100' 2>/dev/null \
+        | python3 -c "
 import json, sys
-v = json.load(sys.stdin).get('data', [])
-print('db' in v and 'cache' in v)" 2>/dev/null)"
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(0); raise SystemExit
+print(len({s['stream'].get('service_name') for s in d.get('data', {}).get('result', [])}))" 2>/dev/null || echo 0)"
+
+    check "PostgreSQL and Redis are shipped as well, for the context an app log lacks" 2 \
+        "$INFRA_LINES"
 
     # --- No sensitive data in logs -----------------------------------------------------------
     # The phase's fourth deliverable, asserted the only way that means anything: by searching the
@@ -1558,6 +1574,19 @@ print('db' in v and 'cache' in v)" 2>/dev/null)"
             "$(curl -sS "$ALLOY_URL/metrics" \
                 | awk '/^loki_write_sent_entries_total/ {total += $2} END {print (total > 0)}' \
                 | sed 's/^1$/True/; s/^0$/False/')"
+
+        # And that Docker AGREES it is healthy. Alloy answering /-/ready from the host says
+        # nothing about the container's own health check, which runs inside the container with a
+        # different shell - the first version of that check used CMD-SHELL, whose /bin/sh is dash
+        # and has no /dev/tcp builtin, so the container sat `unhealthy` for hours while shipping
+        # logs perfectly well. A health check nobody verifies is a status light wired to nothing.
+        if command -v docker >/dev/null 2>&1; then
+            check "and Docker's own health check for it agrees" "healthy" \
+                "$(docker inspect ecomdemo-alloy --format '{{.State.Health.Status}}' 2>/dev/null \
+                    || echo MISSING)"
+        else
+            skip "Alloy container health" "docker is not on the PATH"
+        fi
     else
         skip "Alloy checks" "no Alloy at $ALLOY_URL (set ALLOY_URL to override)"
     fi

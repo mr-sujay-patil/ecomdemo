@@ -76,6 +76,22 @@ class LoggingStackConfigTest {
         }
 
         @Test
+        @DisplayName("Alloy's health check runs under bash, because /dev/tcp is a bash builtin")
+        void alloyHealthCheckUsesBash() throws Exception {
+            String compose = Files.readString(COMPOSE);
+
+            // /dev/tcp is not a device. There is no such file and the kernel knows nothing about
+            // it; bash intercepts the name and opens a socket. Under `CMD-SHELL` the check runs
+            // in /bin/sh, which in the Alloy image is dash - it answers "Directory nonexistent",
+            // and the container is marked unhealthy for ever while shipping logs perfectly well.
+            // That is what this line is guarding, and it cost 371 consecutive failed checks to
+            // find, because a red health light on a container that works is easy to scroll past.
+            assertThat(compose)
+                    .contains("test: [\"CMD\", \"bash\", \"-c\", \"exec 3<>/dev/tcp/localhost/12345\"]");
+            assertThat(compose).doesNotContain("CMD-SHELL\", \"exec 3<>/dev/tcp");
+        }
+
+        @Test
         @DisplayName("Alloy labels the application's stream `service_name=app`")
         void alloyLabelsTheStream() throws Exception {
             String alloy = Files.readString(ALLOY);
