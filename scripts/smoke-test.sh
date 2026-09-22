@@ -186,6 +186,32 @@ fi
 PGDB="${POSTGRES_DB:-ecomdemo}"
 PGUSER_="${POSTGRES_USER:-ecomdemo}"
 
+# The Redis container, found the same way as the database one: the compose stack's name first.
+REDIS_CONTAINER="${REDIS_CONTAINER:-}"
+if [ -z "$REDIS_CONTAINER" ]; then
+    for candidate in ecomdemo-cache ecomdemo-redis; do
+        if command -v docker >/dev/null 2>&1 \
+            && docker exec "$candidate" true >/dev/null 2>&1; then
+            REDIS_CONTAINER="$candidate"
+            break
+        fi
+    done
+    REDIS_CONTAINER="${REDIS_CONTAINER:-ecomdemo-cache}"
+fi
+
+# redis_cli <args...> -> runs redis-cli, preferring one on PATH and falling back to the container.
+# Returns non-zero when neither is available, so the caller can SKIP rather than invent a pass.
+redis_cli() {
+    if command -v redis-cli >/dev/null 2>&1; then
+        redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>/dev/null
+    elif command -v docker >/dev/null 2>&1 \
+        && docker exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
+        docker exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
 # psql_query <sql> -> prints the result, one row per line, no headers or padding
 psql_query() {
     if command -v psql >/dev/null 2>&1; then
@@ -835,6 +861,96 @@ check "every order in the list belongs to the caller" "True" \
 # The probe product was ordered, so it cannot be deleted while an order references it (V1's
 # RESTRICT foreign key). Leaving it is correct; the order history is what keeps it alive.
 pass "the ownership probe order is left in history, as an order should be"
+
+# --------------------------------------------------------------------------------------------
+# Caching (Phase 13)
+# --------------------------------------------------------------------------------------------
+# Two questions: does a read populate the cache, and does a write invalidate it. Both are asked
+# of Redis directly, because a cache that is never read from and a cache that is never written to
+# look identical through the API.
+section "Caching"
+
+if redis_cli PING >/dev/null 2>&1; then
+    as_admin
+    STATUS="$(request POST /api/products \
+        '{"name":"Cache Probe","description":"read me twice","price":77.00,"stockQuantity":4,"category":"TEST"}')"
+    check "a cache probe product is created" "201" "$STATUS"
+    CACHE_ID="$(jget "d['id']")"
+    CACHE_KEY="product::$CACHE_ID"
+
+    # Creating evicts the listing but never creates an entry for an id that did not exist, so the
+    # key must be absent until something reads it.
+    redis_cli DEL "$CACHE_KEY" >/dev/null
+    check "no cache entry before the first read" "0" "$(redis_cli EXISTS "$CACHE_KEY" | tr -d '\r ')"
+
+    as_anonymous
+    check "reading the product returns 200" "200" "$(request GET "/api/products/$CACHE_ID")"
+    check "and the cache key now exists" "1" "$(redis_cli EXISTS "$CACHE_KEY" | tr -d '\r ')"
+
+    # JSON, not a Java-serialized blob - which is the whole reason redis-cli can be used to check
+    # any of this.
+    check "the entry is readable JSON" "True" \
+        "$(redis_cli GET "$CACHE_KEY" | python3 -c "
+import json,sys
+raw = sys.stdin.read().strip()
+try:
+    print(json.loads(raw)['name'] == 'Cache Probe')
+except Exception:
+    print(False)
+")"
+
+    # Everything expires. A missed eviction is wrong until the TTL clears it, so there has to be
+    # one.
+    CACHE_TTL="$(redis_cli TTL "$CACHE_KEY" | tr -d '\r ')"
+    if [ -n "${CACHE_TTL:-}" ] && [ "$CACHE_TTL" -gt 0 ]; then
+        pass "the entry expires on its own (TTL ${CACHE_TTL}s)"
+    else
+        fail "the entry expires on its own" "a positive TTL" "${CACHE_TTL:-<none>}"
+    fi
+
+    # Updating must not leave the old value behind. @CachePut writes the new one straight in, so
+    # the key is still present AND now holds the new name.
+    as_admin
+    STATUS="$(request PUT "/api/products/$CACHE_ID" \
+        '{"name":"Cache Probe v2","description":"updated","price":88.00,"stockQuantity":4,"category":"TEST"}')"
+    check "updating the product returns 200" "200" "$STATUS"
+    check "the cache entry is refreshed, not stale" "True" \
+        "$(redis_cli GET "$CACHE_KEY" | python3 -c "
+import json,sys
+raw = sys.stdin.read().strip()
+try:
+    print(json.loads(raw)['name'] == 'Cache Probe v2')
+except Exception:
+    print(False)
+")"
+
+    # And the API agrees with what is in Redis.
+    as_anonymous
+    request GET "/api/products/$CACHE_ID" >/dev/null
+    check "and the API serves the updated value" "Cache Probe v2" "$(jget "d['name']")"
+
+    # Deleting must remove the entry outright: a survivor would keep serving a product that no
+    # longer exists.
+    as_admin
+    request DELETE "/api/products/$CACHE_ID" >/dev/null
+    check "deleting the product evicts the entry" "0" "$(redis_cli EXISTS "$CACHE_KEY" | tr -d '\r ')"
+    as_anonymous
+    check "and the product is really gone" "404" "$(request GET "/api/products/$CACHE_ID")"
+    as_customer
+else
+    skip "a cache probe product is created" \
+        "no redis-cli on PATH and no running container named '$REDIS_CONTAINER'"
+    skip "no cache entry before the first read" "same as above"
+    skip "reading the product returns 200" "same as above"
+    skip "and the cache key now exists" "same as above"
+    skip "the entry is readable JSON" "same as above"
+    skip "the entry expires on its own" "same as above"
+    skip "updating the product returns 200" "same as above"
+    skip "the cache entry is refreshed, not stale" "same as above"
+    skip "and the API serves the updated value" "same as above"
+    skip "deleting the product evicts the entry" "same as above"
+    skip "and the product is really gone" "same as above"
+fi
 
 # --------------------------------------------------------------------------------------------
 # Summary
