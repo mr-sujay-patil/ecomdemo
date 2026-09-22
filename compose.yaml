@@ -138,6 +138,15 @@ services:
       # Overrides the Dockerfile's default when set in .env — useful for pinning a heap on a
       # laptop, or adding -XX:+HeapDumpOnOutOfMemoryError while debugging.
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError}
+    volumes:
+      # The batch working directory (Phase 14). A named volume rather than container-local space,
+      # because a restart of a failed import re-reads the file it was given BY PATH: if the
+      # staged upload vanished with the container, the run could never be resumed. The reports
+      # the nightly job writes are worth keeping for the same undramatic reason.
+      #
+      # The path matches BATCH_DIR in the Dockerfile, where the directory is created owned by the
+      # runtime user - which is what makes the volume inherit that ownership instead of root's.
+      - batch-data:/var/lib/ecomdemo/batch
     ports:
       - "${APP_PORT:-8080}:8080"
     # A limit matters here even locally, because it is what MaxRAMPercentage is a percentage OF.
@@ -153,3 +162,6 @@ volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
   postgres-data:
+
+  # Uploads staged for the import, the error files beside them, and the nightly sales reports.
+  batch-data:

@@ -12,7 +12,52 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 13: Caching (tag: pending, PR: pending)
+## Phase 14: Batch Processing (tag: pending, PR: pending)
+**What exists now:** Two Spring Batch jobs. `productImportJob` reads a product CSV uploaded by an
+ADMIN, validates each row, upserts by product name, skips bad rows up to a limit and writes them
+to an error file beside the upload; it is restartable. `salesReportJob` writes a CSV of one day's
+order count, revenue and best sellers, every night at 02:00. 276 tests (229 + 47), smoke test 156
+checks. Schema V8.
+**Key code:** `batch/BatchConfig` — **the critical one**: Spring Batch 6 defaults to
+`ResourcelessJobRepository` (in memory), so this extends `DefaultBatchConfiguration` (which is
+what makes Boot's auto-config back off) and supplies a `JdbcJobRepositoryFactoryBean`.
+`batch/ProductImportJobConfig` (chunk step, `chunk(size).transactionManager(...)` — the 6.0 API,
+not the deprecated two-arg form; `@StepScope` reader/writer/skip-listener reading
+`#{jobParameters['inputFile']}`), `ProductImportProcessor` (validation + upsert via
+`findFirstByNameOrderByIdAsc`), `ProductUpsertWriter` (saves the chunk; evicts the Phase 13 caches
+in `afterStep`, never inside the transaction), `RejectedRowRecorder` (SkipListener -> error file),
+`SalesReportJobConfig` (a TASKLET step for the summary, a CHUNK step over a `JdbcCursorItemReader`
+for the table), `SalesReportScheduler` (`@EnableScheduling` lives here), `BatchService`,
+`BatchController` (`/api/admin/batch/**`).
+**Config & infrastructure:** New dep `spring-boot-starter-batch` (Spring Batch 6.0.5).
+`spring.batch.job.enabled=false`. `ecomdemo.batch.{directory,chunk-size,skip-limit,sales-report-cron}`.
+Flyway **V7** = Spring Batch's own `schema-postgresql.sql` verbatim (Boot 4 has no
+`initialize-schema` property at all); **V8** = a non-unique index on `product.name`.
+`/api/admin/**` is ADMIN-only by prefix in `SecurityConfig`. Dockerfile creates
+`/var/lib/ecomdemo/batch` owned by the runtime user and sets `BATCH_DIR`; compose mounts the
+`batch-data` named volume there. `spring.servlet.multipart.max-file-size=16MB`. Tests point
+`ecomdemo.batch.directory` at `./target/...`.
+**Tests:** `ProductImportProcessorTest`, `RejectedRowRecorderTest`, `BatchControllerTest`,
+`BatchJobRepositoryTest` (asserts ROWS in the BATCH_ tables), `SalesReportScheduleTest` (cron set
+to every second; costs a context of its own), `ProductImportJobIT` (10,000 rows + restart),
+`SalesReportJobIT`. `FlywayMigrationTest` and `OpenApiDocumentationTest` extended.
+Test report: `docs/test-reports/phase-14.md`.
+**Gotchas:** (1) The in-memory JobRepository above — every behavioural test passed against it
+while the BATCH_ tables stayed empty; only an assertion about rows caught it, and the tell was
+every execution reporting `id=1`. (2) A restart resumes from the last COMMIT, so rows that were
+SKIPPED are behind it and are NOT reconsidered however well the file is fixed; they come back by
+re-importing, which is safe because the import upserts. (3) The 6.0 chunk step gives
+`rollbackCount == 0` on a run with skips (no item-by-item replay) and wraps a skip-limit failure
+in `FatalStepExecutionException: Unable to process chunk` — hence `JobExecutionResponse` now
+reports the whole cause chain. (4) The batch directory cannot live under `/app`: root-owned, and
+the app is not. (5) Spring's cron has SIX fields.
+**Follow-ups (not done, out of scope):** a manual trigger endpoint for the sales report; 202 +
+polling once jobs run long enough to time out a request; a supplier SKU in a unique column
+instead of keying the upsert on a non-unique name; restart across a container replacement is
+inferred from where the state lives, not tested; `@Scheduled` fires in every instance, so a real
+deployment wants a leader election rather than a JobRepository collision.
+
+## Phase 13: Caching (tag: phase-13-complete, PR #15)
 **What exists now:** The catalogue is served from Redis. `GET /api/products` and
 `/api/products/{id}` are `@Cacheable`; create/update/delete keep the cache honest. Per-cache TTL
 (product 10 min, listing 2 min), JSON values typed per cache, hit/miss logging, and a
@@ -44,38 +89,3 @@ PostgreSQL too - verified one of each across the whole Failsafe run.
 **Follow-ups (not done, out of scope):** cache hit-rate metrics - Phase 15. Making the browsing
 view's stock accurate without the evict-before-commit race. Redis `requirepass` and a replica.
 Redis data types beyond string-with-TTL (hashes, sorted sets, streams) need a RedisTemplate.
-
-## Phase 12: Code Quality (tag: phase-12-complete, PR #14)
-**What exists now:** Coverage is measured across BOTH suites and the project passes a quality
-gate. JaCoCo runs two agents (Surefire and Failsafe fork separate JVMs) and merges the exec files
-at `verify`: 96.1% overall, 97.4% line, 81.0% branch. SonarQube Community runs in its own compose
-stack; the first analysis found 16 issues / 92 min debt / reliability D / security D, and the
-project now reports **0 bugs, 0 vulnerabilities, 0 smells, 0 debt, A/A/A, QUALITY GATE OK**.
-220 tests and the 125-check smoke test are unchanged. Schema still V6.
-**Key code:** `pom.xml` — jacoco 0.8.15 with `prepare-agent` + `prepare-agent-integration` +
-`merge` + `report` (declared AFTER failsafe so the verify-phase executions run in the right
-order), Surefire/Failsafe argLines reading `@{jacocoUnitArgLine}` / `@{jacocoItArgLine}` with
-empty defaults, `sonar.coverage.jacoco.xmlReportPaths` -> the MERGED xml, `sonar.coverage.exclusions`
-for `EcomdemoApplication` and `**/dto/**`, sonar-maven-plugin 5.8.0.7211 pinned and unbound.
-`compose.sonar.yaml` (sonarqube + its own postgres, three named volumes, a status-endpoint
-healthcheck). `scripts/sonar-setup.sh` — the quality gate as code, idempotent.
-**Config & infrastructure:** No application change. New: `compose.sonar.yaml`,
-`scripts/sonar-setup.sh`. Quality gate "EcomDemo way" = Sonar's four defaults +
-`new_reliability_rating` and `new_security_rating` at A; every condition on NEW code.
-**Tests:** No test added or removed. Fifteen Sonar findings fixed in place — the real bug was
-`new SecureRandom()` per call in `JwtConfig`; `OrderAuditService.record` -> `recordAttempt`;
-`throws Exception` dropped from `securityFilterChain` (Spring Security 7 no longer declares it,
-confirmed by compiling); `RestTemplateBuilder.rootUri` (deprecated for removal) -> a
-`DefaultUriBuilderFactory`; five `assertThatThrownBy` lambdas narrowed to one throwing call; four
-minor test smells. Test report: `docs/test-reports/phase-12.md`.
-**Gotchas:** `sonarqube:lts-community` still resolves to 9.9 and dies mid-migration against
-PostgreSQL 18 — pin an exact `*-community` build; the LTA tags are paid-tier only. A literal
-`<argLine>` OVERRIDES JaCoCo's injected one, so coverage silently reads 0%; `@{...}` late
-evaluation is the fix. A Sonar issue resolved as "Accepted" lives only in the server database and
-comes back when the volume is wiped — `@SuppressWarnings("java:S4502")` puts the decision in Git.
-Writing `scripts/sonar-setup.sh` surfaced three shell bugs worth remembering: SonarQube answers a
-bad password with 401 and an EMPTY body; `x="$(fn)"` runs `fn` in a subshell so globals it sets
-are discarded; and `curl` needs `-G --data-urlencode` for a GET parameter containing a space.
-**Follow-ups (not done, out of scope):** SonarQube Cloud + PR decoration so the gate actually
-blocks a merge — optional in the phase file, deliberately skipped, and the obvious next step.
-Raising branch coverage (81%) rather than line coverage. Image scanning — Phase 31.
