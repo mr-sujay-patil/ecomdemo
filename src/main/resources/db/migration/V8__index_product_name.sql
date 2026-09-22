@@ -1,0 +1,14 @@
+-- An index on product.name, for the CSV import.
+--
+-- The import treats the product name as the natural key of a catalogue feed: every row asks
+-- "is there already a product called this?" before deciding whether to insert or update. Without
+-- an index that is a sequential scan of the whole catalogue PER ROW - quadratic in the size of
+-- the file, and a ten-thousand-row import is where quadratic stops being an abstraction.
+--
+-- NOT a unique index, deliberately. The API has allowed two products to share a name since
+-- Phase 1 and the seed data is only unique by accident; adding UNIQUE here would turn an
+-- existing, working request into a 500 the first time somebody reused a name. The import
+-- therefore updates the OLDEST match (see ProductRepository.findFirstByNameOrderByIdAsc), and
+-- the honest fix - a supplier SKU in a unique column - is recorded in docs/decisions.md as
+-- deferred rather than pretended away.
+CREATE INDEX idx_product_name ON product (name);

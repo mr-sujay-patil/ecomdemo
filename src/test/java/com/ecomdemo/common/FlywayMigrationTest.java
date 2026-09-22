@@ -46,13 +46,13 @@ class FlywayMigrationTest {
             """;
 
     @Test
-    @DisplayName("V1 to V7 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V8 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -93,7 +93,8 @@ class FlywayMigrationTest {
                 "add product version and order audit",
                 "add users",
                 "cart and orders per user",
-                "batch job repository");
+                "batch job repository",
+                "index product name");
     }
 
     @Test
@@ -285,6 +286,18 @@ class FlywayMigrationTest {
                         "SELECT count(*) FROM information_schema.table_constraints "
                                 + "WHERE upper(table_name) = 'BATCH_JOB_INSTANCE' "
                                 + "AND constraint_type = 'UNIQUE'",
+                        Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("V8 indexed product.name, which the import looks every row up by")
+    void indexesTheProductName() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.indexes "
+                                + "WHERE upper(index_name) = 'IDX_PRODUCT_NAME'",
                         Integer.class))
                 .isEqualTo(1);
     }
