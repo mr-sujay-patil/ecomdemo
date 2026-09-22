@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 9: JWT Authentication
 - **Branch:** feature/phase-09-jwt
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #9 — raised, awaiting review
+- **Waiting for user:** YES — review and merge PR #9, then say `merged, continue`
 
 ## Phase 08 merge verification (passed 2026-09-22)
 PR #8 MERGED with a merge commit (0af4342, 2 parents: fe2e02c + 4569a3e); branch is an ancestor
@@ -32,7 +32,7 @@ tag `phase-08-complete` pushed.
       a tampered token -> 401, an expired token -> 401 with a short test expiry)
 - [x] Testing protocol run in full + docs/test-reports/phase-09.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 07 archived), tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#9)
 
 **Out of scope, suggest only:** the phase file lists a refresh token endpoint as *optional*.
 Per hard rule 7 it is NOT being built; it will be suggested in the PR.
@@ -66,11 +66,21 @@ Per hard rule 7 it is NOT being built; it will be suggested in the PR.
 - No refresh token (optional in the phase file, out of scope by hard rule 7).
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v6**.
-`docker start ecomdemo-postgres` if it is down. The application is stopped, no stray Java
-processes. Docker Desktop must stay running (Testcontainers needs it for `./mvnw verify`).
-The database holds three accounts: `admin` (seeded by V5) plus `smoke-customer` and
-`smoke-customer-b`, created by the smoke test. All passwords are BCrypt hashes.
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v6**
+(unchanged this phase). `docker start ecomdemo-postgres` if it is down. The application is
+stopped, no stray Java processes. Docker Desktop must stay running (Testcontainers needs it for
+`./mvnw verify`). The database holds three accounts: `admin` (seeded by V5) plus `smoke-customer`
+and `smoke-customer-b`, created by the smoke test. All passwords are BCrypt hashes.
+
+To run the app the way this phase intends:
+`JWT_SECRET='at-least-32-characters-of-random-text' ./mvnw spring-boot:run`
+Without it the app still starts, on a random key, and warns that tokens die with the process.
 
 ## Next action
-Push the branch and raise the PR (`gh pr create --base main`), then STOP for the user's review.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
+  `./mvnw clean verify` (needs Docker running) and `scripts/smoke-test.sh` (needs the
+  `ecomdemo-postgres` container up and the app running), the git-workflow Verification Checklist,
+  then tag and push `phase-09-complete`, then start Phase 10 (`docs/phases/phase-10-docker.md`).
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
