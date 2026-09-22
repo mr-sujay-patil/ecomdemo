@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 15: Metrics & Monitoring
 - **Branch:** feature/phase-15-metrics
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -22,8 +22,8 @@ container recreate); `scripts/smoke-test.sh` -> 156 passed, 0 failed, 0 skipped.
 Tag `phase-14-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Exposed endpoints: health (with liveness and readiness groups), info, metrics, prometheus
-- [ ] Business metrics: `orders.placed`, `order.value`, and a checkout timer
+- [x] Exposed endpoints: health (with liveness and readiness groups), info, metrics, prometheus
+- [x] Business metrics: `orders.placed`, `order.value`, and a checkout timer
 - [ ] Prometheus and Grafana in Compose, with a provisioned dashboard and one alert rule
 - [ ] Done when: the dashboard shows live traffic and business metrics
 - [ ] Smoke test additions: after placing an order, `/actuator/prometheus` shows
@@ -34,6 +34,7 @@ Tag `phase-14-complete` pushed.
 - [ ] PR raised, CI green
 
 ## Last test run
+- 2026-09-22: `./mvnw test` -> 236 unit tests (was 229), 0 failures, 0 skipped.
 - 2026-09-22 (on `main`, phase 14 verification): `./mvnw clean verify` -> BUILD SUCCESS,
   229 + 47, 0 failures, 0 skipped. `scripts/smoke-test.sh` -> 156 passed, 0 failed, 0 skipped.
 - Nothing run yet for phase 15.
@@ -52,7 +53,7 @@ Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomd
 JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-Phase 15 is branched and the housekeeping commit is in. Move to IMPLEMENTING and work the
-checklist top-down, starting with Actuator endpoints and the health groups, then the business
-metrics, then the Prometheus + Grafana compose services. Phase file:
-`docs/phases/phase-15-metrics.md`. Do NOT touch anything outside phase 15 scope.
+Actuator + the three business meters are committed (af24a9d). Next: the Prometheus and Grafana
+compose services with a provisioned datasource, dashboard and one alert rule, then the
+Dockerfile healthcheck moved onto /actuator/health/readiness, then the smoke test additions.
+Phase file: `docs/phases/phase-15-metrics.md`.
