@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 15: Metrics & Monitoring
 - **Branch:** feature/phase-15-metrics
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #17 — raised, awaiting CI
+- **Waiting for user:** YES — review and merge PR #17, then say `merged, continue`
 
 ## Phase 14 merge verification (passed 2026-09-22)
 PR #16 MERGED with a merge commit (a5ff674, 2 parents: d674e1c + e11d777); the branch is an
@@ -32,7 +32,7 @@ Tag `phase-14-complete` pushed.
 - [x] Testing protocol run in full + docs/test-reports/phase-15.md
 - [x] README section, docs/decisions.md entries (16), RECENT.md rotation (Phase 13 archived),
       tracker -> 🔵
-- [ ] PR raised, CI green
+- [x] PR raised (#17)
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 241 (was 229) + Failsafe 62
@@ -88,6 +88,11 @@ Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomd
 JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-Everything except the PR is done and committed. Push the branch, `gh pr create --base main` with
-the template filled in, set the step to PR_OPEN, then **STOP** and send the Phase Review Report
-(execution-protocol §6). Do NOT merge unless the user says exactly `approved, merge it`.
+STOPPED at the mandatory post-PR stop point. PR #17 is open:
+https://github.com/mr-sujay-patil/ecomdemo/pull/17
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
+  tag `phase-15-complete` and start Phase 16 (`docs/phases/phase-16-logging.md`).
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
+- One ⚠️ is outstanding for the user: look at the Grafana dashboard's RENDER (its data is fully
+  verified). Steps in `docs/test-reports/phase-15.md` §8.
