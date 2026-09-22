@@ -1,6 +1,6 @@
 package com.ecomdemo.security;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

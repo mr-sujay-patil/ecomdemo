@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.support.TestData;
 import java.time.Instant;
 import java.util.List;

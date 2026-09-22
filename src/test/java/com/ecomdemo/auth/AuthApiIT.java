@@ -1,11 +1,11 @@
 package com.ecomdemo.auth;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.auth.dto.LoginRequest;
 import com.ecomdemo.auth.dto.TokenResponse;
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.security.JwtConfig;
 import com.ecomdemo.support.IntegrationTest;

@@ -168,7 +168,7 @@ class SalesReportJobIT extends IntegrationTest {
         // an instance that has COMPLETED will not run again. That is the JobRepository doing the
         // job a lock file or a "have I run today?" flag would otherwise be written to do.
         assertThat(org.assertj.core.api.Assertions
-                .catchThrowableOfType(com.ecomdemo.common.ConflictException.class,
+                .catchThrowableOfType(com.ecomdemo.shared.ConflictException.class,
                         () -> batchService.runSalesReport(day)))
                 .isNotNull()
                 .hasMessageContaining("already been completed");

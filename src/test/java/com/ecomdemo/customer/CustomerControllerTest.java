@@ -11,7 +11,7 @@ import static org.springframework.http.HttpStatus.CREATED;
 import static org.springframework.http.HttpStatus.OK;
 import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
-import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
 import com.ecomdemo.customer.dto.UpdateProfileRequest;

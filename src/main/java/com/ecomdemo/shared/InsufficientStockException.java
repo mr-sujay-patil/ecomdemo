@@ -1,4 +1,4 @@
-package com.ecomdemo.common;
+package com.ecomdemo.shared;
 
 /** Thrown when an order asks for more units than are in stock. Mapped to HTTP 409. */
 public class InsufficientStockException extends ConflictException {

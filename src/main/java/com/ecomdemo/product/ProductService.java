@@ -1,7 +1,7 @@
 package com.ecomdemo.product;
 
 import com.ecomdemo.cache.CacheNames;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
 import java.util.List;

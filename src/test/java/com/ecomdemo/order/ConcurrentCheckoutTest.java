@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
-import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.customer.UserRepository;

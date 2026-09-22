@@ -1,4 +1,4 @@
-package com.ecomdemo.common;
+package com.ecomdemo.shared;
 
 import org.springframework.security.oauth2.jwt.JwtClaimNames;
 

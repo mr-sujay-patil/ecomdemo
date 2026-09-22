@@ -13,8 +13,8 @@ import static org.mockito.Mockito.when;
 
 import com.ecomdemo.cart.Cart;
 import com.ecomdemo.cart.CartService;
-import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.common.InsufficientStockException;
+import com.ecomdemo.shared.ConflictException;
+import com.ecomdemo.shared.InsufficientStockException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderItemResponse;

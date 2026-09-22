@@ -1,4 +1,4 @@
-package com.ecomdemo.common;
+package com.ecomdemo.shared;
 
 /**
  * Thrown when an operation kept losing an optimistic lock and ran out of retries. Mapped to

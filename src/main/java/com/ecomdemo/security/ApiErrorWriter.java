@@ -1,6 +1,6 @@
 package com.ecomdemo.security;
 
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import org.springframework.http.HttpStatus;

@@ -1,9 +1,9 @@
 package com.ecomdemo.order;
 
-import com.ecomdemo.common.ConcurrentUpdateException;
-import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.common.InsufficientStockException;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.ConcurrentUpdateException;
+import com.ecomdemo.shared.ConflictException;
+import com.ecomdemo.shared.InsufficientStockException;
+import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.metrics.CheckoutMetrics;
 import com.ecomdemo.metrics.CheckoutOutcome;
 import com.ecomdemo.order.dto.OrderResponse;

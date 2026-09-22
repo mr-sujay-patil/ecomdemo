@@ -1,6 +1,6 @@
 package com.ecomdemo.support;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.customer.UserRepository;

@@ -1,4 +1,4 @@
-package com.ecomdemo.common;
+package com.ecomdemo.shared;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 

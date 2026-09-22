@@ -1,6 +1,6 @@
 package com.ecomdemo.auth;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.auth.dto.TokenResponse;

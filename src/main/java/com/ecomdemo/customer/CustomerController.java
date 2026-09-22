@@ -1,6 +1,6 @@
 package com.ecomdemo.customer;
 
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
 import com.ecomdemo.customer.dto.UpdateProfileRequest;

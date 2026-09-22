@@ -1,4 +1,4 @@
-package com.ecomdemo.common;
+package com.ecomdemo.shared;
 
 import com.ecomdemo.security.ApiErrorAuthenticationEntryPoint;
 import java.util.stream.Collectors;

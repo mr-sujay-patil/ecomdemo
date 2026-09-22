@@ -2,7 +2,7 @@ package com.ecomdemo.auth;
 
 import com.ecomdemo.auth.dto.LoginRequest;
 import com.ecomdemo.auth.dto.TokenResponse;
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;

@@ -15,8 +15,8 @@ import static org.springframework.http.HttpStatus.NO_CONTENT;
 import static org.springframework.http.HttpStatus.OK;
 import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
-import com.ecomdemo.common.GlobalExceptionHandler;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.GlobalExceptionHandler;
+import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
 import com.ecomdemo.support.WithSecurityRules;

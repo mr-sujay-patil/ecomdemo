@@ -9,10 +9,10 @@ import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.OK;
 import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
-import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.common.GlobalExceptionHandler;
-import com.ecomdemo.common.InsufficientStockException;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.ConflictException;
+import com.ecomdemo.shared.GlobalExceptionHandler;
+import com.ecomdemo.shared.InsufficientStockException;
+import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import java.math.BigDecimal;

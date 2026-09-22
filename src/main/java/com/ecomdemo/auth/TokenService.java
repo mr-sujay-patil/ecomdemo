@@ -1,6 +1,6 @@
 package com.ecomdemo.auth;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.auth.dto.TokenResponse;
 import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;

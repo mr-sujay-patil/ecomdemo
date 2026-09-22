@@ -2,7 +2,7 @@ package com.ecomdemo.product;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
 import com.ecomdemo.support.IntegrationTest;

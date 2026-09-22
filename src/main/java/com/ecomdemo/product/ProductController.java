@@ -1,6 +1,6 @@
 package com.ecomdemo.product;
 
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
 import io.swagger.v3.oas.annotations.Operation;

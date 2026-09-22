@@ -2,7 +2,7 @@ package com.ecomdemo.batch;
 
 import com.ecomdemo.batch.dto.JobExecutionResponse;
 import com.ecomdemo.batch.dto.ProductImportResponse;
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;

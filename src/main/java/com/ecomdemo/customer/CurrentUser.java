@@ -1,6 +1,6 @@
 package com.ecomdemo.customer;
 
-import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.security.AppUserDetails;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;

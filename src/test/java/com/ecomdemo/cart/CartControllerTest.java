@@ -16,7 +16,7 @@ import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.support.WithSecurityRules;
 import java.math.BigDecimal;
 import java.util.List;
