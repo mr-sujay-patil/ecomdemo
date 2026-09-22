@@ -12,7 +12,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimNames;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
@@ -121,19 +120,4 @@ public class JwtConfig {
         return decoder;
     }
 
-    /** The claim names this application writes and reads. */
-    public static final class Claims {
-
-        /** The account's database id. Saves a lookup by username on every request. */
-        public static final String USER_ID = "uid";
-
-        /** The roles, without the {@code ROLE_} prefix Spring Security adds back on the way in. */
-        public static final String ROLES = "roles";
-
-        /** The username. Standard: {@link JwtClaimNames#SUB}. */
-        public static final String SUBJECT = JwtClaimNames.SUB;
-
-        private Claims() {
-        }
-    }
 }

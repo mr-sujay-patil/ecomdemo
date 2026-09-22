@@ -10,7 +10,7 @@ import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.stereotype.Service;

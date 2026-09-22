@@ -1,5 +1,6 @@
 package com.ecomdemo.auth;
 
+import com.ecomdemo.common.TokenClaims;
 import com.ecomdemo.auth.dto.TokenResponse;
 import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;
@@ -68,8 +69,8 @@ public class TokenService {
                 .issuedAt(issuedAt)
                 .expiresAt(expiresAt)
                 .subject(user.getUsername())
-                .claim(JwtConfig.Claims.USER_ID, user.getId())
-                .claim(JwtConfig.Claims.ROLES, roles)
+                .claim(TokenClaims.USER_ID, user.getId())
+                .claim(TokenClaims.ROLES, roles)
                 .build();
 
         // The header is signed along with the payload, which is what stops an attacker rewriting

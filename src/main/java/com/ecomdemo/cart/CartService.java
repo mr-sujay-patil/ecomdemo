@@ -6,7 +6,7 @@ import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.common.NotFoundException;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

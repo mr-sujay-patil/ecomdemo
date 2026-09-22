@@ -16,7 +16,7 @@ import com.ecomdemo.common.NotFoundException;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;

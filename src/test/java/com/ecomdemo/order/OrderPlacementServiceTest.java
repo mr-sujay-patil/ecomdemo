@@ -22,7 +22,7 @@ import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

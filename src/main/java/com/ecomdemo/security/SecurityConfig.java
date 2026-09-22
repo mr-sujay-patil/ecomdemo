@@ -1,5 +1,6 @@
 package com.ecomdemo.security;
 
+import com.ecomdemo.common.TokenClaims;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -234,7 +235,7 @@ public class SecurityConfig {
      */
     private JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName(JwtConfig.Claims.ROLES);
+        authorities.setAuthoritiesClaimName(TokenClaims.ROLES);
         authorities.setAuthorityPrefix(AppUserDetails.ROLE_PREFIX);
 
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();

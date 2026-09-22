@@ -11,7 +11,7 @@ import com.ecomdemo.common.ConflictException;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
 import com.ecomdemo.customer.dto.UpdateProfileRequest;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;

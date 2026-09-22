@@ -19,7 +19,7 @@ import com.ecomdemo.metrics.CheckoutMetrics;
 import com.ecomdemo.metrics.CheckoutOutcome;
 import com.ecomdemo.metrics.MetricNames;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;

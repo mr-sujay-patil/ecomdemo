@@ -23,6 +23,13 @@
 			format; an older one fails to instrument rather than quietly under-reporting.
 		-->
 		<jacoco.version>0.8.15</jacoco.version>
+
+		<!--
+			Pinned here because Spring Boot 4.1.1 does not manage Spring Modulith at all. See the
+			dependency block below for why that is survivable: these jars are test-scoped and the
+			application context is never built from them.
+		-->
+		<spring-modulith.version>1.4.1</spring-modulith.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
 		<!--
@@ -347,6 +354,55 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-restclient</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			Spring Modulith, TEST SCOPE ONLY, and both halves of that are deliberate.
+
+			Scope first. This phase wants three things: named modules, a test that fails when one
+			reaches into another's internals, and generated diagrams. All three are build-time
+			concerns - `ApplicationModules` reads the package structure with ArchUnit and
+			`Documenter` writes PlantUML from it. None of them run in production, so none of them
+			belong on the runtime classpath. `spring-modulith-starter-core` would also pull the
+			runtime auto-configuration and the event publication registry, which this phase does
+			not use: Phase 18 already built a durable outbox, and a second event-persistence
+			mechanism alongside it would be two answers to one question.
+
+			Version second, and this is the sharp edge. Spring Boot 4.1.1 does NOT manage Spring
+			Modulith - it is absent from `spring-boot-dependencies` - and the newest GA line,
+			1.4.x, targets Boot 3.5 and Spring Framework 6.2. Keeping it test-scoped is what makes
+			that mismatch tolerable: the application context is never assembled from these jars,
+			so the Boot-4 auto-configuration changes that would break the starter cannot be
+			reached. `spring-modulith-core` needs little more than ArchUnit and Spring's core
+			type-scanning, and `ModularityTest` is the proof that it holds on this stack.
+		-->
+		<!--
+			The annotations only - `@ApplicationModule` and `@NamedInterface` - and these DO go on
+			main source, because a module's boundary is declared by the code that owns it and not
+			by the test that checks it. COMPILE scope for that reason, unlike the two below.
+
+			It is an annotations jar in practice: its three dependencies (spring-boot-autoconfigure,
+			spring-tx, spring-context) are all declared OPTIONAL, so none of them is pulled in
+			transitively and none of Boot's auto-configuration comes with it. That is what makes it
+			safe to put on the runtime classpath of an application whose Boot version this Modulith
+			line does not officially target.
+		-->
+		<dependency>
+			<groupId>org.springframework.modulith</groupId>
+			<artifactId>spring-modulith-api</artifactId>
+			<version>${spring-modulith.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.modulith</groupId>
+			<artifactId>spring-modulith-core</artifactId>
+			<version>${spring-modulith.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.modulith</groupId>
+			<artifactId>spring-modulith-docs</artifactId>
+			<version>${spring-modulith.version}</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

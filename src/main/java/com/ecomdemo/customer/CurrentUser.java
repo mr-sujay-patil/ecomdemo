@@ -1,7 +1,7 @@
-package com.ecomdemo.security;
+package com.ecomdemo.customer;
 
-import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.UserRepository;
+import com.ecomdemo.common.TokenClaims;
+import com.ecomdemo.security.AppUserDetails;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -19,6 +19,24 @@ import org.springframework.stereotype.Component;
  *
  * <p>Wrapping the static holder in a bean is what makes the services that use it testable: a
  * unit test injects a stub of this class instead of having to populate a thread-local.
+ *
+ * <h2>Why this lives in {@code customer} and not in {@code security} (Phase 19)</h2>
+ *
+ * <p>It used to live in {@code security}, and that created the application's only dependency
+ * CYCLE: {@code security} needs {@code User} and {@code UserRepository} to load an account, while
+ * {@code customer} needed this class to find out who was calling. Two modules that each require
+ * the other cannot be reasoned about separately, cannot be tested separately, and cannot be
+ * extracted separately — which matters directly to Phase 20.
+ *
+ * <p>Moving one class broke it, and the move is right on its own merits rather than merely
+ * convenient. The question this class answers — "which {@code User} is acting?" — is a question
+ * about the customer domain; reading the {@code SecurityContextHolder} is just how it is
+ * answered. It still uses Spring Security the LIBRARY, which is infrastructure any module may
+ * use, but it no longer depends on this application's {@code security} module.
+ *
+ * <p>The cycle was not the only thing that went. {@code cart} and {@code order} imported nothing
+ * else from {@code security}, so their dependency on it disappeared with this file: three edges
+ * removed by moving one class. {@code ModularityTest} is what keeps it that way.
  *
  * <p><strong>Since Phase 9 the principal is a {@link Jwt}.</strong> Under HTTP Basic it was an
  * {@link AppUserDetails} built from a database row read on that very request; now it is the
@@ -50,13 +68,13 @@ public class CurrentUser {
      * everywhere and working until the user table passes two billion rows.
      */
     public Long id() {
-        Object claim = token().getClaim(JwtConfig.Claims.USER_ID);
+        Object claim = token().getClaim(TokenClaims.USER_ID);
         if (claim instanceof Number number) {
             return number.longValue();
         }
         throw new IllegalStateException(
                 "The token carries no usable '%s' claim. It was issued by something other than "
-                                .formatted(JwtConfig.Claims.USER_ID)
+                                .formatted(TokenClaims.USER_ID)
                         + "this application's login endpoint.");
     }
 

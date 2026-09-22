@@ -1,12 +1,10 @@
-package com.ecomdemo.security;
+package com.ecomdemo.customer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.UserRepository;
+import com.ecomdemo.common.TokenClaims;
 import com.ecomdemo.support.TestData;
 import java.time.Instant;
 import java.util.List;
@@ -49,8 +47,8 @@ class CurrentUserTest {
                 .issuedAt(Instant.now())
                 .expiresAt(Instant.now().plusSeconds(900))
                 .subject("asha")
-                .claim(JwtConfig.Claims.USER_ID, userIdClaim)
-                .claim(JwtConfig.Claims.ROLES, List.of("CUSTOMER"))
+                .claim(TokenClaims.USER_ID, userIdClaim)
+                .claim(TokenClaims.ROLES, List.of("CUSTOMER"))
                 .build();
         SecurityContextHolder.getContext()
                 .setAuthentication(new JwtAuthenticationToken(

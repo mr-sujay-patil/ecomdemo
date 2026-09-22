@@ -1,5 +1,6 @@
 package com.ecomdemo.auth;
 
+import com.ecomdemo.common.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.auth.dto.TokenResponse;
@@ -61,9 +62,9 @@ class TokenServiceTest {
         assertThat(jwt.getSubject()).isEqualTo("asha");
         // Assigned to Object first: getClaim is generic (<T> T), so passing it straight to
         // assertThat leaves the compiler unable to choose an overload.
-        Object userIdClaim = jwt.getClaim(JwtConfig.Claims.USER_ID);
+        Object userIdClaim = jwt.getClaim(TokenClaims.USER_ID);
         assertThat(userIdClaim).hasToString("7");
-        assertThat(jwt.getClaimAsStringList(JwtConfig.Claims.ROLES)).containsExactly("CUSTOMER");
+        assertThat(jwt.getClaimAsStringList(TokenClaims.ROLES)).containsExactly("CUSTOMER");
         // Read as a string, not via getIssuer(): that accessor insists on a URL, and this
         // application's issuer is a plain name. The decoder's issuer validator compares strings.
         assertThat(jwt.getClaimAsString("iss")).isEqualTo("ecomdemo-test");
@@ -81,7 +82,7 @@ class TokenServiceTest {
 
         // Then: ROLE_ is Spring Security's convention, not part of this API's contract. It is
         // stripped here and added back by the converter in SecurityConfig.
-        assertThat(jwt.getClaimAsStringList(JwtConfig.Claims.ROLES)).containsExactly("ADMIN");
+        assertThat(jwt.getClaimAsStringList(TokenClaims.ROLES)).containsExactly("ADMIN");
     }
 
     @Test
