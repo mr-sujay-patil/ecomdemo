@@ -6,8 +6,16 @@
 # check. Exits non-zero if any check fails, which makes it a growing regression suite: every
 # later phase adds checks here and none are ever removed.
 #
-#   Usage:  ./mvnw spring-boot:run          # in one terminal
+#   Usage:  docker compose up --build       # in one terminal (since Phase 10)
 #           scripts/smoke-test.sh           # in another
+#
+#   Still works against a locally run application too:
+#           ./mvnw spring-boot:run
+#           scripts/smoke-test.sh
+#
+# The script only ever talks HTTP, so it does not care which of the two is behind BASE_URL. The
+# one place that has to know is the Flyway section, which needs SQL: it finds the database
+# container by name, trying the compose stack's first.
 #
 # Since Phase 8 the API needs credentials, and since Phase 9 those credentials are exchanged
 # once for a token. The script logs in as the ADMIN seeded by migration V5 for catalogue writes,
@@ -158,6 +166,38 @@ register() {
 # jget <python expression over `d`> -> prints the value from the last response body
 jget() {
     python3 -c "import json;d=json.load(open('$BODY'));print($1)" 2>/dev/null
+}
+
+# The database container's name. Phase 10's compose stack calls it `ecomdemo-db`; the
+# hand-started container from Phases 4-9 was `ecomdemo-postgres`. Both are tried, newest first,
+# so the script works against either without being told which - and POSTGRES_CONTAINER still
+# overrides if somebody names it something else entirely.
+POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-}"
+if [ -z "$POSTGRES_CONTAINER" ]; then
+    for candidate in ecomdemo-db ecomdemo-postgres; do
+        if command -v docker >/dev/null 2>&1 \
+            && docker exec "$candidate" true >/dev/null 2>&1; then
+            POSTGRES_CONTAINER="$candidate"
+            break
+        fi
+    done
+    POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-ecomdemo-db}"
+fi
+PGDB="${POSTGRES_DB:-ecomdemo}"
+PGUSER_="${POSTGRES_USER:-ecomdemo}"
+
+# psql_query <sql> -> prints the result, one row per line, no headers or padding
+psql_query() {
+    if command -v psql >/dev/null 2>&1; then
+        PGPASSWORD="${POSTGRES_PASSWORD:-ecomdemo}" psql -qtAX \
+            -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
+            -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
+    elif command -v docker >/dev/null 2>&1 \
+        && docker exec "$POSTGRES_CONTAINER" true >/dev/null 2>&1; then
+        docker exec "$POSTGRES_CONTAINER" psql -qtAX -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
+    else
+        return 1
+    fi
 }
 
 # --------------------------------------------------------------------------------------------
@@ -503,7 +543,9 @@ check "the Swagger UI javascript bundle is served" "200" "$STATUS"
 #   scripts/smoke-test.sh          # second run: the probe from before the restart is still there
 #
 # The probe id is remembered in a small state file, ignored by Git, NOT in the database - reading
-# it back out of the API is the whole point of the check.
+# it back out of the API is the whole point of the check. The file also records WHICH database the
+# probe was left in, so that switching databases (`docker compose down -v`, or moving off the
+# Phase 4-9 container) reads as a first run rather than as lost data.
 section "Persistence across restarts"
 
 STATE_FILE="${SMOKE_STATE_FILE:-.smoke-state}"
@@ -511,11 +553,31 @@ STATE_FILE="${SMOKE_STATE_FILE:-.smoke-state}"
 PROBE_ID=""
 PROBE_NAME=""
 PROBE_PRICE=""
+PROBE_DB_ID=""
+
+# Which database the probe was left in. PostgreSQL stamps every cluster with a unique
+# system_identifier at initdb time, so this changes when - and only when - the data directory is
+# recreated: `docker compose down -v`, or moving from the hand-started container of Phases 4-9 to
+# the compose stack's own volume.
+#
+# Without it, switching databases fails this check for a reason that has nothing to do with
+# persistence: the probe really is gone, because it was in a different database. Recording the
+# identity lets the script tell "the data did not survive a restart" (a real failure) apart from
+# "this is a different database" (a first run).
+CURRENT_DB_ID="$(psql_query "SELECT system_identifier FROM pg_control_system();" 2>/dev/null | tr -d '\r ')"
 
 if [ -f "$STATE_FILE" ]; then
     # shellcheck disable=SC1090
     . "$STATE_FILE"
-    STATUS="$(request GET "/api/products/${PROBE_ID:-0}")"
+fi
+
+if [ -n "${PROBE_DB_ID:-}" ] && [ -n "$CURRENT_DB_ID" ] && [ "$PROBE_DB_ID" != "$CURRENT_DB_ID" ]; then
+    pass "the previous probe belongs to a different database; treating this as a first run"
+    PROBE_ID=""
+fi
+
+if [ -n "${PROBE_ID:-}" ]; then
+    STATUS="$(request GET "$(printf '/api/products/%s' "$PROBE_ID")")"
     if [ "$STATUS" = "200" ]; then
         pass "the probe product from the previous run is still there (id=$PROBE_ID)"
         check "it kept its name" "${PROBE_NAME:-<missing>}" "$(jget "d['name']")"
@@ -529,7 +591,7 @@ if [ -f "$STATE_FILE" ]; then
     request DELETE "/api/products/$PROBE_ID" >/dev/null
     as_customer
 else
-    pass "first run: no previous probe to check (run again after a restart to verify persistence)"
+    pass "first run against this database: no previous probe to check (run again after a restart)"
 fi
 
 # Leave a probe for the next run. The name is unique per run so a stale row is never mistaken for
@@ -547,8 +609,8 @@ STATUS="$(request GET "/api/products/$PROBE_ID")"
 check "the probe reads back from the database" "200" "$STATUS"
 
 # Quoted, because the name contains spaces and this file is read back with `.` (source).
-printf "PROBE_ID='%s'\nPROBE_NAME='%s'\nPROBE_PRICE='%s'\n" \
-    "$PROBE_ID" "$PROBE_NAME" "$PROBE_PRICE" > "$STATE_FILE"
+printf "PROBE_ID='%s'\nPROBE_NAME='%s'\nPROBE_PRICE='%s'\nPROBE_DB_ID='%s'\n" \
+    "$PROBE_ID" "$PROBE_NAME" "$PROBE_PRICE" "$CURRENT_DB_ID" > "$STATE_FILE"
 pass "probe id $PROBE_ID recorded in $STATE_FILE for the next run"
 
 # --------------------------------------------------------------------------------------------
@@ -562,24 +624,6 @@ pass "probe id $PROBE_ID recorded in $STATE_FILE for the next run"
 # otherwise it runs psql inside the PostgreSQL container (POSTGRES_CONTAINER, default
 # ecomdemo-postgres). With neither, the check is SKIPPED and says so - never silently passed.
 section "Flyway migrations"
-
-POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-ecomdemo-postgres}"
-PGDB="${POSTGRES_DB:-ecomdemo}"
-PGUSER_="${POSTGRES_USER:-ecomdemo}"
-
-# psql_query <sql> -> prints the result, one row per line, no headers or padding
-psql_query() {
-    if command -v psql >/dev/null 2>&1; then
-        PGPASSWORD="${POSTGRES_PASSWORD:-ecomdemo}" psql -qtAX \
-            -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
-            -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
-    elif command -v docker >/dev/null 2>&1 \
-        && docker exec "$POSTGRES_CONTAINER" true >/dev/null 2>&1; then
-        docker exec "$POSTGRES_CONTAINER" psql -qtAX -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
-    else
-        return 1
-    fi
-}
 
 if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
