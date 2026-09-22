@@ -5,10 +5,11 @@
 - **Updated:** 2026-09-22
 - **Phase:** 11: Continuous Integration
 - **Branch:** feature/phase-11-github-actions
-- **Step:** VERIFYING — **BLOCKED**
+- **Step:** VERIFYING — passed; a docs follow-up PR is open
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #11 — MERGED (95fd430). Merge verification is INCOMPLETE: see below.
-- **Waiting for user:** YES — a GitHub settings change is needed before Phase 11 can be tagged. See "Open issues / blockers".
+- **PR:** #11 MERGED (95fd430); tag `phase-11-complete` pushed at 5748b56.
+  Follow-up PR open with the corrected test report.
+- **Waiting for user:** YES — review and merge the follow-up PR, then say `merged, continue`.
 
 ## Phase 10 merge verification (passed 2026-09-22)
 PR #10 MERGED with a merge commit (35d99a5, 2 parents: d2ab0a2 + 33a5095); branch is an ancestor
@@ -48,27 +49,32 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
 - 2026-09-22 local: `scripts/smoke-test.sh` against the compose stack -> 125 passed, 0 failed,
   0 skipped. The script is unchanged this phase.
 
-## Open issues / blockers — PHASE 11 IS NOT COMPLETE
-1. **🔴 The CI run on `main` for the merge FAILED.** Run 35684930913, one attempt, no re-run.
-   `Build and test` ✅; `Publish image to GHCR` ❌ at the "Build and push" step:
-   `denied: permission_denied: write_package` pushing `ghcr.io/mr-sujay-patil/ecomdemo:latest`.
-   The workflow itself is correct — the job log's "Set up job" shows the token really did get
-   `Packages: write`, and `Login Succeeded!`. The denial is GHCR-side.
-   **Root cause:** `repos/.../actions/permissions/workflow` -> `default_workflow_permissions:
-   "read"`, and the new user-owned package has no Actions write access for this repository.
-   **Fix (USER, in GitHub settings — not a code change, and not mine to make):** either
-   Settings -> Actions -> General -> Workflow permissions -> "Read and write permissions";
-   or the package page -> Package settings -> Manage Actions access -> add `ecomdemo` with the
-   **Write** role. Then re-run the failed job (`gh run rerun 35684930913 --failed`).
-2. **🟠 A half-published image is in GHCR.** `:latest` EXISTS (a real OCI index, publicly
-   pullable) but `:sha-95fd430` does NOT — the push was denied partway through. So `latest`
-   currently points at an image no successful run produced, which is a neat illustration of why
-   a deployment should never pin `latest`. A successful re-run overwrites it and adds the SHA tag.
-3. **⚠️ `required_status_checks` on `main` is still `null`.** A red check shows as UNSTABLE
-   rather than blocking the merge — which is exactly what happened here: PR #11 was mergeable
-   while this was unenforced. Still the user's manual step.
-4. **⚠️ Docker Desktop is not running**, so `./mvnw clean verify` and `scripts/smoke-test.sh`
-   on `main` could NOT be run as part of this verification. They must be run before tagging.
+## Phase 11 merge verification (passed 2026-09-22, after three failed publish runs)
+PR #11 MERGED with a merge commit (95fd430, 2 parents: 35d99a5 + 03605c1); branch is an ancestor
+of `main`; no commits and no file diffs; branches intact; `.github/workflows/ci.yml`,
+`.github/dependabot.yml` and `docs/test-reports/phase-11.md` all present in `main`.
+
+The publish job then failed three times before it worked, and the first diagnosis was wrong:
+- Runs 35684930913 (#11) and 35687555954 (#12): `denied: permission_denied: write_package`.
+- Setting the repo's `default_workflow_permissions` to `write` did NOT fix it — the job log
+  showed `Packages: write` from the very first failure, because the workflow's own `permissions:`
+  block was already elevating it. The repository default was never the binding constraint.
+- Real cause: the first partial push CREATED the GHCR package and a `latest` tag, then was
+  denied. GHCR authorises against the package's own Actions-access list, and a package left in
+  that state had none for this repository — so it blocked every later push.
+- Fix: the user deleted the package; the next run created it cleanly and linked it.
+
+Verified after the fix: CI on `main` green (both jobs); `latest` and `sha-5748b56` both exist and
+resolve to the SAME manifest (8fff98009bb1); `./mvnw clean verify` on `main` -> 190 + 30, 0
+failures, 0 skipped, 23.6 s; `docker compose up -d --build` -> both services healthy;
+`scripts/smoke-test.sh` -> 125 passed, 0 failed, 0 skipped, 0 ERROR in the container log.
+Tag `phase-11-complete` pushed at 5748b56.
+
+## Still outstanding (user, not blocking Phase 12)
+- **`required_status_checks` on `main` is `null`.** CI reports but does not block: both PR #11 and
+  PR #12 were merged while a run was red. Adding "Require status checks to pass" (the
+  `Build and test` job) is the phase's stated manual step.
+
 
 ## Decisions this phase (copied to docs/decisions.md ✅ — 11 entries)
 - One workflow, two jobs, `publish` with `needs: build` — that is what makes the gate real.
@@ -90,15 +96,12 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
 gitignored. No stray Java processes.
 
 ## Next action
-**STOPPED. Phase 11 is NOT tagged and Phase 12 has NOT been started** — merge verification failed
-(blockers 1 and 4 above), and execution-protocol §5 says to stop and report rather than proceed.
+A small follow-up PR is open from this branch with the corrected `docs/test-reports/phase-11.md`
+(§5 now records what actually happened instead of the pre-merge ⚠️) and this checkpoint. Phase 11
+itself is verified and tagged; this is record-keeping, raised as a PR because nothing is ever
+fixed directly on `main`.
 
-When the user has done the GitHub settings change in blocker 1, and Docker Desktop is running:
-1. `gh run rerun 35684930913 --failed` and watch it go green.
-2. Confirm the image: `docker manifest inspect ghcr.io/mr-sujay-patil/ecomdemo:sha-95fd430`
-   and `:latest` — both must exist.
-3. `./mvnw clean verify` on `main`, and `scripts/smoke-test.sh` against `docker compose up -d`.
-4. Then the git-workflow Verification Checklist (already passed: merge commit with 2 parents,
-   ancestor, no diffs, branch intact, artifacts present), tag and push `phase-11-complete`,
-   update `docs/test-reports/phase-11.md` §5 with the real result, and start Phase 12
-   (`docs/phases/phase-12-sonarqube.md`).
+- `merged, continue` -> verify the follow-up merge, then start Phase 12
+  (`docs/phases/phase-12-sonarqube.md`).
+- `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
