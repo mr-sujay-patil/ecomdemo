@@ -6,8 +6,9 @@
   `actions/setup-java@v6` (Temurin 21, `cache: maven`), `actions/upload-artifact@v7`,
   `docker/login-action@v4`, `docker/metadata-action@v6`, `docker/build-push-action@v7`;
   locally JDK 21, Maven Wrapper 3.9.16, Docker 29.7.2, Compose v5.4.0
-- **Result:** ✅ everything testable before the merge passed. **One item is ⚠️ and cannot be
-  verified until the merge happens** — see §5.
+- **Result:** ✅ everything passed. §5 was ⚠️ when this report was first written and is now
+  **resolved** — it took three failed runs and a deleted package to get there, and that story is
+  the most useful thing in this report.
 
 ## 1. Full regression — `./mvnw clean verify`
 
@@ -87,30 +88,72 @@ Three things worth drawing out of the red run:
 pom files, so it survives code changes and rebuilds when a dependency moves — the same idea as the
 Dockerfile's layer ordering, applied to `~/.m2`.
 
-## 5. ⚠️ "Done when", part two: a merge publishes an image
+## 5. "Done when", part two: a merge publishes an image — ✅, eventually
 
-**Not verifiable before the merge.** The publish job is deliberately gated on
-`github.event_name == 'push' && github.ref == 'refs/heads/main'`, and that event does not exist
-until the PR is merged. Making it testable earlier would mean relaxing exactly the condition that
-stops an unreviewed pull request from publishing.
+This section was written as ⚠️ before the merge, because the publish job is gated on
+`github.event_name == 'push' && github.ref == 'refs/heads/main'` and that event does not exist
+until the PR is merged. Making it testable earlier would have meant relaxing the exact condition
+that stops an unreviewed pull request from publishing.
 
-What *has* been verified: the job exists, is correctly skipped on every pull-request run (three
-times, above), is gated on `needs: build`, and holds `packages: write`. The image itself builds
-from this same `Dockerfile` locally in 34 s (Phase 10's report).
+It then failed three times, and the diagnosis was wrong twice. The sequence is worth recording in
+full, because "the config looks right" was true throughout.
 
-**Manual step to confirm it after merging** — this is also part of Phase 11's own merge
-verification:
+| Attempt | Trigger | Build and test | Publish |
+|---|---|---|---|
+| Run 35684930913 | merge of PR #11 (`95fd430`) | ✅ | ❌ `denied: permission_denied: write_package` |
+| Run 35687555954 | merge of PR #12 (`5748b56`) | ✅ | ❌ same error |
+| Run 35687555954, re-run | after setting the repo token default to `write` | ✅ | ❌ **same error** |
+| Run 35687555954, re-run | after **deleting** the GHCR package | ✅ | ✅ **success** |
 
-```bash
-gh run list --branch main --limit 1          # the run triggered by the merge
-gh run view <id> --json jobs --jq '.jobs[]|{name,conclusion}'
-#   expect: "Build and test" success, "Publish image to GHCR" success
+**What the log said every time**, including the very first failure:
 
-gh api users/mr-sujay-patil/packages/container/ecomdemo/versions --jq '.[0].metadata.container.tags'
-#   expect: ["latest", "sha-<short>"]
-
-docker pull ghcr.io/mr-sujay-patil/ecomdemo:latest
 ```
+GITHUB_TOKEN Permissions
+  Contents: read
+  Packages: write          <-- the token DID have it, from the start
+Login Succeeded!
+#26 ERROR: failed to push ghcr.io/mr-sujay-patil/ecomdemo:latest:
+          denied: permission_denied: write_package
+```
+
+**The wrong diagnosis.** The repository's `default_workflow_permissions` was `read`, so that
+looked like the cause. Setting it to `write` changed nothing — and in hindsight the log already
+said so: the workflow's own `permissions:` block was elevating the job to `Packages: write`
+regardless of the repository default. The repository setting was never the binding constraint.
+
+**The actual cause.** The first failed push was *partial*: it created the package
+`ghcr.io/mr-sujay-patil/ecomdemo` and wrote a `latest` tag, then was denied. GHCR authorises a
+push against the package's own **Actions access** list, not only against the token's scope — and
+a package created in that half-finished state had no write access for the repository. Every
+later push was then denied by the package that the first failure had left behind.
+
+**The fix**: delete the package and let a clean run create it. A push that creates a package from
+a workflow links it to the source repository automatically; the surgical alternative (package
+settings -> Manage Actions access -> add the repository with the Write role) would also have
+worked.
+
+**Verified afterwards:**
+
+```
+latest           EXISTS
+sha-5748b56      EXISTS
+latest=8fff98009bb1  sha-5748b56=8fff98009bb1
+same manifest ✓
+```
+
+Both tags resolve to the same manifest, which is what `docker/metadata-action` is supposed to
+produce: one image, two names.
+
+**Two things this taught that no amount of configuration review would have.**
+
+1. *The half-published `latest` was real.* Between the first failure and the fix, `latest`
+   existed in GHCR and was publicly pullable, pointing at an image no successful run had
+   produced. The README argues that a deployment must never pin `latest`; this is that argument
+   as an incident rather than as a paragraph.
+2. *`needs: build` held throughout.* Every one of these failures was in `publish`, with
+   `Build and test` green — so the gate never had to stop anything. But the converse also shows
+   up here: a red `publish` job does not stop a merge either, and PR #12 was merged while the
+   publish job for #11 was still failing.
 
 ## 6. The run summary
 
@@ -152,6 +195,8 @@ thing to add, and is suggested in the PR.
 | Item | Status |
 |---|---|
 | A failing test blocks a PR | ✅ verified, three runs |
-| A merge publishes an image | ⚠️ **cannot be tested before the merge** — §5 has the commands |
-| "Require status checks to pass" on `main` | ⚠️ the user's manual step, in the GitHub UI |
+| A merge publishes an image | ✅ verified after the fix in §5 — both tags, same manifest |
+| `./mvnw clean verify` on `main` | ✅ 190 + 30, 0 failures, 0 skipped, 23.6 s |
+| `scripts/smoke-test.sh` on `main` | ✅ 125 passed, 0 failed, 0 skipped, 0 ERROR in the container log |
+| "Require status checks to pass" on `main` | ⚠️ **still outstanding** — the user's manual step. `required_status_checks` is `null`, so CI reports but does not block; both PR #11 and #12 were merged with a red run |
 | Smoke test in CI | not built — optional in the phase file, suggested in the PR |

@@ -5,10 +5,11 @@
 - **Updated:** 2026-09-22
 - **Phase:** 11: Continuous Integration
 - **Branch:** feature/phase-11-github-actions
-- **Step:** PR_OPEN
+- **Step:** VERIFYING — passed; a docs follow-up PR is open
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #11 — raised (ready for review), CI green
-- **Waiting for user:** YES — review and merge PR #11, then say `merged, continue`
+- **PR:** #11 MERGED (95fd430); tag `phase-11-complete` pushed at 5748b56.
+  Follow-up PR open with the corrected test report.
+- **Waiting for user:** YES — review and merge the follow-up PR, then say `merged, continue`.
 
 ## Phase 10 merge verification (passed 2026-09-22)
 PR #10 MERGED with a merge commit (35d99a5, 2 parents: d2ab0a2 + 33a5095); branch is an ancestor
@@ -48,15 +49,32 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
 - 2026-09-22 local: `scripts/smoke-test.sh` against the compose stack -> 125 passed, 0 failed,
   0 skipped. The script is unchanged this phase.
 
-## Open issues / blockers
-- Both opening questions are answered: Testcontainers works on `ubuntu-latest` unchanged, and
-  `packages: write` is granted on the publish job alone.
-- **⚠️ "a merge publishes an image" is unverified**, and cannot be verified before the merge: the
-  publish job is gated on a push to `main`. Confirm it during Phase 11's merge verification —
-  `docs/test-reports/phase-11.md` §5 has the exact commands.
-- **⚠️ The gate is not enforced yet.** `required_status_checks` on `main` is `null`, so a red
-  check shows as UNSTABLE rather than blocking the merge. That is the user's manual step, after
-  the merge, in the GitHub UI.
+## Phase 11 merge verification (passed 2026-09-22, after three failed publish runs)
+PR #11 MERGED with a merge commit (95fd430, 2 parents: 35d99a5 + 03605c1); branch is an ancestor
+of `main`; no commits and no file diffs; branches intact; `.github/workflows/ci.yml`,
+`.github/dependabot.yml` and `docs/test-reports/phase-11.md` all present in `main`.
+
+The publish job then failed three times before it worked, and the first diagnosis was wrong:
+- Runs 35684930913 (#11) and 35687555954 (#12): `denied: permission_denied: write_package`.
+- Setting the repo's `default_workflow_permissions` to `write` did NOT fix it — the job log
+  showed `Packages: write` from the very first failure, because the workflow's own `permissions:`
+  block was already elevating it. The repository default was never the binding constraint.
+- Real cause: the first partial push CREATED the GHCR package and a `latest` tag, then was
+  denied. GHCR authorises against the package's own Actions-access list, and a package left in
+  that state had none for this repository — so it blocked every later push.
+- Fix: the user deleted the package; the next run created it cleanly and linked it.
+
+Verified after the fix: CI on `main` green (both jobs); `latest` and `sha-5748b56` both exist and
+resolve to the SAME manifest (8fff98009bb1); `./mvnw clean verify` on `main` -> 190 + 30, 0
+failures, 0 skipped, 23.6 s; `docker compose up -d --build` -> both services healthy;
+`scripts/smoke-test.sh` -> 125 passed, 0 failed, 0 skipped, 0 ERROR in the container log.
+Tag `phase-11-complete` pushed at 5748b56.
+
+## Still outstanding (user, not blocking Phase 12)
+- **`required_status_checks` on `main` is `null`.** CI reports but does not block: both PR #11 and
+  PR #12 were merged while a run was red. Adding "Require status checks to pass" (the
+  `Build and test` job) is the phase's stated manual step.
+
 
 ## Decisions this phase (copied to docs/decisions.md ✅ — 11 entries)
 - One workflow, two jobs, `publish` with `needs: build` — that is what makes the gate real.
@@ -71,22 +89,19 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
 - The branch protection change is left to the user, as the phase file assigns it.
 
 ## Environment left behind
-The compose stack is RUNNING and healthy (`ecomdemo-app`, `ecomdemo-db`), schema v6, data in the
-named volume `ecomdemo_postgres-data`. The pre-compose container `ecomdemo-postgres` is stopped,
-not deleted. `.env` exists locally with a real JWT_SECRET and is gitignored. No stray Java
-processes.
+**Docker Desktop is STOPPED**, so the compose stack is down. Start Docker Desktop, then
+`docker compose up -d` to bring `ecomdemo-app` and `ecomdemo-db` back; the named volume
+`ecomdemo_postgres-data` still holds the v6 database. The pre-compose container
+`ecomdemo-postgres` is stopped, not deleted. `.env` exists locally with a real JWT_SECRET and is
+gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR #11 is ready for review and CI is green
-(mergeStateStatus CLEAN, run 35684569454).
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`. From
-  THIS phase onwards that also means confirming CI on `main` is green — and here it is doubly
-  important, because the merge run is the first and only chance to verify the ⚠️ item above:
-  that a merge publishes an image. Commands in docs/test-reports/phase-11.md §5. Then the usual
-  `./mvnw clean verify` + `scripts/smoke-test.sh` against the compose stack, the git-workflow
-  Verification Checklist, tag and push `phase-11-complete`, then start Phase 12
+A small follow-up PR is open from this branch with the corrected `docs/test-reports/phase-11.md`
+(§5 now records what actually happened instead of the pre-merge ⚠️) and this checkpoint. Phase 11
+itself is verified and tagged; this is record-keeping, raised as a PR because nothing is ever
+fixed directly on `main`.
+
+- `merged, continue` -> verify the follow-up merge, then start Phase 12
   (`docs/phases/phase-12-sonarqube.md`).
-- Remind the user of their manual step: add "Require status checks to pass" to the `main` branch
-  protection. Until then CI reports but does not enforce.
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.
