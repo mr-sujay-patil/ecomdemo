@@ -12,6 +12,36 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 11: Continuous Integration (tag: pending, PR: pending)
+**What exists now:** Every PR is built and tested by GitHub Actions before it can be merged, and
+every push to `main` publishes an image to GHCR tagged `sha-<short>` and `latest`. Proven, not
+assumed: a deliberately failing test was committed, the run went red with the publish job skipped
+and the reports still uploaded, and the commit was reverted. Build ~73 s cold, ~57 s with the
+Maven cache. No application code changed; 190 + 30 tests and the 125-check smoke test unchanged.
+**Key code:** `.github/workflows/ci.yml` — one workflow, two jobs. `build` (checkout@v7,
+setup-java@v6 with `cache: maven`, `./mvnw -B clean verify`, upload-artifact@v7 with
+`if: always()`, a `$GITHUB_STEP_SUMMARY` table built from the Surefire/Failsafe XML).
+`publish` (`needs: build`, `if: push && ref == refs/heads/main`, `packages: write` on that job
+alone, login-action@v4 with the built-in `GITHUB_TOKEN`, metadata-action@v6 for the two tags,
+build-push-action@v7 with `cache-from/to: type=gha,mode=max`). `.github/dependabot.yml` — weekly
+Maven and github-actions, Spring modules grouped.
+**Config & infrastructure:** No Maven dependencies, no application changes, schema still V6. The
+only new infrastructure is the GHCR package, created by the first publish. `permissions:
+contents: read` workflow-wide. `concurrency` cancels superseded PR runs but never `main` runs.
+**Tests:** None added or changed — CI runs the existing suite. `scripts/smoke-test.sh` is
+untouched this phase. Test report: `docs/test-reports/phase-11.md`.
+**Gotchas:** GitHub's ubuntu runners have a Docker daemon, so Testcontainers works with no
+`service:` container and no CI-only datasource — the run log shows `postgres:18-alpine` starting
+in 1.4 s. `if: always()` on the upload step is what makes reports available from a RED build
+(126 KB artifact captured from the failing run). A red check shows the PR as `UNSTABLE`, NOT
+`BLOCKED`, until `required_status_checks` is added to the branch protection — it was `null` at the
+time of writing, which is the user's manual step. `needs: build` is the only thing stopping a red
+commit from publishing an image.
+**Follow-ups (not done, out of scope):** running the smoke test against the compose stack in CI —
+optional in the phase file, deliberately skipped, and the most obviously worthwhile next addition.
+Image vulnerability scanning — Phase 31. Actual deployment — Phases 25-26. Pinning actions by
+commit SHA rather than major version — not planned.
+
 ## Phase 10: Containerization (tag: phase-10-complete, PR #10)
 **What exists now:** `cp .env.example .env && docker compose up --build` starts the whole system:
 `ecomdemo-app` and `ecomdemo-db` on a private network, the app waiting for `pg_isready` before it
@@ -45,44 +75,3 @@ Dockerfile's 410 MB / 5 s.
 Image vulnerability scanning — Phase 31. A production-shaped deployment (no local database, real
 secret management, more than one replica) — Phases 25-26. Pinning base images by digest and
 signing them — not planned.
-
-## Phase 09: JWT Authentication (tag: phase-09-complete, PR #9)
-**What exists now:** The password is sent once. `POST /api/auth/login` returns a signed HS256 JWT
-(15 min) carrying `sub`, `uid` and `roles`; every other call sends `Authorization: Bearer <token>`
-and the OAuth2 Resource Server filter verifies signature, expiry and issuer. No session, no
-per-request database read, no per-request BCrypt: measured 106 ms for a login against 14 ms for an
-authenticated call. Every Phase 8 rule is unchanged — they were always decided from authorities.
-220 tests (190 + 30), smoke test 125 checks. Schema unchanged at V6.
-**Key code:** `auth/` is new — `AuthController` (`POST /api/auth/login`), `AuthService` (delegates
-to the `AuthenticationManager`, then issues), `TokenService` (builds the claim set and signs),
-`AuthenticationManagerConfig` (the `DaoAuthenticationProvider`, deliberately NOT in
-`SecurityConfig`), `dto/LoginRequest` (masks the password in `toString`), `dto/TokenResponse`.
-In `security/`: `JwtProperties` + `JwtConfig` (the `SecretKey`, `JwtEncoder`, `JwtDecoder` and
-`Claims` constants), `SecurityConfig` swaps `httpBasic` for `oauth2ResourceServer` with a
-`JwtGrantedAuthoritiesConverter` on the `roles` claim, `CurrentUser` now reads the `Jwt`
-principal, `ApiErrorAuthenticationEntryPoint` distinguishes "no token" from "bad token".
-`GlobalExceptionHandler` maps `AuthenticationException` to one identical 401.
-**Config & infrastructure:** New dependency `spring-boot-starter-oauth2-resource-server` (brings
-`spring-security-oauth2-jose`, so the encoder needs nothing extra). New properties
-`ecomdemo.jwt.secret=${JWT_SECRET:}`, `ecomdemo.jwt.issuer=ecomdemo`, `ecomdemo.jwt.expiry=15m`.
-No default key in Git: unset means a random key plus a loud WARN; under 32 bytes fails startup.
-OpenAPI now declares `bearerAuth` (`bearerFormat: JWT`) and no longer declares `basicAuth`.
-**Tests:** +27 unit/slice (`TokenServiceTest` 6, `CurrentUserTest` 6, `JwtConfigTest` 5,
-`AuthControllerTest` 5, `AuthServiceTest` 4) and +8 IT (`AuthApiIT`). `IntegrationTest` now logs
-in over HTTP for a real token (`asAdmin()`, `asCustomer()`, `login()`, `withToken()`);
-`TestAuthentication` installs a `Jwt` principal. `ProductApiIT` lost its bad-credentials test to
-`AuthApiIT`. Test report: `docs/test-reports/phase-09.md`.
-**Gotchas:** `@WebMvcTest` slices now need `JwtConfig` imported too — a resource server cannot be
-built without a `JwtDecoder` — which is why the `AuthenticationManager` had to move out of
-`SecurityConfig` (a slice has no `UserDetailsService`). `Jwt.getIssuer()` insists on a URL, so a
-plain-string issuer must be read with `getClaimAsString("iss")`; the decoder's issuer validator
-compares strings and is fine with it. The resource server has its own `AuthenticationEntryPoint`
-for bad tokens, separate from `exceptionHandling()`'s for missing ones — both must be set or half
-the 401s lose the `ApiError` shape. A `uid` claim comes back as `Integer` or `Long` depending on
-its size. The decoder allows 60 s of clock skew, so short expiries cannot be tested by waiting.
-bash 3.2 mis-splits escaped quotes nested in a command substitution inside a quoted string.
-**Follow-ups (not done, out of scope):** a refresh token endpoint (optional in the phase file,
-deliberately skipped — it needs storage, rotation and reuse detection). Revocation via a token
-deny-list. RS256 and a JWKS endpoint, needed as soon as a second service accepts these tokens —
-relevant from Phase 20. TLS termination, which a Bearer token really requires — the deployment
-phases.
