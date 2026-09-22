@@ -12,6 +12,41 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 15: Metrics & Monitoring (tag: pending, PR: pending)
+**What exists now:** The application is observable. Actuator publishes health (with separate
+liveness and readiness groups), info, metrics and a Prometheus scrape endpoint; three business
+meters describe checkout; Prometheus scrapes every 15s and Grafana draws an 11-panel dashboard,
+both provisioned from files in `docker/`. One alert rule. 303 tests (241 + 62), smoke test 204
+checks. Schema still V8 - this phase adds no migration.
+**Key code:** `metrics/CheckoutMetrics` (the three meters, **all registered in the constructor**),
+`metrics/MetricNames`, `metrics/CheckoutOutcome` (five tag values incl. a catch-all `error`),
+`metrics/MetricsConfig` (the `application` common tag, and a `MeterFilter` denying `/actuator`
+URIs). `OrderService.place()` now wraps a private `placeWithRetries()` so the timer covers the
+whole retry loop; the catch blocks map exceptions to outcomes, specific-first.
+`SecurityConfig` gained four `EndpointRequest` rules.
+**Config & infrastructure:** New deps `spring-boot-starter-actuator` + `micrometer-registry-prometheus`
+(runtime), and the `build-info` goal on `spring-boot-maven-plugin`. `compose.yaml` gains
+`prometheus` (3.7.3, :9090) and `grafana` (12.3.1, :3000), both with health checks; config lives in
+`docker/prometheus/{prometheus,alerts}.yml` and `docker/grafana/{provisioning,dashboards}`. The
+Dockerfile HEALTHCHECK moved from `/api/products` to `/actuator/health/readiness`.
+~25 `management.*` properties in `application.properties`, all commented.
+**Tests:** +7 `OrderServiceTest.CheckoutMeters` (a real `SimpleMeterRegistry`, not a mock),
++5 `DashboardMetricsTest` (parses the shipped dashboard and alert files; **verified by mutation**),
++15 `metrics/ActuatorApiIT` (asserts on the scrape TEXT, not the registry).
+Test report: `docs/test-reports/phase-15.md`.
+**Gotchas:** An absent series is not zero - PromQL over one returns no rows, so a panel reads "No
+data" and an alert can never fire; hence constructor registration. A metric name is a public
+interface with no compiler behind it, hence `DashboardMetricsTest`. Readiness with the DB down
+answers `{"status":"DOWN"}` 503 after **10s** (the driver's connectTimeout), not instantly, and the
+container HEALTHCHECK's `--timeout=3s` means it fails by timeout rather than by reading the 503 -
+right verdict, different route. `EndpointRequest` moved package in Boot 4
+(`org.springframework.boot.security.autoconfigure.actuate.web.servlet`), as did
+`MeterRegistryCustomizer` (`org.springframework.boot.micrometer.metrics.autoconfigure`).
+**Follow-ups (not done, out of scope):** Alertmanager - nothing delivers the alert anywhere.
+`management.server.port` on an internal-only network, which is the real fix for the anonymous
+scrape endpoint. Cache hit-rate panels (the Phase 13 follow-up; `cache_gets_total` is published but
+not graphed). Batch job metrics on the dashboard. A cardinality budget asserted in a test.
+
 ## Phase 14: Batch Processing (tag: phase-14-complete, PR #16)
 **What exists now:** Two Spring Batch jobs. `productImportJob` reads a product CSV uploaded by an
 ADMIN, validates each row, upserts by product name, skips bad rows up to a limit and writes them
@@ -57,35 +92,3 @@ instead of keying the upsert on a non-unique name; restart across a container re
 inferred from where the state lives, not tested; `@Scheduled` fires in every instance, so a real
 deployment wants a leader election rather than a JobRepository collision.
 
-## Phase 13: Caching (tag: phase-13-complete, PR #15)
-**What exists now:** The catalogue is served from Redis. `GET /api/products` and
-`/api/products/{id}` are `@Cacheable`; create/update/delete keep the cache honest. Per-cache TTL
-(product 10 min, listing 2 min), JSON values typed per cache, hit/miss logging, and a
-CacheErrorHandler so a Redis outage costs latency rather than availability. 228 tests
-(190 + 38), smoke test 136 checks. Schema still V6.
-**Key code:** `cache/CacheConfig` (one `JacksonJsonRedisSerializer` per cache typed to what it
-holds, TTLs, `CachingConfigurer.errorHandler()`, a `RedisCacheManager` whose `decorateCache`
-wraps everything in `LoggingCache`), `cache/CacheNames`, `cache/LoggingCache`.
-`ProductService`: `@Cacheable` on `findAll`/`findById`, `@Caching(put=@CachePut, evict=@CacheEvict)`
-on `update`, `@CacheEvict` on `create`/`delete`. **`requireProduct` and `save` are deliberately
-uncached** - they are the cart/checkout path. `SecurityConfig` now permits `/error`.
-**Config & infrastructure:** New deps `spring-boot-starter-cache` + `spring-boot-starter-data-redis`
-(Lettuce). `compose.yaml` gains a `cache` service (`redis:8-alpine`, `--save "" --appendonly no`,
-`maxmemory` + `allkeys-lru`, no volume, healthcheck, app `depends_on: service_healthy`); the app
-reaches it at `cache:6379`. `application-dev.properties` gets `spring.data.redis.*` with 2s
-timeouts. `test` profile: `spring.cache.type=none`. `it` profile: `spring.cache.type=redis`.
-**Tests:** +8 `cache/CacheApiIT`, all proving behaviour by changing the database BEHIND the cache
-with direct SQL and checking which value comes back. New `support/RedisContainerConfig`
-(`GenericContainer` + `@ServiceConnection(name="redis")`) imported by `IntegrationTest`.
-Test report: `docs/test-reports/phase-13.md`.
-**Gotchas:** A generic serializer with Jackson default typing wrote a root-level List as a bare
-array and then demanded a type id on read - every cached listing read failed. Per-cache types fix
-it AND remove the deserialization-gadget risk. That 500 reached clients as **401**, because Spring
-forwards to `/error` and the forward goes through the filter chain - latent since Phase 8. The
-default CacheErrorHandler rethrows, so a cache bug became an outage. `CacheManager.clear()` logged
-success while the keys survived (`@CacheEvict` on explicit keys is fine); tests delete keys
-directly. Declaring Redis anywhere but the shared `IntegrationTest` config would fork a second
-PostgreSQL too - verified one of each across the whole Failsafe run.
-**Follow-ups (not done, out of scope):** cache hit-rate metrics - Phase 15. Making the browsing
-view's stock accurate without the evict-before-commit race. Redis `requirepass` and a replica.
-Redis data types beyond string-with-TTL (hashes, sorted sets, streams) need a RedisTemplate.
