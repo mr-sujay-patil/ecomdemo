@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 12: Code Quality
 - **Branch:** feature/phase-12-sonarqube
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #14 — raised, CI green (run 35700790382, mergeStateStatus CLEAN)
+- **Waiting for user:** YES — review and merge PR #14, then say `merged, continue`
 
 ## Phase 11 merge verification (passed 2026-09-22, after a follow-up PR)
 PR #11 MERGED (95fd430, 2 parents) and follow-up PR #13 MERGED (5b50c6b, 2 parents: 5748b56 +
@@ -31,7 +31,7 @@ the publish now works end to end: `latest` and `sha-5b50c6b` both exist in GHCR.
 - [x] Smoke test: no new checks, but the existing 125 must still pass
 - [x] Testing protocol run in full + docs/test-reports/phase-12.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 10 archived), tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#14)
 
 **Optional, NOT in scope (hard rule 7):** SonarQube Cloud in GitHub Actions with PR decoration.
 Suggest it in the PR; do not build it. That also means the user needs no SONAR_TOKEN.
@@ -84,5 +84,15 @@ a real JWT_SECRET and is gitignored. No stray Java processes.
   were both merged with a red run. Phase 11's stated manual step, still undone.
 
 ## Next action
-Raise the PR (`gh pr create --base main`), wait for CI to go green, then STOP for the user's
-review. From Phase 11 onwards a PR may be merged only when CI is green.
+STOPPED at the mandatory post-PR stop point. PR #14 is open and CI is green.
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`:
+  the git-workflow Verification Checklist, **CI on `main` green** (required from Phase 11),
+  `./mvnw clean verify`, and `scripts/smoke-test.sh` against `docker compose up -d`. Then tag
+  and push `phase-12-complete` and start Phase 13 (`docs/phases/phase-13-redis.md`).
+  Re-running the Sonar analysis on `main` is optional — the gate is a local tool, not a CI check.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
+
+## Still outstanding (user, not blocking)
+- **`required_status_checks` on `main` is `null`.** CI reports but does not block. Phase 11's
+  stated manual step, still undone.
