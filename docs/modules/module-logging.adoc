@@ -1,0 +1,8 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.logging`
+|Spring components
+|* `c.e.l.CorrelationIdFilter`
+* `c.e.l.RequestLogFilter`
+|===

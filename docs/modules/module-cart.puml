@@ -1,0 +1,25 @@
+@startuml
+set separator none
+title Cart
+
+top to bottom direction
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Catalog, "Catalog", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Customer, "Customer", $techn="Module", $descr="", $tags="", $link="")
+}
+
+Rel(EcomdemoApplication.EcomdemoApplication.Customer, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Catalog, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Catalog, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Customer, "uses", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+@enduml
