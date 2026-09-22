@@ -12,6 +12,38 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 19: Modular Monolith (tag: pending, PR: pending)
+**What exists now:** Fourteen named modules, each declaring in `package-info.java` exactly which
+others it may depend on, enforced by `ModularityTest` - an undeclared import now fails the build
+naming both ends. The graph is ACYCLIC. Every module keeps its published API at its package root
+and everything else under `<module>.internal`. No schema change, no new endpoint, no new container,
+and the smoke test is **270 checks, unchanged**, which is the phase's real result: ~90 files moved
+and no behaviour did. 401 tests (319 + 82). Schema still **V10**.
+**Key code:** `catalog` (was `product`) and a new `inventory` that owns stock movement;
+`shared` (was `common`); `customer.CurrentUser` (was in `security`) and `shared.TokenClaims` (was
+`JwtConfig.Claims`) - those two moves broke the application's only dependency cycle. Three new
+narrow APIs replaced cross-module repository access: `customer.UserDirectory`,
+`catalog.ProductService.findFirstByName/saveAll`, `messaging.EventDeduplicator.claim`.
+**Config & infrastructure:** `spring-modulith-api` at COMPILE scope (annotations go on main
+source), `spring-modulith-core` and `-docs` at TEST scope. Boot 4.1.1 does not manage Spring
+Modulith and the GA line targets Boot 3.5 - keeping the runtime starter out is what makes that gap
+safe. Nothing else changed.
+**Tests:** `ModularityTest` (boundaries + regenerates `docs/modules/`), `StockMutationRulesTest`
+(ArchUnit: who may write stock), `EventDeduplicatorTest` (the idempotency assertions, moved from
+`NotificationServiceTest`). 23 test classes moved into `internal` test packages to follow the
+classes they cover.
+**Gotchas:** (1) `catalog` and `inventory` SHARE the `product` table and the `Product` entity - the
+split is behavioural, so the ArchUnit rule permits BOTH modules to write stock; `ProductService.update`
+is the admin's full replace and cannot call into inventory without a cycle. (2) `ModularityTest`
+writes into `docs/modules/` on every run, so `./mvnw test` touches the working tree - deliberate,
+so a stale diagram shows as an uncommitted change. (3) Moving a package-private class into
+`internal` breaks its test unless the test moves too. (4) `Documenter` drops `logging` from the
+overall diagram because it has no edges; cosmetic.
+**Follow-ups (not done, out of scope):** split `product` and `product_stock` so the stock rule can
+name one module (Phase 20, if the service split demands it); let `catalog` contribute its own cache
+configuration so `cache` stops knowing products exist; `order -> cart` stays a direct call on
+purpose, since `clearCart` is inside the checkout transaction.
+
 ## Phase 18: Reliable Event Publishing (tag: phase-18-complete, PR #23)
 **What exists now:** A checkout writes its `OrderPlacedEvent` into `outbox_event` in the ORDER's
 own transaction, and a scheduled relay publishes pending rows to `orders.placed` and marks them
@@ -46,43 +78,3 @@ relay stops its batch at the first failure, on purpose.
 not both publish (harmless today - the consumer dedupes - and recorded in `docs/decisions.md` as
 deferred); a Micrometer gauge on the pending count and an Actuator health indicator for a stuck
 outbox; CDC with Debezium as the no-application-change alternative.
-
-## Phase 17: Messaging (tag: phase-17-complete, PR #21 + follow-up #22)
-**What exists now:** A checkout publishes an `OrderPlacedEvent` to `orders.placed` (3 partitions,
-keyed by order id) after its transaction commits, on a small async pool so the customer never waits
-for the broker. A notification consumer writes one row per order, idempotently. Retries happen on
-`orders.placed-retry-0/-1` with an exponential jittered backoff, then `orders.placed-dlt`, which
-nothing consumes. 355 tests (278 + 77), smoke test 252 checks. Schema **V9**.
-**Key code:** `messaging/OrderPlacedEvent` (a record, NOT the entity; `of()` generates the event id
-that makes redelivery detectable), `messaging/OrderEventPublisher`
-(`@Async` + `@TransactionalEventListener(AFTER_COMMIT)`), `messaging/MessagingAsyncConfig` (bounded
-pool, ABORT policy - CallerRuns would re-introduce the blocking), `messaging/KafkaTopicsConfig`
-(NewTopic beans; `REPLICAS` is the one line a real cluster changes), `messaging/ProcessedEvent`
-(PK **is** the event id), `notification/NotificationService` (check + marker + work in ONE
-transaction, marker first), `notification/OrderPlacedListener` (`@RetryableTopic` +
-`@DltHandler`). `OrderPlacementService` publishes the domain event and knows nothing about Kafka.
-**Config & infrastructure:** New dep **`spring-boot-starter-kafka`** (not the bare `spring-kafka` -
-Boot 4 keeps auto-config in `spring-boot-kafka`). compose gains `kafka`
-(apache/kafka:4.2.1, KRaft, two listeners: INTERNAL `kafka:9092` and HOST `localhost:29092`) and
-`kafka-ui` (kafbat v1.5.0, :8090), plus `kafka-data`. ~25 `spring.kafka.*` properties. V9 adds
-`notification` (UNIQUE on order_id) and `processed_event`.
-**Tests:** `NotificationServiceTest` (4), `OrderPlacedKafkaIT` (4, real broker via
-`KafkaContainerConfig` + `@ServiceConnection`), +1 in `OrderPlacementServiceTest`. Smoke test +18.
-Test report: `docs/test-reports/phase-17.md`.
-**Gotchas:** (1) `KafkaTemplate.send` BLOCKS inside the call until it has metadata
-(`max.block.ms`, 60s default) - with the broker stopped a checkout took **97 seconds** before the
-`@Async` fix; it is 0.18s now. (2) Retry topics are named after the DELAY by default, so jitter
-creates new topic names every restart - use `SUFFIX_WITH_INDEX_VALUE`. (3) `spring-kafka` alone
-gives no auto-configuration in Boot 4; the symptom is a missing KafkaTemplate BEAN. (4)
-`spring.kafka.admin.auto-create=false` in the test profile, or every @SpringBootTest spends 45s
-timing out. (5) Migrations must use the portable spelling (`BIGINT GENERATED BY DEFAULT AS
-IDENTITY`, `TIMESTAMP(6) WITH TIME ZONE`, `CURRENT_TIMESTAMP`) - the fast suite runs on H2.
-(6) After a broker restart the first notification lags tens of seconds while clients reconnect.
-**The gap Phase 18 exists to close:** publishing happens AFTER the commit, so a process death in
-between leaves an order with no event and nothing aware of it. Measured: 4 orders came out of the
-broker outage permanently un-notified. That is the dual-write problem, and the outbox is the fix.
-**Follow-ups (not done, out of scope):** the outbox (Phase 18). Nothing sweeps `processed_event`,
-so it grows for ever - the index on `processed_at` is what a retention job will use. The
-correlation ID does not cross the Kafka boundary, so a consumer's log lines cannot be joined to the
-request that caused them - Phase 23 does that properly with trace context. No consumer-lag alert
-in Prometheus. Kafka UI has no authentication.
