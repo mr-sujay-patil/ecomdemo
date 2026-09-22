@@ -20,9 +20,10 @@ import org.springframework.test.context.ActiveProfiles;
  * PostgreSQL in a container.
  *
  * <p>Every annotation here is part of the context cache key, so keeping them in one place is what
- * lets the three integration tests share a single context — and therefore a single container and
- * a single PostgreSQL boot. Add a {@code @MockitoBean} or a stray {@code @TestPropertySource} to
- * one subclass and that subclass silently gets a context, and a container, of its own.
+ * lets the integration tests share a single context — and therefore one PostgreSQL and one Redis
+ * for the whole run rather than a pair per class. Add a {@code @MockitoBean} or a stray
+ * {@code @TestPropertySource} to one subclass and that subclass silently gets a context, and both
+ * containers, of its own.
  *
  * <p>{@link WebEnvironment#RANDOM_PORT} starts Tomcat on a free port and the injected
  * {@link TestRestTemplate} is pre-pointed at it. Requests therefore travel over real HTTP through
@@ -60,7 +61,7 @@ import org.springframework.test.context.ActiveProfiles;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
-@Import(PostgresContainerConfig.class)
+@Import({PostgresContainerConfig.class, RedisContainerConfig.class})
 @ActiveProfiles("it")
 public abstract class IntegrationTest {
 

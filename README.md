@@ -4,11 +4,28 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · GitHub Actions · SonarQube + JaCoCo · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Redis · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · GitHub Actions · SonarQube + JaCoCo · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 12: Code Quality** — the project is now measured rather than assumed. JaCoCo covers
+**Phase 13: Caching** — the catalogue is now served from Redis. A repeated read of a product
+never reaches PostgreSQL; an edit refreshes the entry in place; a delete removes it. Everything
+has a TTL, because explicit eviction handles the changes this application makes and the TTL
+handles the ones it does not.
+
+The interesting half is what is **not** cached. `requireProduct` — the method the cart and
+checkout use — is deliberately left alone, because it returns the live entity. A cached
+`stockQuantity` would be stale; a cached `version` would defeat the optimistic locking that Phase
+6 added, and the oversell bug would come back in a form the race test could not detect. The rule:
+**cache what is read often and changes rarely; never cache what a decision is made against.**
+
+Stopping Redis does not stop the shop — a cache error logs a warning and falls through to the
+database, which is verified by actually stopping it.
+
+<details>
+<summary>Phase 12: Code Quality</summary>
+
+The project is measured rather than assumed. JaCoCo covers
 **both** test suites (the unit run and the integration run fork separate JVMs, so each gets its
 own agent and the results are merged), and SonarQube runs in its own compose stack behind a
 quality gate.
@@ -23,6 +40,8 @@ every call), two were confirmed by the compiler rather than taken on trust, and 
 whose assertions did not pin down which call was supposed to throw. The one finding that was not
 "fixed" — CSRF being disabled — is a *review* rule with a deliberate answer, suppressed in the
 code with its reasoning attached rather than dismissed in a server database that a rebuild wipes.
+
+</details>
 
 <details>
 <summary>Phase 11: Continuous Integration</summary>
@@ -92,6 +111,7 @@ The full 32-phase plan, with a progress tracker, lives in **[docs/ROADMAP.md](do
 ecomdemo/
 ├── src/main/java/com/ecomdemo/
 │   ├── common/    # ApiError + @RestControllerAdvice shared by every feature
+│   ├── cache/     # cache names, per-cache TTL and serializers, hit/miss logging
 │   ├── security/  # the filter chain, the JWT key/encoder/decoder, CurrentUser, 401/403 handlers
 │   ├── auth/      # POST /api/auth/login: exchanging a password for a signed token
 │   ├── customer/  # accounts: registration, roles, the profile
@@ -112,7 +132,7 @@ ecomdemo/
 │   └── application-it.properties    # the container's PostgreSQL, for the *IT tests (Failsafe)
 ├── Dockerfile     # multi-stage: JDK+Maven to build, JRE to run, non-root, layered jar
 ├── .dockerignore  # keeps target/, .git and .env out of the build context
-├── compose.yaml   # the app + PostgreSQL: health checks, a named volume, one network
+├── compose.yaml   # the app + PostgreSQL + Redis: health checks, a named volume, one network
 ├── compose.sonar.yaml  # SonarQube + its own PostgreSQL, started only for an analysis
 ├── .env.example   # every variable, documented; .env itself is gitignored
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
@@ -660,6 +680,166 @@ curl -s "${BEN[@]}" localhost:8080/api/cart
 # 403 - the order exists, it is simply not his
 curl -s -i "${BEN[@]}" localhost:8080/api/orders/1 | head -1
 ```
+
+## Caching
+
+```bash
+docker compose up -d                       # brings up `cache` alongside `app` and `db`
+curl -s localhost:8080/api/products/1      # miss: reads PostgreSQL, populates Redis
+curl -s localhost:8080/api/products/1      # hit:  never touches PostgreSQL
+
+docker exec ecomdemo-cache redis-cli KEYS '*'
+docker exec ecomdemo-cache redis-cli GET 'product::1'
+docker exec ecomdemo-cache redis-cli TTL 'product::1'
+```
+
+Turn the commentary on to watch it work:
+
+```
+logging.level.com.ecomdemo.cache=DEBUG
+```
+
+```
+cache MISS product for key 1
+cache PUT  product for key 1
+cache HIT  product for key 1
+```
+
+### Cache-aside
+
+`@Cacheable` implements the **cache-aside** pattern: look in the cache; on a miss, call the method
+and store what it returns. The application owns the data — Redis never talks to PostgreSQL and
+knows nothing about it.
+
+That is why losing the cache costs nothing but latency, and why the Redis container has **no
+volume** and runs with `--save "" --appendonly no`. Everything in it can be recomputed. Persisting
+a derived copy would buy nothing and cost fork() pauses and disk.
+
+| | Where the truth is | Losing it costs |
+|---|---|---|
+| Cache-aside | PostgreSQL | a slow minute |
+| Write-through / write-behind | the cache, at least briefly | data |
+
+### What is cached, and what must never be
+
+```java
+@Cacheable(cacheNames = PRODUCT,      key = "#id")   ProductResponse findById(Long id)
+@Cacheable(cacheNames = PRODUCT_LIST, key = "'all'") List<ProductResponse> findAll()
+
+// NOT cached, and this is the important one:
+public Product requireProduct(Long id)               // the live entity, used by cart + checkout
+```
+
+`requireProduct` returns the **managed JPA entity**. Caching it would hand checkout a detached
+object with a stale `stockQuantity` *and* a stale `version` — and that second one is the killer,
+because optimistic locking compares versions. A cached version defeats the very mechanism Phase 6
+added, so the oversell bug would return in a form the Phase 6 race test could not detect: both
+threads would simply agree on the same wrong number.
+
+**Cache what is read often and changes rarely; never cache what a decision is made against.**
+
+The accepted cost, stated plainly: after a sale the catalogue shows the old stock figure for up to
+the TTL. Browsing is a view; checkout reads live, so the number that decides whether a sale happens
+is never stale.
+
+### Invalidation
+
+Three annotations, doing three different things:
+
+```java
+@Cacheable  // populate on a miss
+@CachePut   // run the method AND write its result into the cache
+@CacheEvict // remove the entry
+```
+
+An update needs two of them at once:
+
+```java
+@Caching(
+    put   = @CachePut(cacheNames = PRODUCT, key = "#id"),        // refresh this product
+    evict = @CacheEvict(cacheNames = PRODUCT_LIST, key = "'all'")) // discard the listing
+```
+
+The asymmetry is cache invalidation in miniature: **refresh what you can compute, discard what you
+cannot.** The method has to run anyway and its return value is exactly what the next read would
+produce, so `@CachePut` saves a database round trip. The listing holds every product and there is
+no way to patch one entry inside it, so it goes.
+
+### TTL and eviction
+
+| Cache | TTL | Why |
+|---|---|---|
+| `product` | 10 min | changes rarely, and every edit evicts it anyway |
+| `productList` | 2 min | one key covering every product: costliest to hold, likeliest to be wrong |
+
+**Every cache has a TTL**, and that is the real answer to invalidation. Explicit eviction handles
+the changes this application makes; the TTL handles the ones it does not — a migration, a manual
+`UPDATE`, a bug in an eviction rule. Without one, a single missed eviction is wrong for ever.
+
+Redis has its own eviction, for a different problem — running out of memory:
+
+```
+--maxmemory 256mb --maxmemory-policy allkeys-lru
+```
+
+`allkeys-lru` drops the least recently used key and carries on. The default, `noeviction`, would
+start *failing writes* — turning a full cache into an application error.
+
+### Serialization: one type per cache
+
+Each cache declares exactly what it holds:
+
+```java
+new JacksonJsonRedisSerializer<>(jsonMapper, types.constructType(ProductResponse.class))
+new JacksonJsonRedisSerializer<>(jsonMapper, types.constructCollectionType(List.class, ProductResponse.class))
+```
+
+The obvious alternative — one generic serializer with Jackson **default typing**, writing the class
+name into each document — was tried first and is wrong twice over:
+
+1. **It did not round-trip.** A root-level `List` was written as a bare JSON array with no type id,
+   and the reader then demanded one. Every cached listing read failed.
+2. **It is a deserialization gadget.** "The document names the class to instantiate" is a
+   well-trodden path to remote code execution. Jackson's own convenience method for it is called
+   `enableUnsafeDefaultTyping`.
+
+A per-cache type removes both, and the stored JSON is smaller and legible:
+
+```json
+{"id":1,"name":"Mechanical Keyboard","price":8999.00,"stockQuantity":25,"category":"PERIPHERALS"}
+```
+
+Money survives with its scale intact — `42.50`, not `42.5`. That is worth a test of its own, and
+has one.
+
+### When the cache breaks
+
+A cache-aside cache is an optimisation over a database that can still answer, so losing it should
+cost latency, not availability. Spring's default `CacheErrorHandler` rethrows, which turns a cache
+problem into a failed request. This one logs and falls through:
+
+```bash
+docker compose stop cache
+curl -o /dev/null -w "%{http_code}" localhost:8080/api/products    # 200
+```
+
+```
+WARN CacheConfig : cache GET failed on productList for key all
+                   — falling through to the database
+```
+
+Note the asymmetry: a swallowed **evict** leaves a stale entry, and only the TTL will clear it.
+That is the second reason every cache here has one.
+
+### Redis data types
+
+This application uses exactly one: a **string** per key, holding JSON, with an expiry. Spring's
+cache abstraction is a key-value map and needs nothing more.
+
+Redis offers a good deal more — hashes for storing an object field by field, sorted sets for
+leaderboards and rate limiting, streams for event logs, sets for membership. None of it is reachable
+through `@Cacheable`; using it means a `RedisTemplate` and writing the access code yourself. Worth
+knowing the map is not the territory.
 
 ## Code quality
 
@@ -1505,6 +1685,14 @@ cost a container start each time.
 - **Branch coverage sits at 81% against 97% line coverage.** Several `else` paths are defensive
   and only reachable through states the API does not permit. That gap is the honest one to look
   at; the line figure flatters.
+- **The catalogue shows stale stock for up to 10 minutes after a sale.** A deliberate trade, not
+  an oversight — checkout reads live, so nothing decides on the stale number. Making the browsing
+  view accurate would mean evicting on every checkout, which has its own race (see
+  `docs/decisions.md` [Phase 13]).
+- **Nothing measures the cache hit rate.** Hit and miss are logged at DEBUG, which answers "is it
+  working?" and not "is it worth it?". Hit ratios belong in metrics — **Phase 15**.
+- **Redis is a single node with no password.** Fine on a compose network that publishes it only
+  for `redis-cli`; a real deployment needs at least `requirepass` and a replica.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the
   code it reaches. **Phase 12** adds JaCoCo and SonarQube.
 - **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without

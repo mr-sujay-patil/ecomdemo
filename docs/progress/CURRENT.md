@@ -3,96 +3,80 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 12: Code Quality
-- **Branch:** feature/phase-12-sonarqube
+- **Phase:** 13: Caching
+- **Branch:** feature/phase-13-redis
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #14 — raised, CI green (run 35700790382, mergeStateStatus CLEAN)
-- **Waiting for user:** YES — review and merge PR #14, then say `merged, continue`
+- **PR:** #15 — raised, CI green, mergeStateStatus CLEAN
+- **Waiting for user:** YES — review and merge PR #15, then say `merged, continue`
 
-## Phase 11 merge verification (passed 2026-09-22, after a follow-up PR)
-PR #11 MERGED (95fd430, 2 parents) and follow-up PR #13 MERGED (5b50c6b, 2 parents: 5748b56 +
-365a9ca); branch is an ancestor of `main`; no branch commits missing from `main`; the only file
-difference is `main` being AHEAD (Dependabot's `setup-buildx-action@v4` from PR #12); branches
-intact; `.github/workflows/ci.yml`, `.github/dependabot.yml` and the corrected
-`docs/test-reports/phase-11.md` all in `main`.
-**CI on `main` is green** (run 35697500349, both jobs) — required from this phase onwards — and
-the publish now works end to end: `latest` and `sha-5b50c6b` both exist in GHCR.
-`./mvnw clean verify` on `main` -> 190 + 30, 0 failures, 0 skipped, 41.9 s.
-`docker compose up -d --build` -> both services healthy; `scripts/smoke-test.sh` -> 125 passed,
-0 failed, 0 skipped, 0 ERROR. Tag `phase-11-complete` pushed at 5748b56.
+## Phase 12 merge verification (passed 2026-09-22)
+PR #14 MERGED with a merge commit (1b03f5f, 2 parents: 5b50c6b + 62744b0); branch is an ancestor
+of `main`; no commits and no file diffs between branch and `main`; branches intact;
+`compose.sonar.yaml`, `scripts/sonar-setup.sh`, `docs/test-reports/phase-12.md` and the JaCoCo
+configuration all present in `main`. **CI on `main` green** (run 35702256606, both jobs) and the
+image published as `latest` + `sha-1b03f5f`. `./mvnw clean verify` -> 190 + 30, 0 failures,
+0 skipped; coverage 97.3% line / 81.0% branch. `scripts/smoke-test.sh` against the compose stack
+-> 125 passed, 0 failed, 0 skipped, 0 ERROR. Tag `phase-12-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] SonarQube Community Edition in `compose.sonar.yaml`
-- [x] The JaCoCo plugin, with analysis through `./mvnw sonar:sonar`
-- [x] Fix the reported bugs, smells and hotspots
-- [x] A quality gate (e.g. >= 70% coverage on new code, no new critical issues)
-- [x] The project passes the quality gate, and the results are documented (the "Done when")
-- [x] Smoke test: no new checks, but the existing 125 must still pass
-- [x] Testing protocol run in full + docs/test-reports/phase-12.md
-- [x] README section, decisions.md, RECENT.md rotation (Phase 10 archived), tracker -> 🔵
-- [x] PR raised (#14)
-
-**Optional, NOT in scope (hard rule 7):** SonarQube Cloud in GitHub Actions with PR decoration.
-Suggest it in the PR; do not build it. That also means the user needs no SONAR_TOKEN.
+- [x] Redis in Compose
+- [x] `@Cacheable` on product reads, `@CacheEvict` / `@CachePut` on writes
+- [x] JSON serialization with a TTL per cache
+- [x] Hit/miss logging
+- [x] A Testcontainers Redis test
+- [x] Repeated reads skip the database and updates invalidate the cache (the "Done when")
+- [x] Smoke test additions (after a product read the cache key exists in Redis; updating the
+      product evicts or refreshes it)
+- [x] Testing protocol run in full + docs/test-reports/phase-13.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 11 archived), tracker -> 🔵
+- [x] PR raised (#15), CI green
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, 190 + 30, 0 failures, 0 skipped. Run after
-  every change in this phase. No test added, removed or disabled.
-- 2026-09-22: JaCoCo merged report -> 96.5% instruction, 97.3% line, 81.0% branch, 100% class.
-  Both exec files present and merged (`jacoco-unit.exec` + `jacoco-it.exec` -> `jacoco-merged`).
-- 2026-09-22: SonarQube first analysis -> 16 issues, 92 min debt, reliability D, security D.
-  After the fixes -> **0 bugs, 0 vulnerabilities, 0 smells, 0 hotspots, 0 min debt, A/A/A**.
-- 2026-09-22: `-Dsonar.qualitygate.wait=true` -> **QUALITY GATE: OK**, every condition green.
-- 2026-09-22: `scripts/sonar-setup.sh` proven against a VIRGIN server (`down -v` + fresh `up`):
-  created the project, the gate and the two custom conditions; re-running it is all no-ops.
-- 2026-09-22: `scripts/smoke-test.sh` against the compose stack -> 125 passed, 0 failed,
-  0 skipped, 0 ERROR in the container log. The script is unchanged this phase, as specified.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 190 (unchanged) + Failsafe 38
+  (was 30), 0 failures, 0 skipped. Exactly ONE redis and ONE postgres container for the whole
+  Failsafe run (counted from the log) - the shared IntegrationTest context held.
+- 2026-09-22: `./mvnw clean test` -> 190 tests, 0 "Creating container" lines. The Phase 7
+  Docker-free promise still holds (`spring.cache.type=none` in the test profile).
+- 2026-09-22: `scripts/smoke-test.sh` against the compose stack -> 136 passed (was 125), 0 failed,
+  **0 skipped** - so every cache check really ran against Redis.
+- 2026-09-22: graceful degradation verified by hand: `docker compose stop cache`, then
+  `GET /api/products` -> 200 with "cache GET failed ... falling through to the database".
 
 ## Open issues / blockers
-- none. All three opening concerns are settled: SonarQube is in its own compose file, JaCoCo
-  merges both suites, and every reported issue is either fixed or (for the one review rule)
-  suppressed in code with its reasoning attached.
-- Worth knowing for next time: `sonarqube:lts-community` still resolves to 9.9 and dies
-  mid-migration against PostgreSQL 18 — pin an exact `*-community` build.
+- none. All three opening concerns were handled and are covered by tests: `requireProduct` is
+  uncached and `checkoutIgnoresTheCache` proves the boundary; serialization is per-cache typed
+  and `bigDecimalKeepsItsScale` proves the round trip; one container of each was counted.
+- Worth carrying forward: `CacheManager.clear()` logged success while the keys survived
+  (`@CacheEvict` on explicit keys is fine, and that is all the application uses).
 
-## Decisions this phase (copied to docs/decisions.md ✅ — 12 entries)
-- Two JaCoCo agents + a merge; a single prepare-agent would measure half the suite.
-- Surefire/Failsafe argLines use @{...} late evaluation — a literal argLine overrides JaCoCo's
-  and coverage silently reads 0%.
-- SonarQube in its own compose file, with its own PostgreSQL, pinned to an exact community build.
-- The quality gate is created by a script so it survives `down -v` and lives in Git.
-- Every gate condition is on NEW code; new_coverage stays at 80 (the project is at 97.4%).
-- java:S4502 (CSRF) suppressed in code, not "accepted" in the server — a server resolution is
-  lost on rebuild and invisible in review.
-- `record` -> `recordAttempt`; `throws Exception` removed (verified by compiling, not trusted).
-- SonarQube Cloud + PR decoration NOT built (optional; hard rule 7) — suggested in the PR.
+## Decisions this phase (copied to docs/decisions.md ✅ — 11 entries)
+- Only the catalogue reads are cached; `requireProduct` (cart/checkout) never is.
+- DTOs are cached, never entities.
+- One JSON serializer per cache, typed — NOT generic + Jackson default typing (which failed to
+  round-trip AND is a deserialization gadget).
+- A CacheErrorHandler logs and falls through, so a Redis outage costs latency not availability.
+- Every cache has a TTL; `productService.save` evicts nothing (evict-before-commit race).
+- `/error` is permitted, because a 500 on a public endpoint was arriving as 401.
+- Redis container declared in the shared IntegrationTest config; `spring.cache.type=none` in the
+  test profile.
+- Redis runs with no persistence, a maxmemory ceiling and allkeys-lru.
 
 ## Environment left behind
-Docker Desktop is RUNNING. Two stacks are up:
-- the application (`ecomdemo-app`, `ecomdemo-db`), healthy, schema v6;
-- SonarQube (`ecomdemo-sonarqube`, `ecomdemo-sonar-db`) at http://localhost:9000 with this
-  branch's analysis. `docker compose -f compose.sonar.yaml down` stops it, `-v` deletes history.
-The SonarQube admin password and the analysis token exist only on this machine, outside the
-repository — regenerate a token from My Account -> Security if a fresh session needs one, or wipe
-and re-run `scripts/sonar-setup.sh`.
-The pre-compose container `ecomdemo-postgres` is stopped, not deleted. `.env` exists locally with
-a real JWT_SECRET and is gitignored. No stray Java processes.
-
-## Still outstanding (user, not blocking)
-- **`required_status_checks` on `main` is `null`.** CI reports but does not block; PRs #11 and #12
-  were both merged with a red run. Phase 11's stated manual step, still undone.
+Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`), schema
+v6. SonarQube stack (`ecomdemo-sonarqube`, `ecomdemo-sonar-db`) also up at http://localhost:9000;
+stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted back. The
+pre-compose container `ecomdemo-postgres` is stopped, not deleted. `.env` holds a real JWT_SECRET
+and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR #14 is open and CI is green.
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`:
-  the git-workflow Verification Checklist, **CI on `main` green** (required from Phase 11),
-  `./mvnw clean verify`, and `scripts/smoke-test.sh` against `docker compose up -d`. Then tag
-  and push `phase-12-complete` and start Phase 13 (`docs/phases/phase-13-redis.md`).
-  Re-running the Sonar analysis on `main` is optional — the gate is a local tool, not a CI check.
+STOPPED at the mandatory post-PR stop point. PR #15 is open, CI is green, mergeStateStatus CLEAN.
+Branch protection now REQUIRES the `Build and test` check and has `strict: true` (branch must be
+up to date with `main`); no `gh pr update-branch` was needed because nothing landed on `main`
+after this branch was cut. If a Dependabot PR merges first, it will be.
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`: the
+  git-workflow Verification Checklist, CI on `main` green, `./mvnw clean verify`, and
+  `scripts/smoke-test.sh` against `docker compose up -d` (which now includes Redis). Then tag and
+  push `phase-13-complete` and start Phase 14 (`docs/phases/phase-14-spring-batch.md`).
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.
-
-## Still outstanding (user, not blocking)
-- **`required_status_checks` on `main` is `null`.** CI reports but does not block. Phase 11's
-  stated manual step, still undone.

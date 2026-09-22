@@ -12,7 +12,40 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 12: Code Quality (tag: pending, PR: pending)
+## Phase 13: Caching (tag: pending, PR: pending)
+**What exists now:** The catalogue is served from Redis. `GET /api/products` and
+`/api/products/{id}` are `@Cacheable`; create/update/delete keep the cache honest. Per-cache TTL
+(product 10 min, listing 2 min), JSON values typed per cache, hit/miss logging, and a
+CacheErrorHandler so a Redis outage costs latency rather than availability. 228 tests
+(190 + 38), smoke test 136 checks. Schema still V6.
+**Key code:** `cache/CacheConfig` (one `JacksonJsonRedisSerializer` per cache typed to what it
+holds, TTLs, `CachingConfigurer.errorHandler()`, a `RedisCacheManager` whose `decorateCache`
+wraps everything in `LoggingCache`), `cache/CacheNames`, `cache/LoggingCache`.
+`ProductService`: `@Cacheable` on `findAll`/`findById`, `@Caching(put=@CachePut, evict=@CacheEvict)`
+on `update`, `@CacheEvict` on `create`/`delete`. **`requireProduct` and `save` are deliberately
+uncached** - they are the cart/checkout path. `SecurityConfig` now permits `/error`.
+**Config & infrastructure:** New deps `spring-boot-starter-cache` + `spring-boot-starter-data-redis`
+(Lettuce). `compose.yaml` gains a `cache` service (`redis:8-alpine`, `--save "" --appendonly no`,
+`maxmemory` + `allkeys-lru`, no volume, healthcheck, app `depends_on: service_healthy`); the app
+reaches it at `cache:6379`. `application-dev.properties` gets `spring.data.redis.*` with 2s
+timeouts. `test` profile: `spring.cache.type=none`. `it` profile: `spring.cache.type=redis`.
+**Tests:** +8 `cache/CacheApiIT`, all proving behaviour by changing the database BEHIND the cache
+with direct SQL and checking which value comes back. New `support/RedisContainerConfig`
+(`GenericContainer` + `@ServiceConnection(name="redis")`) imported by `IntegrationTest`.
+Test report: `docs/test-reports/phase-13.md`.
+**Gotchas:** A generic serializer with Jackson default typing wrote a root-level List as a bare
+array and then demanded a type id on read - every cached listing read failed. Per-cache types fix
+it AND remove the deserialization-gadget risk. That 500 reached clients as **401**, because Spring
+forwards to `/error` and the forward goes through the filter chain - latent since Phase 8. The
+default CacheErrorHandler rethrows, so a cache bug became an outage. `CacheManager.clear()` logged
+success while the keys survived (`@CacheEvict` on explicit keys is fine); tests delete keys
+directly. Declaring Redis anywhere but the shared `IntegrationTest` config would fork a second
+PostgreSQL too - verified one of each across the whole Failsafe run.
+**Follow-ups (not done, out of scope):** cache hit-rate metrics - Phase 15. Making the browsing
+view's stock accurate without the evict-before-commit race. Redis `requirepass` and a replica.
+Redis data types beyond string-with-TTL (hashes, sorted sets, streams) need a RedisTemplate.
+
+## Phase 12: Code Quality (tag: phase-12-complete, PR #14)
 **What exists now:** Coverage is measured across BOTH suites and the project passes a quality
 gate. JaCoCo runs two agents (Surefire and Failsafe fork separate JVMs) and merges the exec files
 at `verify`: 96.1% overall, 97.4% line, 81.0% branch. SonarQube Community runs in its own compose
@@ -46,33 +79,3 @@ are discarded; and `curl` needs `-G --data-urlencode` for a GET parameter contai
 **Follow-ups (not done, out of scope):** SonarQube Cloud + PR decoration so the gate actually
 blocks a merge — optional in the phase file, deliberately skipped, and the obvious next step.
 Raising branch coverage (81%) rather than line coverage. Image scanning — Phase 31.
-
-## Phase 11: Continuous Integration (tag: phase-11-complete, PRs #11 and #13)
-**What exists now:** Every PR is built and tested by GitHub Actions before it can be merged, and
-every push to `main` publishes an image to GHCR tagged `sha-<short>` and `latest`. Proven, not
-assumed: a deliberately failing test was committed, the run went red with the publish job skipped
-and the reports still uploaded, and the commit was reverted. Build ~73 s cold, ~57 s with the
-Maven cache. No application code changed; 190 + 30 tests and the 125-check smoke test unchanged.
-**Key code:** `.github/workflows/ci.yml` — one workflow, two jobs. `build` (checkout@v7,
-setup-java@v6 with `cache: maven`, `./mvnw -B clean verify`, upload-artifact@v7 with
-`if: always()`, a `$GITHUB_STEP_SUMMARY` table built from the Surefire/Failsafe XML).
-`publish` (`needs: build`, `if: push && ref == refs/heads/main`, `packages: write` on that job
-alone, login-action@v4 with the built-in `GITHUB_TOKEN`, metadata-action@v6 for the two tags,
-build-push-action@v7 with `cache-from/to: type=gha,mode=max`). `.github/dependabot.yml` — weekly
-Maven and github-actions, Spring modules grouped.
-**Config & infrastructure:** No Maven dependencies, no application changes, schema still V6. The
-only new infrastructure is the GHCR package, created by the first publish. `permissions:
-contents: read` workflow-wide. `concurrency` cancels superseded PR runs but never `main` runs.
-**Tests:** None added or changed — CI runs the existing suite. `scripts/smoke-test.sh` is
-untouched this phase. Test report: `docs/test-reports/phase-11.md`.
-**Gotchas:** GitHub's ubuntu runners have a Docker daemon, so Testcontainers works with no
-`service:` container and no CI-only datasource — the run log shows `postgres:18-alpine` starting
-in 1.4 s. `if: always()` on the upload step is what makes reports available from a RED build
-(126 KB artifact captured from the failing run). A red check shows the PR as `UNSTABLE`, NOT
-`BLOCKED`, until `required_status_checks` is added to the branch protection — it was `null` at the
-time of writing, which is the user's manual step. `needs: build` is the only thing stopping a red
-commit from publishing an image.
-**Follow-ups (not done, out of scope):** running the smoke test against the compose stack in CI —
-optional in the phase file, deliberately skipped, and the most obviously worthwhile next addition.
-Image vulnerability scanning — Phase 31. Actual deployment — Phases 25-26. Pinning actions by
-commit SHA rather than major version — not planned.
