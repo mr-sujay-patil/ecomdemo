@@ -6,7 +6,6 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.ecomdemo.catalog.Product;
-import com.ecomdemo.catalog.ProductRepository;
 import com.ecomdemo.catalog.ProductService;
 import com.ecomdemo.inventory.InventoryService;
 import java.math.BigDecimal;
@@ -32,8 +31,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class ProductImportProcessorTest {
 
-    @Mock
-    private ProductRepository productRepository;
 
     /**
      * Only the catalogue's persistence is mocked. {@link InventoryService} itself is REAL, because
@@ -49,7 +46,7 @@ class ProductImportProcessorTest {
     @BeforeEach
     void setUp() {
         processor = new ProductImportProcessor(
-                productRepository, new InventoryService(productService));
+                productService, new InventoryService(productService));
     }
 
     private static ProductCsvRow row(String name, String price, String stock) {
@@ -63,7 +60,7 @@ class ProductImportProcessorTest {
         @Test
         @DisplayName("becomes a new product when nothing of that name exists")
         void createsWhenTheNameIsNew() {
-            when(productRepository.findFirstByNameOrderByIdAsc("Widget")).thenReturn(Optional.empty());
+            when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
             Product product = processor.process(row("Widget", "12.50", "4"));
 
@@ -78,7 +75,7 @@ class ProductImportProcessorTest {
         @DisplayName("updates the existing product of that name, so a re-import is idempotent")
         void updatesWhenTheNameExists() {
             Product existing = new Product("Widget", "old", new BigDecimal("1.00"), 1, "OLD");
-            when(productRepository.findFirstByNameOrderByIdAsc("Widget"))
+            when(productService.findFirstByName("Widget"))
                     .thenReturn(Optional.of(existing));
 
             Product product = processor.process(row("Widget", "12.50", "4"));
@@ -93,7 +90,7 @@ class ProductImportProcessorTest {
         @Test
         @DisplayName("is trimmed, and blank optional columns become null rather than empty text")
         void trimsAndNullsOutBlanks() {
-            when(productRepository.findFirstByNameOrderByIdAsc("Widget")).thenReturn(Optional.empty());
+            when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
             Product product = processor.process(
                     new ProductCsvRow(1, "raw", "  Widget  ", "   ", " 12.50 ", " 4 ", ""));
@@ -107,7 +104,7 @@ class ProductImportProcessorTest {
         @Test
         @DisplayName("keeps the price at two decimal places, the scale the column stores")
         void normalisesThePriceScale() {
-            when(productRepository.findFirstByNameOrderByIdAsc("Widget")).thenReturn(Optional.empty());
+            when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
             Product product = processor.process(row("Widget", "12.5", "4"));
 
@@ -152,8 +149,8 @@ class ProductImportProcessorTest {
             assertThatThrownBy(() -> processor.process(row("Widget", "nope", "4")))
                     .isInstanceOf(InvalidProductRowException.class);
 
-            org.mockito.Mockito.verify(productRepository, org.mockito.Mockito.never())
-                    .findFirstByNameOrderByIdAsc(anyString());
+            org.mockito.Mockito.verify(productService, org.mockito.Mockito.never())
+                    .findFirstByName(anyString());
         }
 
         @Test

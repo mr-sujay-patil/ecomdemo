@@ -1,5 +1,6 @@
 package com.ecomdemo.cart;
 
+import com.ecomdemo.cart.internal.CartRepository;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;

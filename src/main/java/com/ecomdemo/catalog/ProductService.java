@@ -1,10 +1,12 @@
 package com.ecomdemo.catalog;
 
+import com.ecomdemo.catalog.internal.ProductRepository;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import java.util.List;
+import java.util.Optional;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Caching;
@@ -179,6 +181,38 @@ public class ProductService {
      * {@code OrderPlacementService} keeps the ordering code free of any knowledge that a cache
      * exists.
      */
+    /**
+     * The catalogue row with this name, oldest first, or empty.
+     *
+     * <p>Added in Phase 19 so that {@code ProductRepository} could move into {@code internal}.
+     * The CSV import needs an upsert-by-name — it treats the product name as the natural key of a
+     * supplier feed — and was calling the repository directly across a module boundary to get it.
+     *
+     * <p>"Oldest first" is not arbitrary and is not this method's idea: the API has allowed two
+     * products to share a name since Phase 1, so the import updates the FIRST match rather than
+     * failing or guessing. That rule now lives here, on the catalogue's own API, instead of being
+     * encoded in the repository method name that every caller had to know to pick.
+     */
+    @Transactional(readOnly = true)
+    public Optional<Product> findFirstByName(String name) {
+        return productRepository.findFirstByNameOrderByIdAsc(name);
+    }
+
+    /**
+     * Saves many products at once, for the batch import.
+     *
+     * <p>Separate from {@link #save(Product)} on purpose: that one publishes
+     * {@code ProductStockChangedEvent} because it is the checkout's stock path, and doing so per
+     * row here would fire one cache eviction per imported product — thousands of them for a large
+     * feed, to invalidate a cache that the import's own scale has already made useless. The
+     * import's blunt instrument is the right one: it changes the catalogue wholesale, and the
+     * entries expire on their TTL.
+     */
+    @Transactional
+    public void saveAll(Iterable<? extends Product> products) {
+        productRepository.saveAll(products);
+    }
+
     @Transactional
     public void save(Product product) {
         productRepository.save(product);

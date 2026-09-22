@@ -1,5 +1,7 @@
 package com.ecomdemo.shared;
 
+import com.ecomdemo.shared.internal.GlobalExceptionHandler;
+
 /** Thrown when a requested entity does not exist. Mapped to HTTP 404 by {@link GlobalExceptionHandler}. */
 public class NotFoundException extends RuntimeException {
 

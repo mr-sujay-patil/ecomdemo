@@ -1,6 +1,6 @@
 package com.ecomdemo.support;
 
-import com.ecomdemo.shared.GlobalExceptionHandler;
+import com.ecomdemo.shared.internal.GlobalExceptionHandler;
 import com.ecomdemo.security.ApiErrorAccessDeniedHandler;
 import com.ecomdemo.security.ApiErrorAuthenticationEntryPoint;
 import com.ecomdemo.security.ApiErrorWriter;

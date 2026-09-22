@@ -1,5 +1,6 @@
 package com.ecomdemo.customer;
 
+import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.security.AppUserDetails;
 import org.springframework.security.core.Authentication;

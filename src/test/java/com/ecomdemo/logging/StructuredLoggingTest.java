@@ -78,7 +78,7 @@ class StructuredLoggingTest {
         void carriesTheCorrelationId() throws Exception {
             JsonNode line =
                     encode(
-                            "com.ecomdemo.order.OrderService",
+                            "com.ecomdemo.order.internal.OrderService",
                             Level.INFO,
                             "order placed",
                             Map.of(CorrelationId.MDC_KEY, "abc123def456"));
@@ -93,10 +93,10 @@ class StructuredLoggingTest {
         @Test
         @DisplayName("names the level and the logger where ECS says they live")
         void usesEcsFieldNames() throws Exception {
-            JsonNode line = encode("com.ecomdemo.order.OrderService", Level.WARN, "stock is low", Map.of());
+            JsonNode line = encode("com.ecomdemo.order.internal.OrderService", Level.WARN, "stock is low", Map.of());
 
             assertThat(line.path("log").path("level").asText()).isEqualTo("WARN");
-            assertThat(line.path("log").path("logger").asText()).isEqualTo("com.ecomdemo.order.OrderService");
+            assertThat(line.path("log").path("logger").asText()).isEqualTo("com.ecomdemo.order.internal.OrderService");
             assertThat(line.path("message").asText()).isEqualTo("stock is low");
             assertThat(line.path("@timestamp").asText()).isNotBlank();
             assertThat(line.path("ecs").path("version").asText()).isEqualTo("8.11");
@@ -105,7 +105,7 @@ class StructuredLoggingTest {
         @Test
         @DisplayName("identifies the service, so a second application cannot be confused with this one")
         void identifiesTheService() throws Exception {
-            JsonNode line = encode("com.ecomdemo.order.OrderService", Level.INFO, "hello", Map.of());
+            JsonNode line = encode("com.ecomdemo.order.internal.OrderService", Level.INFO, "hello", Map.of());
 
             assertThat(line.path("service").path("name").asText()).isEqualTo("ecomdemo");
             assertThat(line.path("service").path("environment").asText()).isEqualTo("dev");

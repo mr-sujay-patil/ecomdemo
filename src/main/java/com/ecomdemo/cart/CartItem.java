@@ -1,5 +1,6 @@
 package com.ecomdemo.cart;
 
+import com.ecomdemo.cart.internal.CartRepository;
 import com.ecomdemo.catalog.Product;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;

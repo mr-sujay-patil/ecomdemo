@@ -1,5 +1,6 @@
 package com.ecomdemo.customer;
 
+import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;

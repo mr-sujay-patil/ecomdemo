@@ -3,7 +3,7 @@ package com.ecomdemo.support;
 import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.UserRepository;
+import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;
 import java.time.Instant;

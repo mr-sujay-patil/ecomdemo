@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.UserRepository;
+import com.ecomdemo.customer.UserDirectory;
 import com.ecomdemo.support.TestData;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,7 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 class AppUserDetailsServiceTest {
 
     @Mock
-    private UserRepository userRepository;
+    private UserDirectory users;
 
     @InjectMocks
     private AppUserDetailsService service;
@@ -30,7 +30,7 @@ class AppUserDetailsServiceTest {
     @Test
     void loadUserByUsername_addsTheRolePrefixSpringSecurityExpects() {
         // Given: the database stores "ADMIN", with no prefix
-        when(userRepository.findByUsername("admin"))
+        when(users.findByUsername("admin"))
                 .thenReturn(Optional.of(TestData.user(2L, "admin", Role.ADMIN)));
 
         // When
@@ -47,7 +47,7 @@ class AppUserDetailsServiceTest {
     @Test
     void loadUserByUsername_carriesTheAccountIdOnThePrincipal() {
         // Given
-        when(userRepository.findByUsername("asha"))
+        when(users.findByUsername("asha"))
                 .thenReturn(Optional.of(TestData.user(7L, "asha", Role.CUSTOMER)));
 
         // When
@@ -62,7 +62,7 @@ class AppUserDetailsServiceTest {
     @Test
     void loadUserByUsername_returnsTheStoredHashAsTheCredential() {
         // Given
-        when(userRepository.findByUsername("asha"))
+        when(users.findByUsername("asha"))
                 .thenReturn(Optional.of(TestData.user(7L, "asha", Role.CUSTOMER)));
 
         // When / Then: "password" in UserDetails means "the stored credential to compare
@@ -74,7 +74,7 @@ class AppUserDetailsServiceTest {
     @Test
     void loadUserByUsername_whenThereIsNoSuchAccount_throws() {
         // Given
-        when(userRepository.findByUsername("nobody")).thenReturn(Optional.empty());
+        when(users.findByUsername("nobody")).thenReturn(Optional.empty());
 
         // When / Then: this exception never reaches the client. Spring Security turns it into
         // the same BadCredentialsException a wrong password produces, so a caller cannot use

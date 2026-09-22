@@ -2,7 +2,7 @@ package com.ecomdemo.batch;
 
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.inventory.InventoryService;
-import com.ecomdemo.catalog.ProductRepository;
+import com.ecomdemo.catalog.ProductService;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
@@ -49,7 +49,7 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
     private static final int MAX_CATEGORY = 50;
     private static final int MAX_PRICE_SCALE = 2;
 
-    private final ProductRepository productRepository;
+    private final ProductService catalogue;
 
     /**
      * The import sets stock, so since Phase 19 it goes through the inventory module like every
@@ -58,8 +58,8 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
      */
     private final InventoryService inventory;
 
-    ProductImportProcessor(ProductRepository productRepository, InventoryService inventory) {
-        this.productRepository = productRepository;
+    ProductImportProcessor(ProductService catalogue, InventoryService inventory) {
+        this.catalogue = catalogue;
         this.inventory = inventory;
     }
 
@@ -92,7 +92,7 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
         // The upsert. An existing product is a MANAGED entity inside the chunk's transaction, so
         // these setters are enough on their own - the writer's save() is what makes the intent
         // explicit rather than what makes it happen.
-        Product product = productRepository.findFirstByNameOrderByIdAsc(name)
+        Product product = catalogue.findFirstByName(name)
                 .orElseGet(() -> new Product(name, description, price, stock, category));
         product.setName(name);
         product.setDescription(description);
