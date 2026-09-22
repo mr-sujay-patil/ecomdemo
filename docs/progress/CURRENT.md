@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-17-kafka
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #21 — raised, awaiting CI
+- **PR:** #21 — raised, CI green (`Build and test` pass), mergeStateStatus CLEAN
   https://github.com/mr-sujay-patil/ecomdemo/pull/21
 - **Waiting for user:** YES — review and merge PR #21
 
