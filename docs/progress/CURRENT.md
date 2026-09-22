@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 8: Spring Security
 - **Branch:** feature/phase-08-spring-security
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #8 — raised, awaiting review
+- **Waiting for user:** YES — review and merge PR #8, then say `merged, continue`
 
 ## Phase 07 merge verification (passed 2026-09-22)
 PR #7 MERGED with a merge commit (fe2e02c, 2 parents: cf50c2f + ae20fd2); branch is an ancestor
@@ -33,7 +33,7 @@ in the app log; tag `phase-07-complete` pushed.
       customer A cannot read customer B's order, full flow as a logged-in customer)
 - [x] Testing protocol run in full + docs/test-reports/phase-08.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 06 archived), tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#8)
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 163 (was 120), Failsafe 23 (was 15),
@@ -65,9 +65,17 @@ in the app log; tag `phase-07-complete` pushed.
   and attributes them to the seeded admin; orders.user_id is ON DELETE RESTRICT.
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v4**.
+Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v6**.
 `docker start ecomdemo-postgres` if it is down. The application is stopped, no stray Java
 processes. Docker Desktop must stay running (Testcontainers needs it for `./mvnw verify`).
+The database holds three accounts: `admin` (seeded by V5) plus `smoke-customer` and
+`smoke-customer-b`, created by the smoke test. All passwords are BCrypt hashes.
 
 ## Next action
-Push the branch and raise the PR (`gh pr create --base main`), then STOP for the user's review.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
+  `./mvnw clean verify` (needs Docker running) and `scripts/smoke-test.sh` (needs the
+  `ecomdemo-postgres` container up and the app running), the git-workflow Verification Checklist,
+  then tag and push `phase-08-complete`, then start Phase 9 (`docs/phases/phase-09-jwt.md`).
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
