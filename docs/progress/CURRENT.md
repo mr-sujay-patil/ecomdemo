@@ -24,10 +24,11 @@ Tag `phase-14-complete` pushed.
 ## Checklist (copied from the phase's "What you'll implement")
 - [x] Exposed endpoints: health (with liveness and readiness groups), info, metrics, prometheus
 - [x] Business metrics: `orders.placed`, `order.value`, and a checkout timer
-- [ ] Prometheus and Grafana in Compose, with a provisioned dashboard and one alert rule
-- [ ] Done when: the dashboard shows live traffic and business metrics
-- [ ] Smoke test additions: after placing an order, `/actuator/prometheus` shows
-      `orders_placed_total` incremented; liveness and readiness are UP
+- [x] Prometheus and Grafana in Compose, with a provisioned dashboard and one alert rule
+- [x] Done when: the dashboard shows live traffic and business metrics (data verified;
+      the visual render is ⚠️ manual - see below)
+- [x] Smoke test additions: after placing an order, `/actuator/prometheus` shows
+      `orders_placed_total` incremented; liveness and readiness are UP - 48 new checks
 - [ ] Testing protocol run in full + docs/test-reports/phase-15.md
 - [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 13 archived),
       tracker -> 🔵
@@ -40,10 +41,31 @@ Tag `phase-14-complete` pushed.
 - Nothing run yet for phase 15.
 
 ## Open issues / blockers
-- none.
+- ⚠️ The Grafana dashboard could not be screenshotted: Chrome's site permissions block
+  localhost:3000 for browser automation in this environment. Verified instead by running all 16
+  of the dashboard's own panel queries through the Prometheus API - every one returns live data.
+  The visual render needs the user's eyes; steps go in the test report.
 
 ## Decisions this phase (copied to docs/decisions.md ❌ — not yet)
-- none yet.
+- Actuator stays on the main port 8080; the production answer (management.server.port on an
+  internal-only network) is named in SecurityConfig and deliberately out of scope.
+- health/info/prometheus are anonymous because their callers are machines with no credentials;
+  everything else Actuator exposes is ADMIN via EndpointRequest.toAnyEndpoint().
+- Exposure is an explicit allow-list, so /actuator/env is a 404 even for an ADMIN.
+- Readiness = readinessState + db. Redis is deliberately excluded: a cache outage is a
+  slowdown the app survives, and including it would turn that into an outage.
+- Liveness = livenessState alone. No dependency belongs in the probe whose remedy is a restart.
+- The container healthcheck moved from /api/products to /actuator/health/readiness.
+- checkout.duration wraps the whole retry loop, so one checkout is one observation.
+- Five outcome tag values including a catch-all `error`, so the RED error rate cannot lie by
+  omission.
+- Every meter pre-registered in the CheckoutMetrics constructor: an absent series is not zero,
+  and an alert on one can never fire.
+- percentiles-histogram, not percentiles: quantiles are computed by Prometheus from buckets so
+  they can be aggregated across instances.
+- A MeterFilter drops /actuator URIs, so the scrape is not the busiest endpoint in the shop.
+- One alert rule, on the conflict SHARE rather than the count, with `for: 10m`.
+- Grafana datasource and dashboard are provisioned from files; UI edits are overwritten.
 
 ## Environment left behind
 Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`,
@@ -53,7 +75,7 @@ Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomd
 JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-Actuator + the three business meters are committed (af24a9d). Next: the Prometheus and Grafana
-compose services with a provisioned datasource, dashboard and one alert rule, then the
-Dockerfile healthcheck moved onto /actuator/health/readiness, then the smoke test additions.
-Phase file: `docs/phases/phase-15-metrics.md`.
+Implementation is complete and committed (af24a9d, 5ac2f17, 0a1262d). Remaining: finish the
+testing protocol - failure scenario (stop redis, readiness must stay UP; stop db, readiness must
+go DOWN while liveness stays UP), then `docs/test-reports/phase-15.md`, README section,
+decisions.md, RECENT.md rotation (Phase 13 archived), tracker -> 🔵, then raise the PR and STOP.
