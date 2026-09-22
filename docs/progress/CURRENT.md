@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 17: Messaging (Apache Kafka, KRaft)
 - **Branch:** feature/phase-17-kafka
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -28,12 +28,12 @@ merge commit c9fa121 (2 parents), no diff, CI green, `./mvnw clean verify` on `m
 No tag - a fix branch is not a phase. Report: `docs/test-reports/fix-product-cache-eviction.md`.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Kafka (single broker, KRaft) and Kafka UI in Compose
-- [ ] An `OrderPlacedEvent` published to `orders.placed`, keyed by order id
-- [ ] A `notification` consumer that writes a log line and a `notifications` row
-- [ ] Retry topics with backoff and a dead-letter topic
-- [ ] An idempotent consumer backed by a `processed_events` table
-- [ ] A Testcontainers Kafka test
+- [x] Kafka (single broker, KRaft) and Kafka UI in Compose
+- [x] An `OrderPlacedEvent` published to `orders.placed`, keyed by order id
+- [x] A `notification` consumer that writes a log line and a `notifications` row
+- [x] Retry topics with backoff and a dead-letter topic
+- [x] An idempotent consumer backed by a `processed_events` table
+- [x] A Testcontainers Kafka test
 - [ ] Done when: each order produces exactly one notification, and poison messages land in the DLT
 - [ ] Smoke test additions: after placing an order, exactly one notification row exists for it,
       and the event is on the `orders.placed` topic
@@ -62,6 +62,19 @@ stack also up at http://localhost:9000; stop it with `docker compose -f compose.
 if the memory is wanted back. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-Start IMPLEMENTING Phase 17 on `feature/phase-17-kafka`, first checklist item first: Kafka in
-KRaft mode plus Kafka UI in `compose.yaml`. Read `docs/phases/phase-17-kafka.md` for the scope
-and `docs/process/testing-protocol.md` before the PR. Nothing is waiting on the user.
+Continue on `feature/phase-17-kafka`: the smoke test additions are next (after an order, exactly
+one notification row and the event on `orders.placed`), then the full testing protocol, then the
+docs and the PR. Nothing is waiting on the user.
+
+Four traps already hit and fixed, worth keeping in the test report:
+1. `spring-kafka` alone gives no auto-configuration in Boot 4 - the auto-config lives in
+   `spring-boot-kafka`, so the dependency must be `spring-boot-starter-kafka`. The symptom is a
+   missing KafkaTemplate BEAN, which reads like an application bug.
+2. V9 first used PostgreSQL spellings (BIGSERIAL, TIMESTAMPTZ, now()) and failed the whole
+   Surefire suite on H2. Migrations must use the portable spelling every earlier one uses.
+3. `spring.kafka.admin.auto-create=false` in the test profile: KafkaAdmin applied the NewTopic
+   beans at startup and every @SpringBootTest spent 45s timing out against a broker that is not
+   there.
+4. Retry topics are named after the DELAY by default, and `@BackOff(jitter=...)` makes that a
+   different number every run - `orders.placed-retry-1031`, `-retry-1661`, new ones for ever.
+   Fixed with `TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE`.
