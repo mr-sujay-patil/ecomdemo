@@ -1,0 +1,42 @@
+# Grafana datasource provisioning: Loki (Phase 16).
+#
+# Same mechanism and the same reasoning as prometheus.yml next to it - this file is why the
+# datasource exists without anybody clicking anything, and why deleting the Grafana volume costs
+# nothing.
+
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    # Grafana proxies the query from inside the compose network; `loki` is a hostname only Docker
+    # resolves, so `direct` would break the moment a browser tried it.
+    access: proxy
+    url: http://loki:3100
+    # Fixed UID, referenced by the logs dashboard. See the note in prometheus.yml.
+    uid: ecomdemo-loki
+    # Prometheus stays the default: the metrics dashboard is the one people open first, and a
+    # default that changes underneath existing dashboards is a needless surprise.
+    isDefault: false
+    editable: false
+    jsonData:
+      # DERIVED FIELDS are what turn a log line into a link. Grafana runs this matcher over every
+      # line it renders; when it hits, the captured value becomes a clickable button on the
+      # expanded line.
+      #
+      # This one matches the correlation ID wherever it appears in the JSON and turns it into a
+      # query for EVERY line sharing it - which is the phase's "Done when" as a single click
+      # rather than a hand-typed LogQL expression. `datasourceUid` points the generated query back
+      # at Loki itself; pointing it at a tracing datasource instead is how the same mechanism
+      # becomes logs-to-traces in Phase 23.
+      derivedFields:
+        - name: correlation_id
+          matcherType: regex
+          matcherRegex: '"correlation_id"\s*:\s*"([A-Za-z0-9_-]{8,64})"'
+          datasourceUid: ecomdemo-loki
+          url: '{service_name="app"} | correlation_id = `${__value.raw}`'
+          urlDisplayLabel: 'All logs for this request'
+      # The maximum number of lines a query returns. Left at Grafana's default rather than raised:
+      # a query that needs more than a thousand lines is a query that needs a narrower filter, and
+      # the browser is what pays for the difference.
+      maxLines: 1000

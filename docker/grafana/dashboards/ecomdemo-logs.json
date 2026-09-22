@@ -1,0 +1,199 @@
+{
+  "description": "Every log line the application wrote, searchable by correlation ID. Provisioned from docker/grafana/dashboards/ecomdemo-logs.json - edits made in this UI are overwritten on reload.",
+  "editable": false,
+  "graphTooltip": 1,
+  "links": [],
+  "refresh": "10s",
+  "schemaVersion": 39,
+  "tags": ["ecomdemo", "phase-16", "logs"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "", "value": "" },
+        "description": "Paste the X-Correlation-Id from a response header. Empty means no filter, so the panels below show everything.",
+        "hide": 0,
+        "label": "Correlation ID",
+        "name": "correlation_id",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+        "definition": "label_values(level)",
+        "description": "The log level, which Alloy promotes to a Loki label in docker/alloy/config.alloy.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Level",
+        "multi": true,
+        "name": "level",
+        "options": [],
+        "query": { "label": "level", "refId": "LokiVariableQueryEditor-VariableQuery", "type": 1 },
+        "refresh": 2,
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "EcomDemo Logs",
+  "uid": "ecomdemo-logs",
+  "version": 1,
+  "weekStart": "",
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Log lines per second, by level",
+      "description": "The shape of the log, not its content. A step change here is the fastest way to notice that something started going wrong, and an ERROR line appearing at all is worth a look - which is why `level` is a Loki LABEL and therefore cheap to group by.",
+      "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "logs/s",
+          "min": 0,
+          "custom": { "drawStyle": "line", "fillOpacity": 20, "stacking": { "mode": "normal" } },
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": ".*ERROR.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": ".*WARN.*" },
+            "properties": [{ "id": "color", "value": { "fixedColor": "orange", "mode": "fixed" } }]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+          "editorMode": "code",
+          "expr": "sum by (level) (rate({service_name=\"app\", level=~\"$level\"} [$__auto]))",
+          "legendFormat": "{{level}}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Errors in the selected window",
+      "description": "A count, not a rate: for errors the question is usually \"were there any, and how many\", and a rate of three errors an hour rounds to a flat line at zero.",
+      "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({service_name=\"app\", level=\"ERROR\"} [$__range]))",
+          "instant": true,
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Lines for this correlation ID",
+      "description": "Zero with an ID pasted in means one of three things: the window does not contain the request, the ID was never issued, or Alloy is not shipping. The Alloy UI at http://localhost:12345 settles the third.",
+      "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": { "colorMode": "none", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+          "editorMode": "code",
+          "expr": "sum(count_over_time({service_name=\"app\"} | correlation_id = `$correlation_id` [$__range]))",
+          "instant": true,
+          "queryType": "instant",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Application log",
+      "description": "The lines themselves. With a correlation ID in the textbox at the top this is one request's whole story, in order, including the lines Spring and Hibernate wrote during it - which is the thing that was impossible before this phase. The filter is `| correlation_id = \"...\"`, a STRUCTURED METADATA match rather than a label selector: see docker/alloy/config.alloy for why an ID must never become a label.",
+      "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+      "gridPos": { "h": 16, "w": 24, "x": 0, "y": 8 },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+          "editorMode": "code",
+          "expr": "{service_name=\"app\", level=~\"$level\"} | correlation_id =~ `$correlation_id.*`",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "logs",
+      "title": "Infrastructure log (PostgreSQL, Redis, Prometheus, Grafana)",
+      "description": "The rest of the stack, shipped by the second pipeline in docker/alloy/config.alloy. Plain text, no parsing, no correlation - it is here because the explanation for an application error is sometimes a line PostgreSQL wrote a second earlier, and having to go and find it in `docker logs` is exactly the friction centralized logging removes.",
+      "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+          "editorMode": "code",
+          "expr": "{service_name=~\"db|cache|prometheus|grafana\"}",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
