@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 13: Caching (tag: pending, PR: pending)
+## Phase 13: Caching (tag: phase-13-complete, PR #15)
 **What exists now:** The catalogue is served from Redis. `GET /api/products` and
 `/api/products/{id}` are `@Cacheable`; create/update/delete keep the cache honest. Per-cache TTL
 (product 10 min, listing 2 min), JSON values typed per cache, hit/miss logging, and a
