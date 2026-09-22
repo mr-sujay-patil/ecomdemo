@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 11: Continuous Integration
 - **Branch:** feature/phase-11-github-actions
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #11 — raised (ready for review), CI green
+- **Waiting for user:** YES — review and merge PR #11, then say `merged, continue`
 
 ## Phase 10 merge verification (passed 2026-09-22)
 PR #10 MERGED with a merge commit (35d99a5, 2 parents: d2ab0a2 + 33a5095); branch is an ancestor
@@ -32,7 +32,7 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
       (optional, in scope: the workflow runs the smoke test against the compose stack)
 - [x] Testing protocol run in full + docs/test-reports/phase-11.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 09 archived), tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#11) — opened as a draft so CI would run, then marked ready
 
 **User's manual step (after the merge):** add "Require status checks to pass" (the CI job) to the
 `main` branch protection in the GitHub UI. From then on, merge only when CI is green.
@@ -77,5 +77,16 @@ not deleted. `.env` exists locally with a real JWT_SECRET and is gitignored. No 
 processes.
 
 ## Next action
-Mark PR #11 ready for review (it was opened as a draft so CI would run against a real pull
-request), post the Phase Review Report, then STOP for the user's review.
+STOPPED at the mandatory post-PR stop point. PR #11 is ready for review and CI is green
+(mergeStateStatus CLEAN, run 35684569454).
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`. From
+  THIS phase onwards that also means confirming CI on `main` is green — and here it is doubly
+  important, because the merge run is the first and only chance to verify the ⚠️ item above:
+  that a merge publishes an image. Commands in docs/test-reports/phase-11.md §5. Then the usual
+  `./mvnw clean verify` + `scripts/smoke-test.sh` against the compose stack, the git-workflow
+  Verification Checklist, tag and push `phase-11-complete`, then start Phase 12
+  (`docs/phases/phase-12-sonarqube.md`).
+- Remind the user of their manual step: add "Require status checks to pass" to the `main` branch
+  protection. Until then CI reports but does not enforce.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
