@@ -17,10 +17,11 @@ import org.springframework.kafka.support.JacksonUtils;
 /**
  * What the outbox row actually contains.
  *
- * <p>The mapper here is the real one — {@link JacksonUtils#enhancedObjectMapper()}, exactly the
- * instance {@code OutboxPublisherConfig} supplies — because the payload's FORMAT is the thing
- * under test. A mocked mapper would let this pass while the bytes on the topic were unreadable to
- * the consumer, which is the one failure mode that cannot be caught anywhere else until run time.
+ * <p>The writer builds its own mapper — {@link JacksonUtils#enhancedObjectMapper()}, the Kafka
+ * consumer's — and this test reads the payload back with the same one. That round trip is the
+ * point: the payload's FORMAT is what is under test, and a mismatch between the mapper that writes
+ * it and the mapper that reads it is the one failure mode nothing else in the build would catch
+ * before run time.
  *
  * <p>That the append joins the caller's transaction is a claim about Spring's proxy and is proved
  * in {@code OutboxRelayKafkaIT}, where there is a real transaction to join and a real one to be
@@ -39,7 +40,7 @@ class OutboxWriterTest {
     void setUp() {
         // Constructed here and not in a field initialiser: field initialisers run before Mockito
         // populates @Mock, so the writer would be built around a null repository.
-        writer = new OutboxWriter(outbox, JacksonUtils.enhancedObjectMapper());
+        writer = new OutboxWriter(outbox);
     }
 
     private static final OrderPlacedEvent EVENT =

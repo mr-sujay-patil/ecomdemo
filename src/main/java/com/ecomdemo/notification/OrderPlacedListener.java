@@ -82,6 +82,25 @@ public class OrderPlacedListener {
      * cannot be deserialised, never reaches this method at all: it fails in the deserializer and
      * is routed by the error handler, which is why the poison-message test sends malformed bytes
      * rather than a valid event that happens to break.
+     *
+     * <p><strong>{@code kafkaTemplate} is named explicitly, and Phase 18 is why.</strong> The
+     * retry and dead-letter publications go out through a {@code KafkaTemplate} that Spring Kafka
+     * resolves BY TYPE. Phase 17 had exactly one, so the default worked and the attribute was not
+     * needed. Phase 18 added a second — the outbox relay's {@code <String, String>} template,
+     * which sends the committed payload bytes through a {@code StringSerializer} — and the
+     * resolution picked that one. The retry publication then tried to send an
+     * {@code OrderPlacedEvent} through a serializer that accepts only strings and threw
+     * {@code ClassCastException} inside {@code DeadLetterPublishingRecoverer}.
+     *
+     * <p>The consequence was worse than a failed send: the recoverer could not move the record
+     * anywhere, so the poison message was never recovered, the offset was never committed, and
+     * the whole partition stopped — which is precisely the head-of-line blocking the retry topics
+     * exist to prevent, reintroduced by a bean added three packages away. The smoke test caught
+     * it; nothing in the unit or integration suites would have, because neither has two templates
+     * and a poison message at the same time.
+     *
+     * <p>Naming the template makes the choice explicit rather than emergent, so adding a third
+     * template later cannot silently re-point this.
      */
     @RetryableTopic(
             attempts = "3",
@@ -89,7 +108,8 @@ public class OrderPlacedListener {
             sameIntervalTopicReuseStrategy = SameIntervalTopicReuseStrategy.SINGLE_TOPIC,
             topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
             retryTopicSuffix = KafkaTopics.RETRY_SUFFIX,
-            dltTopicSuffix = KafkaTopics.DLT_SUFFIX)
+            dltTopicSuffix = KafkaTopics.DLT_SUFFIX,
+            kafkaTemplate = "kafkaTemplate")
     @KafkaListener(
             topics = KafkaTopics.ORDERS_PLACED,
             groupId = KafkaTopics.NOTIFICATION_GROUP)

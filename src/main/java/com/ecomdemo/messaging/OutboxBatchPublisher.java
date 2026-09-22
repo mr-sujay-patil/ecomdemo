@@ -5,9 +5,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.domain.Limit;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,16 +58,13 @@ class OutboxBatchPublisher {
     private static final Duration ACK_TIMEOUT = Duration.ofSeconds(15);
 
     private final OutboxEventRepository outbox;
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private final OutboxKafkaSender sender;
     private final OutboxProperties properties;
 
     OutboxBatchPublisher(
-            OutboxEventRepository outbox,
-            @Qualifier(OutboxPublisherConfig.OUTBOX_KAFKA_TEMPLATE)
-                    KafkaTemplate<String, String> kafkaTemplate,
-            OutboxProperties properties) {
+            OutboxEventRepository outbox, OutboxKafkaSender sender, OutboxProperties properties) {
         this.outbox = outbox;
-        this.kafkaTemplate = kafkaTemplate;
+        this.sender = sender;
         this.properties = properties;
     }
 
@@ -141,8 +136,7 @@ class OutboxBatchPublisher {
      * column holds; the bytes are identical.
      */
     private void awaitAck(OutboxEvent event) throws Exception {
-        kafkaTemplate
-                .send(topicFor(event), event.getAggregateId(), event.getPayload())
+        sender.send(topicFor(event), event.getAggregateId(), event.getPayload())
                 .get(ACK_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
     }
 

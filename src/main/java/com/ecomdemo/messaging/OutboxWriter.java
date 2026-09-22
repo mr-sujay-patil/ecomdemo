@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.kafka.support.JacksonUtils;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,6 +45,24 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>It also means a serialisation failure is found while the transaction is still open, so the
  * order rolls back and the customer gets an error — instead of the relay discovering, minutes
  * later and on a background thread, that it is holding a row it can never send.
+ *
+ * <h2>The mapper is the consumer's, and is not injected</h2>
+ *
+ * <p>Spring Boot 4 auto-configures Jackson 3 ({@code tools.jackson.databind.json.JsonMapper}),
+ * which serialises every HTTP response here. The Kafka consumer reads with
+ * {@link JsonDeserializer}, spring-kafka's <em>Jackson 2</em> deserializer, backed by
+ * {@link JacksonUtils#enhancedObjectMapper()}. Two Jackson majors, two default configurations.
+ *
+ * <p>An outbox payload is a Kafka message body, so it must be written by the mapper that message
+ * will be read by. The two disagree exactly where it hurts most — whether an {@code Instant} goes
+ * out as an ISO-8601 string or an epoch decimal is a mapper default, not a property of the record
+ * — and a mismatch fails nowhere in the build. It fails at the consumer, at run time, on a message
+ * the producer considers perfectly good.
+ *
+ * <p>So the mapper is constructed here rather than injected. That is a deliberate exception to
+ * constructor injection: which mapper writes this payload is not a configuration choice to be
+ * varied per environment or per test, it is a correctness requirement tied to the deserializer on
+ * the other end. Making it injectable would make it possible to get wrong.
  */
 @Component
 public class OutboxWriter {
@@ -52,12 +72,13 @@ public class OutboxWriter {
     /** What the event is about. One aggregate today; the column exists for the next one. */
     static final String ORDER_AGGREGATE = "Order";
 
-    private final OutboxEventRepository outbox;
-    private final ObjectMapper objectMapper;
+    /** The consumer's own mapper. See the class comment: this is a correctness requirement. */
+    private static final ObjectMapper PAYLOAD_MAPPER = JacksonUtils.enhancedObjectMapper();
 
-    public OutboxWriter(OutboxEventRepository outbox, ObjectMapper objectMapper) {
+    private final OutboxEventRepository outbox;
+
+    public OutboxWriter(OutboxEventRepository outbox) {
         this.outbox = outbox;
-        this.objectMapper = objectMapper;
     }
 
     /**
@@ -70,7 +91,7 @@ public class OutboxWriter {
     public void append(OrderPlacedEvent event) {
         String payload;
         try {
-            payload = objectMapper.writeValueAsString(event);
+            payload = PAYLOAD_MAPPER.writeValueAsString(event);
         } catch (JsonProcessingException e) {
             // Unchecked, so the caller's transaction rolls back by Spring's default rules. A
             // checked exception here would commit the order and skip the event, which is the one

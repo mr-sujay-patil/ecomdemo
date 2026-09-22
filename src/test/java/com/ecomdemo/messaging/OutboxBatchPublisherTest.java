@@ -21,7 +21,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Limit;
-import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.SendResult;
 
 /**
@@ -42,7 +41,7 @@ class OutboxBatchPublisherTest {
     private OutboxEventRepository outbox;
 
     @Mock
-    private KafkaTemplate<String, String> kafkaTemplate;
+    private OutboxKafkaSender sender;
 
     private OutboxBatchPublisher publisher;
 
@@ -51,7 +50,7 @@ class OutboxBatchPublisherTest {
         publisher =
                 new OutboxBatchPublisher(
                         outbox,
-                        kafkaTemplate,
+                        sender,
                         new OutboxProperties(Duration.ofSeconds(1), 10, Duration.ofDays(7), "-"));
     }
 
@@ -67,10 +66,10 @@ class OutboxBatchPublisherTest {
     /**
      * A completed future carrying null. The publisher waits on the future and ignores its value —
      * it needs the ACKNOWLEDGEMENT, not the metadata — so null is the honest stub rather than a
-     * mock {@code SendResult} pretending to be consulted.
+     * mock result pretending to be consulted.
      */
     private void sendSucceeds() {
-        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+        when(sender.send(anyString(), anyString(), anyString()))
                 .thenReturn(completed());
     }
 
@@ -79,7 +78,7 @@ class OutboxBatchPublisherTest {
     }
 
     private void sendFailsWith(String message) {
-        when(kafkaTemplate.send(anyString(), anyString(), anyString()))
+        when(sender.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException(message)));
     }
 
@@ -111,7 +110,7 @@ class OutboxBatchPublisherTest {
 
             publisher.publishPendingBatch();
 
-            verify(kafkaTemplate).send(eq(KafkaTopics.ORDERS_PLACED), eq("4812"), anyString());
+            verify(sender).send(eq(KafkaTopics.ORDERS_PLACED), eq("4812"), anyString());
         }
 
         @Test
@@ -125,7 +124,7 @@ class OutboxBatchPublisherTest {
             publisher.publishPendingBatch();
 
             ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
-            verify(kafkaTemplate).send(anyString(), anyString(), payload.capture());
+            verify(sender).send(anyString(), anyString(), payload.capture());
             // Byte-for-byte what the transaction committed. If the relay ever deserialised and
             // re-serialised the payload, this would still pass for a simple record and would
             // quietly start failing the day a field's representation changed - so the assertion
@@ -141,7 +140,7 @@ class OutboxBatchPublisherTest {
 
             assertThat(publisher.publishPendingBatch()).isZero();
 
-            verify(kafkaTemplate, never()).send(anyString(), anyString(), anyString());
+            verify(sender, never()).send(anyString(), anyString(), anyString());
         }
     }
 
@@ -205,7 +204,7 @@ class OutboxBatchPublisherTest {
             assertThat(first.getAttempts()).isEqualTo(1);
             assertThat(second.getAttempts()).as("never attempted").isZero();
             assertThat(third.getAttempts()).as("never attempted").isZero();
-            verify(kafkaTemplate).send(anyString(), anyString(), anyString());
+            verify(sender).send(anyString(), anyString(), anyString());
         }
 
         @Test
@@ -215,8 +214,8 @@ class OutboxBatchPublisherTest {
             OutboxEvent second = orderEvent("2");
             when(outbox.findByPublishedAtIsNullOrderByIdAsc(any(Limit.class)))
                     .thenReturn(List.of(first, second));
-            when(kafkaTemplate.send(anyString(), eq("1"), anyString())).thenReturn(completed());
-            when(kafkaTemplate.send(anyString(), eq("2"), anyString()))
+            when(sender.send(anyString(), eq("1"), anyString())).thenReturn(completed());
+            when(sender.send(anyString(), eq("2"), anyString()))
                     .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("gone")));
 
             assertThat(publisher.publishPendingBatch()).isEqualTo(1);
