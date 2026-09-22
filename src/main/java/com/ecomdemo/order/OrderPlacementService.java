@@ -5,12 +5,14 @@ import com.ecomdemo.cart.CartItem;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.common.ConflictException;
 import com.ecomdemo.common.InsufficientStockException;
+import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
 import com.ecomdemo.security.CurrentUser;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,18 +40,21 @@ class OrderPlacementService {
     private final ProductService productService;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
+    private final ApplicationEventPublisher events;
 
     OrderPlacementService(
             OrderRepository orderRepository,
             CartService cartService,
             ProductService productService,
             OrderAuditService orderAuditService,
-            CurrentUser currentUser) {
+            CurrentUser currentUser,
+            ApplicationEventPublisher events) {
         this.orderRepository = orderRepository;
         this.cartService = cartService;
         this.productService = productService;
         this.orderAuditService = orderAuditService;
         this.currentUser = currentUser;
+        this.events = events;
     }
 
     /**
@@ -102,6 +107,20 @@ class OrderPlacementService {
 
             Order placed = orderRepository.save(order);
             cartService.clearCart(cart);
+
+            // Announced INSIDE the transaction and delivered after it commits — the same shape
+            // the cache evictor uses, and for the same reason: a message cannot be un-sent, so
+            // an order that might still roll back must not be announced. What listens is
+            // OrderEventPublisher, which puts it on Kafka; this method neither knows nor cares
+            // that Kafka exists, which is what keeps a broker outage out of the checkout path.
+            events.publishEvent(
+                    OrderPlacedEvent.of(
+                            placed.getId(),
+                            placed.getUsername(),
+                            placed.getTotalAmount(),
+                            placed.getItems().size(),
+                            placed.getPlacedAt()));
+
             return OrderResponse.from(placed);
         } catch (ConflictException ex) {
             // Written in its own transaction, so it is already committed when this one rolls

@@ -3,120 +3,114 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** between phases - Phase 16 is complete and tagged; on `fix/product-cache-eviction`
-- **Branch:** fix/product-cache-eviction
+- **Phase:** 17: Messaging (Apache Kafka, KRaft)
+- **Branch:** feature/phase-17-kafka
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #20 - the cache fix, raised and awaiting review
-  https://github.com/mr-sujay-patil/ecomdemo/pull/20
-  https://github.com/mr-sujay-patil/ecomdemo/pull/19
-  https://github.com/mr-sujay-patil/ecomdemo/pull/18
-- **Waiting for user:** YES - review and merge PR #20
+- **PR:** #21 — raised, CI green (`Build and test` pass), mergeStateStatus CLEAN
+  https://github.com/mr-sujay-patil/ecomdemo/pull/21
+- **Waiting for user:** YES — review and merge PR #21
 
-## Phase 15 merge verification (passed 2026-09-22)
-PR #17 MERGED with a merge commit (77a9d13, 2 parents: a5ff674 + 8345ab6); the branch is an
-ancestor of `main`; no commits and no file diffs between branch and `main`; all 16 branches
-intact on GitHub. The whole `com.ecomdemo.metrics` package, `docker/prometheus/*`,
-`docker/grafana/*` and the Phase 15 test classes are present in `main`.
-**CI on `main` green** (run 35716925251: `Build and test` SUCCESS, `Publish image to GHCR` SUCCESS).
-`./mvnw clean verify` on `main` -> BUILD SUCCESS, 241 unit + 62 IT, 0 failures, 0 skipped, 1m12s.
-`docker compose up -d --build` from `main` recreated `ecomdemo-app`; `scripts/smoke-test.sh`
--> 204 passed, 0 failed, 0 skipped. Tag `phase-15-complete` pushed.
-**Environment gotcha found during verification:** `git checkout main` deleted `docker/grafana/`
-and `docker/prometheus/` (they did not exist in `main` before the merge) and the pull recreated
-them with new inodes, so the already-running Grafana container's bind mounts pointed at the stale
-directories and saw them EMPTY - the 2 dashboard smoke checks failed. Fix:
-`docker compose up -d --force-recreate grafana prometheus`. Not a code defect; re-run was clean.
+## Phase 16 merge verification (passed 2026-09-22)
+PR #18 merged as a merge commit (e407627, parents 77a9d13 + 1313a6e), plus follow-up PR #19
+(dc35a85) for two defects the verification itself found: Alloy's health check ran under dash,
+which has no `/dev/tcp`, and the infrastructure log check used Loki's default label window.
+Branch is an ancestor of `main`, no missing commits, no file diffs, all branches intact.
+CI on `main` green. `./mvnw clean verify` on `main` -> 269 + 70, 0 failures, 0 skipped.
+`scripts/smoke-test.sh` -> 228 passed, 0 failed, 0 skipped. Tag `phase-16-complete` pushed.
+
+## The Phase 13 cache defect is CLOSED (PR #20, merged c9fa121)
+Accepted as a known defect during Phase 16, then fixed on the user's instruction before Phase 17.
+A checkout now evicts `product::<id>` and `productList::all` through
+`@TransactionalEventListener(AFTER_COMMIT)`; `ProductService.save` publishes
+`ProductStockChangedEvent` and `cache/ProductCacheEvictor` acts on it. Merge verification passed:
+merge commit c9fa121 (2 parents), no diff, CI green, `./mvnw clean verify` on `main` -> **273 +
+73**, 0 failures, 0 skipped, `scripts/smoke-test.sh` -> **234 passed, 0 failed, 0 skipped**.
+No tag - a fix branch is not a phase. Report: `docs/test-reports/fix-product-cache-eviction.md`.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] Structured JSON console logging
-- [x] A correlation ID filter with MDC, also returned in a response header
-- [x] Loki and Grafana Alloy in Compose, with Loki as a Grafana data source
-- [x] No sensitive data in logs
-- [x] Done when: all logs for one request can be found in Grafana by correlation ID
-- [x] Smoke test additions: every response carries an `X-Correlation-Id` header; querying Loki's
-      API for that ID returns log lines - 23 new checks, all passing
-- [x] Testing protocol run in full + docs/test-reports/phase-16.md
-- [x] README section, docs/decisions.md entries (15), RECENT.md rotation (Phase 14 archived),
+- [x] Kafka (single broker, KRaft) and Kafka UI in Compose
+- [x] An `OrderPlacedEvent` published to `orders.placed`, keyed by order id
+- [x] A `notification` consumer that writes a log line and a `notifications` row
+- [x] Retry topics with backoff and a dead-letter topic
+- [x] An idempotent consumer backed by a `processed_events` table
+- [x] A Testcontainers Kafka test
+- [x] Done when: each order produces exactly one notification, and poison messages land in the DLT
+- [x] Smoke test additions: after placing an order, exactly one notification row exists for it,
+      and the event is on the `orders.placed` topic - 18 new checks
+- [x] Testing protocol run in full + docs/test-reports/phase-17.md
+- [x] README section, docs/decisions.md entries (13), RECENT.md rotation (Phase 15 archived),
       tracker -> 🔵
-- [x] PR raised
+- [x] PR raised (#21)
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 268 (was 241) + Failsafe 70
-  (was 62), 0 failures, 0 skipped, 1m04s.
-- 2026-09-22: `./mvnw clean test` -> 268, 0 "Creating container" lines; the fast suite is still
-  Docker-free.
-- 2026-09-22: `scripts/smoke-test.sh` -> 227 passed, 0 failed, 0 skipped on the first runs;
-  now **226 passed, 1 failed** on a PRE-EXISTING bug (see below). All 23 of this phase's own
-  checks pass in every run.
-- 2026-09-22: drift guards verified by MUTATION - renaming the correlation field in
-  config.alloy fails StructuredLoggingTest; widening the derived-field regex fails
-  LoggingStackConfigTest. Both files restored and green.
-- 2026-09-22: failure scenario. Loki STOPPED -> the app answered 200 with no added latency and
-  the line written during the outage arrived in Loki after recovery (Alloy buffered and
-  retried).
-- 2026-09-22: secrecy checks proved non-vacuous - the same Loki query returns 344 lines for a
-  string that IS in the logs and 0 for the password and the bearer token.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 278 (was 273) + Failsafe 77
+  (was 73), 0 failures, 0 skipped, 1m55s.
+- 2026-09-22: `./mvnw clean test` -> 278, 0 "Creating container" lines, 29s. Still Docker-free.
+- 2026-09-22: `scripts/smoke-test.sh` -> 252 passed (was 234), 0 failed, 0 skipped.
+- 2026-09-22: FAILURE SCENARIO found a real bug. Kafka stopped -> checkout returned 201 after
+  **97.77s**, because KafkaTemplate.send blocks for max.block.ms (60s default) waiting for
+  metadata and the AFTER_COMMIT listener runs on the request thread. Fixed with @Async onto a
+  bounded pool + max.block.ms=5000: the same test now gives 0.18s and 0.05s. On recovery the
+  next order is notified, though the first one lags tens of seconds while clients reconnect.
+- 2026-09-22: the outage cost 4 orders their notification, permanently - the dual-write gap
+  Phase 18 closes. Measured, not assumed.
 
 ## Open issues / blockers
-- ⚠️ **KNOWN DEFECT, accepted by the user (2026-09-22), carried not fixed.**
-  `scripts/smoke-test.sh` fails one check, "failed checkout did not touch
-  stock". It is NOT this phase's: placing an order decrements product.stock_quantity in the
-  database and evicts NEITHER Phase 13 cache, so GET /api/products/{id} serves the pre-order
-  stock for up to the 300s TTL. Reproduced directly (DB 2, API 4); the `order` package contains
-  no eviction at all; `git diff main -- src/main/java/com/ecomdemo/{order,product,cache}` is
-  empty. Fixing it is Phase 13 scope (hard rule 7) and weakening the check is forbidden (hard
-  rule 8). The user chose to ACCEPT it as a known defect: the check stays exactly as it is and
-  the smoke test stays red on it until a later phase picks it up. Full evidence in
-  `docs/test-reports/phase-16.md` §7.
-- Carried over from Phase 15: the Grafana dashboards' RENDER has still never been looked at by
+- Carried from Phases 15-16: the Grafana dashboards' RENDER has still never been looked at by
   human eyes (all data behind them is verified). Chrome's site permissions block localhost:3000
-  for browser automation here. Steps: `docs/test-reports/phase-15.md` §8, and for this phase the
-  "EcomDemo Logs" dashboard with a correlation ID pasted into its textbox.
+  for browser automation here. Steps: `docs/test-reports/phase-15.md` §8 and the "EcomDemo Logs"
+  dashboard with a correlation ID pasted into its textbox.
 
-## Decisions this phase (copied to docs/decisions.md ✅ — 15 entries)
-- LOG_FORMAT as an environment variable, not a baked-in property: the format is a deployment
-  decision, and an empty value is Boot's own "not structured".
-- ECS rather than logstash/gelf, and NO logback-spring.xml - structured logging is native to
-  Boot since 3.4, so the whole feature is two properties and no new dependency.
-- MDC key `correlation_id` (flat) vs header `X-Correlation-Id`: a dotted MDC key becomes a
-  NESTED JSON object in ECS output.
-- An inbound ID is validated against [A-Za-z0-9_-]{8,64} and REPLACED, never rejected: log
-  injection is the threat, and a 400 would turn diagnostics into an availability problem.
-- CorrelationIdFilter at HIGHEST_PRECEDENCE, ahead of Spring Security at -100, and the header is
-  set BEFORE the chain runs.
-- MDC cleared in a `finally` and shouldNotFilterErrorDispatch() false - a leaked ID files the
-  NEXT request's lines under this one's story.
-- RequestLogFilter describes a request but never quotes it: no headers, no body, no query string.
-- RequestLogFilter skips /actuator; CorrelationIdFilter deliberately does not.
-- correlation_id is STRUCTURED METADATA, not a Loki label: one value per request would be one
-  Loki stream per request.
-- The application writes to stdout and knows nothing about Loki; Alloy ships.
-- Alloy uses an allow-list of services (compose.sonar.yaml shares the Compose project name).
-- No HTTP health check for Loki (distroless image) or Alloy (no curl/wget); readiness is checked
-  from the host in the smoke test.
-- 7-day retention WITH compactor.retention_enabled - without it the period configures nothing.
-- A second dashboard rather than log panels on the Phase 15 overview.
-- StructuredLoggingTest asserts config.alloy's JMESPath expressions against a real ECS document.
+## Decisions this phase (copied to docs/decisions.md ✅ — 13 entries)
+- KRaft, one broker, every replication factor written out as 1 (the internal topics default to 3
+  and fail when first needed).
+- Two listeners: INTERNAL kafka:9092 and HOST localhost:29092 - a client reconnects to the
+  ADVERTISED address, so one address cannot serve both callers.
+- Topics from NewTopic beans with auto.create.topics.enable=false.
+- A hand-written event record, not the entity; keyed by order id so one order's events share a
+  partition.
+- AFTER_COMMIT publication, with the dual-write gap documented and measured rather than hidden.
+- @Async on a bounded pool with an ABORT policy, plus max.block.ms=5000 (found by the failure
+  test - see above).
+- Idempotency is the consumer's job: processed_event's PRIMARY KEY is the event id from the
+  message; marker and work in one transaction, marker first.
+- Retries on separate TOPICS, not in the consumer thread (head-of-line blocking).
+- Retry topics suffixed by INDEX, not delay (jitter would create new topics every restart).
+- ErrorHandlingDeserializer, or a malformed message stops the partition for ever.
+- Nothing consumes the DLT.
+- A real broker in Testcontainers; Kafka switched off entirely in the fast suite.
+- spring-boot-starter-kafka, not the bare spring-kafka (Boot 4 auto-config modules).
 
 ## Environment left behind
-Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`,
-`ecomdemo-cache`, `ecomdemo-prometheus`, `ecomdemo-grafana`, `ecomdemo-loki`, `ecomdemo-alloy`),
-schema v8, image built from this branch.
-SonarQube stack (`ecomdemo-sonarqube`, `ecomdemo-sonar-db`) also up at http://localhost:9000;
-stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted back. `.env`
-holds a real JWT_SECRET and is gitignored. No stray Java processes.
+Docker Desktop RUNNING. NINE containers up (`ecomdemo-app`, `-db`, `-cache`, `-prometheus`,
+`-grafana`, `-loki`, `-alloy`, `-kafka`, `-kafka-ui`), schema **v9**, image built from this
+branch. The SonarQube stack was STOPPED during this phase to free memory for Testcontainers;
+`docker compose -f compose.sonar.yaml up -d` brings it back. `.env` holds a real JWT_SECRET and
+is gitignored.
 
 ## Next action
-STOPPED after raising PR #20 (the cache fix). Phase 16 is MERGED (PR #18 + follow-up #19) and
-TAGGED `phase-16-complete`; merge verification passed on `main` (269 + 70 green, CI green, smoke
-228/228).
-
-The defect the user accepted during Phase 16 is now FIXED on the user's instruction:
-a checkout evicts both catalogue caches through `@TransactionalEventListener(AFTER_COMMIT)`.
-273 + 73 tests green, smoke **234 passed, 0 failed, 0 skipped**.
-- If they say `merged, continue` -> merge verification of #20 on `main`, then start Phase 17
-  (`docs/phases/phase-17-kafka.md`). No tag: this is a fix branch, not a phase.
-- If they say `changes: <feedback>` -> fix on this same branch and re-run the full protocol.
+STOPPED at the mandatory post-PR stop point.
+https://github.com/mr-sujay-patil/ecomdemo/pull/21
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
+  tag `phase-17-complete` and start Phase 18 (`docs/phases/phase-18-outbox.md`), which exists to
+  close the dual-write gap this phase measured.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say so explicitly.
-- Still outstanding for the user: look at the Grafana dashboards' RENDER (Phase 15/16 ⚠️).
+- Two things are outstanding for the user's eyes: the Grafana dashboards' RENDER (Phases 15-16)
+  and Kafka UI at http://localhost:8090, which is the nicest way to see a partition and a key.
+- The SonarQube stack is STOPPED; `docker compose -f compose.sonar.yaml up -d` brings it back.
+
+Five traps hit and fixed, all in the test report:
+1. `spring-kafka` alone gives no auto-configuration in Boot 4 - the auto-config lives in
+   `spring-boot-kafka`, so the dependency must be `spring-boot-starter-kafka`. The symptom is a
+   missing KafkaTemplate BEAN, which reads like an application bug.
+2. V9 first used PostgreSQL spellings (BIGSERIAL, TIMESTAMPTZ, now()) and failed the whole
+   Surefire suite on H2. Migrations must use the portable spelling every earlier one uses.
+3. `spring.kafka.admin.auto-create=false` in the test profile: KafkaAdmin applied the NewTopic
+   beans at startup and every @SpringBootTest spent 45s timing out against a broker that is not
+   there.
+4. Retry topics are named after the DELAY by default, and `@BackOff(jitter=...)` makes that a
+   different number every run - `orders.placed-retry-1031`, `-retry-1661`, new ones for ever.
+   Fixed with `TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE`.
+5. The 97-second checkout (see Last test run). The fix is @Async + max.block.ms.

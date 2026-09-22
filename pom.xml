@@ -276,6 +276,32 @@
 		</dependency>
 
 		<!--
+			Apache Kafka (Phase 17). `spring-kafka` brings the `kafka-clients` library plus
+			Spring's wrapper over it: `KafkaTemplate` for producing, `@KafkaListener` and the
+			listener container for consuming, and the `@RetryableTopic` machinery that creates
+			the retry and dead-letter topics.
+
+			No version: Spring Boot manages both. Boot 4.1.1 pins spring-kafka 4.1.1 and
+			kafka-clients 4.2.1 - and compose runs the broker on `apache/kafka:4.2.1`, the same
+			number on purpose. The Kafka protocol is versioned and negotiated, so a mismatch
+			usually works; matching them means the client never silently falls back to an older
+			protocol version and behaves differently here than it would against the broker it
+			was tested with.
+
+			THE STARTER, NOT `org.springframework.kafka:spring-kafka`. Boot 4 split its
+			auto-configuration out of the monolithic `spring-boot-autoconfigure` into a module per
+			technology, so the library on its own now gives you the classes and none of the
+			wiring: `KafkaAutoConfiguration` lives in `spring-boot-kafka`, which this starter
+			brings. The symptom of getting it wrong is not a missing class but a missing BEAN -
+			"required a bean of type 'KafkaTemplate' that could not be found" - which reads like
+			an application mistake rather than a dependency one.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-kafka</artifactId>
+		</dependency>
+
+		<!--
 			Testcontainers. `testcontainers-postgresql` starts a real PostgreSQL server in a
 			Docker container for the duration of the tests and throws it away afterwards, so the
 			integration tests run against the same engine production uses instead of an H2
@@ -296,6 +322,11 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-kafka</artifactId>
 			<scope>test</scope>
 		</dependency>
 		<dependency>

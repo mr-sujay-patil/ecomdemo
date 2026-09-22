@@ -110,6 +110,12 @@ services:
         condition: service_healthy
       cache:
         condition: service_healthy
+      kafka:
+        # The application publishes on checkout, so it needs a broker that is genuinely serving
+        # requests - not merely a container that has started. Spring's producer would retry
+        # anyway, but a checkout during that window would block for `delivery.timeout.ms` and
+        # then fail, which is a strange first impression of `docker compose up`.
+        condition: service_healthy
     environment:
       # --- CONTAINER NETWORKING -------------------------------------------------------------
       # `db` is a hostname here, resolved by Compose's own DNS on the network it creates for this
@@ -138,6 +144,10 @@ services:
       # Overrides the Dockerfile's default when set in .env — useful for pinning a heap on a
       # laptop, or adding -XX:+HeapDumpOnOutOfMemoryError while debugging.
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError}
+
+      # Kafka, reached by service name on the compose network - same reasoning as `db`. This is
+      # the INTERNAL listener; the published 29092 is for producers running on the host.
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
       # Structured logging (Phase 16). Empty everywhere else, so `./mvnw spring-boot:run` on a
       # laptop keeps the readable pattern layout; `ecs` here because this container's stdout is
@@ -338,6 +348,98 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # -------------------------------------------------------------------------------------------
+  # Apache Kafka (Phase 17) - the log everything is published to
+  # -------------------------------------------------------------------------------------------
+  # KRAFT MODE, so there is no ZooKeeper here. Until Kafka 3.3 a cluster needed a second
+  # distributed system beside it just to agree on who the controller was and where the partitions
+  # lived; KRaft moves that metadata into a Kafka log managed by the brokers themselves. One
+  # process instead of two, and one fewer thing to operate - ZooKeeper is removed entirely as of
+  # Kafka 4.0, so every `zookeeper:` service in an older tutorial is now wrong rather than merely
+  # dated.
+  #
+  # One broker, which is honest about what this is: a laptop. It means replication-factor 1 for
+  # every topic, so a broker failure loses data and `min.insync.replicas` has nothing to say. A
+  # real cluster is three brokers with replication-factor 3 - the reasoning is in the README, and
+  # nothing in the application code changes between the two.
+  kafka:
+    image: apache/kafka:4.2.1
+    container_name: ecomdemo-kafka
+    environment:
+      # This broker is both broker AND controller. In a real cluster those are usually separate
+      # roles on separate machines; combining them is the standard single-node arrangement.
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+
+      # THE LISTENER SET IS THE PART THAT GOES WRONG. A Kafka client does not keep talking to the
+      # address it dialled: it asks for metadata and is told where the partition leaders are, then
+      # connects to THOSE addresses. So the broker must advertise an address that is correct from
+      # the caller's point of view - and "the caller" here is two different places at once. The
+      # app and Kafka UI reach it as `kafka:9092` over the compose network; a producer on the host
+      # reaches it as `localhost:29092`. One advertised address cannot be right for both, which is
+      # why there are two listeners rather than one.
+      KAFKA_LISTENERS: INTERNAL://:9092,CONTROLLER://:9093,HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+
+      # With one broker, every one of these MUST be 1. They default to 3, and a default of 3 on a
+      # single-node cluster fails at the moment the topic is first needed rather than at startup -
+      # which is a confusing way to learn that consumer offsets are themselves a Kafka topic.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+
+      # A consumer group rebalance waits this long for stragglers to join before assigning
+      # partitions. The default of 3s is aimed at a production cluster where instances come and
+      # go; locally it just adds three seconds to every start, and to every test.
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+      # Topics are created by the application (see KafkaTopicsConfig), never by a producer's first
+      # send. Auto-creation invents a topic with default partitions and replication the moment
+      # somebody typos a name, and the typo then looks like it worked.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      CLUSTER_ID: ecomdemo-kraft-cluster
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    ports:
+      # Only the HOST listener is published. 9092 stays inside the compose network.
+      - "${KAFKA_PORT:-29092}:29092"
+    healthcheck:
+      # Asks the broker to describe the cluster, which fails until it is genuinely serving
+      # requests - unlike a port check, which passes while KRaft is still electing a controller.
+      # The image ships the CLI, so unlike Loki there is something here to ask with.
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-cluster.sh cluster-id --bootstrap-server localhost:9092 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # Kafka UI (Phase 17) - a window into the log
+  # -------------------------------------------------------------------------------------------
+  # Not required by anything: the application, the tests and the smoke test all work without it.
+  # It is here because a topic is otherwise invisible, and "the message is on the topic" is much
+  # easier to believe once you have watched it arrive, seen which partition it landed in, and read
+  # the key it was routed by.
+  kafka-ui:
+    image: kafbat/kafka-ui:v1.5.0
+    container_name: ecomdemo-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: ecomdemo
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      DYNAMIC_CONFIG_ENABLED: "false"
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    restart: unless-stopped
+
 volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
@@ -358,3 +460,7 @@ volumes:
 
   # Alloy's read positions, so a restart does not re-ship every container's whole log.
   alloy-data:
+
+  # Kafka's log segments and its KRaft metadata. A topic is a durable log, and losing this volume
+  # loses every message on it along with the consumer group offsets.
+  kafka-data:

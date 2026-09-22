@@ -52,7 +52,7 @@ class FlywayMigrationTest {
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -94,7 +94,8 @@ class FlywayMigrationTest {
                 "add users",
                 "cart and orders per user",
                 "batch job repository",
-                "index product name");
+                "index product name",
+                "notifications and processed events");
     }
 
     @Test

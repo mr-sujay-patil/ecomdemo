@@ -13,6 +13,7 @@ import static org.mockito.Mockito.when;
 import com.ecomdemo.cart.Cart;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
@@ -62,6 +63,15 @@ class OrderPlacementServiceTest {
 
     @Mock
     private CurrentUser currentUser;
+
+    /**
+     * Phase 17 added this. The service announces a placed order through Spring's event publisher
+     * and knows nothing about Kafka; what listens is {@code OrderEventPublisher}, and that it
+     * listens AFTER the commit is a claim about a real transaction, made in
+     * {@code OrderPlacedKafkaIT} rather than here.
+     */
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher events;
 
     @InjectMocks
     private OrderPlacementService placementService;
@@ -234,5 +244,26 @@ class OrderPlacementServiceTest {
 
     private static Answer<Order> saveReturnsItsArgument() {
         return invocation -> invocation.getArgument(0);
+    }
+
+    @Test
+    void placeOnce_whenTheOrderIsPlaced_announcesItForPublication() {
+        // The event is published INSIDE the transaction and delivered after it commits, so this
+        // assertion is about the announcement and not about Kafka. The event id is generated here,
+        // once, and travels with the message - which is what lets the consumer recognise a
+        // redelivery (see NotificationServiceTest).
+        Product product = TestData.product(1L, "Desk Lamp", "1200.00", 5);
+        when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, product, 2));
+        when(currentUser.require()).thenReturn(SHOPPER);
+        when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        placementService.placeOnce();
+
+        ArgumentCaptor<OrderPlacedEvent> captor = ArgumentCaptor.forClass(OrderPlacedEvent.class);
+        verify(events).publishEvent(captor.capture());
+        OrderPlacedEvent published = captor.getValue();
+        assertThat(published.username()).isEqualTo(SHOPPER.getUsername());
+        assertThat(published.itemCount()).isEqualTo(1);
+        assertThat(published.eventId()).isNotNull();
     }
 }
