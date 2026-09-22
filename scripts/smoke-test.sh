@@ -1542,6 +1542,11 @@ if [ "$LOKI_READY" = true ]; then
     # deliberately asynchronous - the application writes to stdout and is done; Docker buffers,
     # Alloy tails and batches, Loki flushes - so a query immediately after the request is a race
     # this loop exists to lose safely. Ten seconds is generous for a local stack.
+    #
+    # The loop waits for BOTH requests, not merely the first. Alloy batches, so the two requests
+    # can arrive in separate batches: stopping at the first line would hand the check below a
+    # count of 1 and fail an assertion that asks for 2. A wait loop must wait for the strongest
+    # condition asserted after it, or it is not a wait loop, it is a coin toss.
     as_anonymous
     header GET /api/products "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
     header GET /api/products/99999999 "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
@@ -1550,7 +1555,7 @@ if [ "$LOKI_READY" = true ]; then
     LINES_FOR_ID=0
     for _ in 1 2 3 4 5 6 7 8 9 10; do
         LINES_FOR_ID="$(loki_count "{service_name=\"app\"} | correlation_id = \`$SMOKE_CORRELATION_ID\`")"
-        [ "$LINES_FOR_ID" -gt 0 ] && break
+        [ "$LINES_FOR_ID" -ge 2 ] && break
         sleep 1
     done
 

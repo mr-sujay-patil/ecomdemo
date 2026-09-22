@@ -5,11 +5,25 @@
 - **Updated:** 2026-09-22
 - **Phase:** 17: Messaging (Apache Kafka, KRaft)
 - **Branch:** feature/phase-17-kafka
-- **Step:** PR_OPEN
+- **Step:** PR_OPEN (follow-up PR #22, on the same branch)
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #21 — raised, CI green (`Build and test` pass), mergeStateStatus CLEAN
-  https://github.com/mr-sujay-patil/ecomdemo/pull/21
-- **Waiting for user:** YES — review and merge PR #21
+- **PR:** #21 MERGED (68769a6). Follow-up #22 open — CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN.
+  https://github.com/mr-sujay-patil/ecomdemo/pull/22
+- **Waiting for user:** YES — review and merge the follow-up PR
+
+## Phase 17 merge verification (2026-09-22)
+PR #21 merged as a merge commit 68769a6 (parents c9fa121 + 90d5361). Branch is an ancestor of
+`main`, no missing commits, no file diff, all 19 remote branches intact. CI on `main` green.
+`./mvnw clean verify` on `main` -> 278 + 77, 0 failures, 0 skipped.
+`scripts/smoke-test.sh` on `main` -> run 1: **251 passed, 1 failed**; run 2: 252 passed, 0 failed.
+The tag `phase-17-complete` was ALREADY on origin when this session started (created 22:09, after
+the 21:40 merge) while this file still read PR_OPEN — the previous session tagged without
+checkpointing. Verification was re-run in full rather than assumed.
+
+The one failure is a defect in the smoke script, not the application: the Loki wait loop at
+`scripts/smoke-test.sh:1551` broke at `-gt 0` lines while the next check asserts `-ge 2`, so a
+cold stack whose two requests land in separate Alloy batches fails it. Fixed on
+`feature/phase-17-kafka` (execution-protocol §5: never fix on `main`) and raised as PR #22.
 
 ## Phase 16 merge verification (passed 2026-09-22)
 PR #18 merged as a merge commit (e407627, parents 77a9d13 + 1313a6e), plus follow-up PR #19
@@ -41,7 +55,8 @@ No tag - a fix branch is not a phase. Report: `docs/test-reports/fix-product-cac
 - [x] Testing protocol run in full + docs/test-reports/phase-17.md
 - [x] README section, docs/decisions.md entries (13), RECENT.md rotation (Phase 15 archived),
       tracker -> 🔵
-- [x] PR raised (#21)
+- [x] PR raised (#21) — MERGED
+- [x] Follow-up PR #22: the Loki wait loop waits for both requests, not merely the first
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 278 (was 273) + Failsafe 77
@@ -89,12 +104,19 @@ branch. The SonarQube stack was STOPPED during this phase to free memory for Tes
 `docker compose -f compose.sonar.yaml up -d` brings it back. `.env` holds a real JWT_SECRET and
 is gitignored.
 
+This session cleared three abandoned Testcontainers containers, and STOPPED (not removed) a stray
+`ecomdemo-postgres` from 2026-09-21 that was holding port 5432 and blocking `docker compose up`.
+It is not part of `compose.yaml`; its data is intact and `docker start ecomdemo-postgres` restores
+it, though nothing in this project wants it. An untracked `handoff.md` (a pasted Phase 15 session
+transcript) sits in the working tree, unstaged and unused.
+
 ## Next action
-STOPPED at the mandatory post-PR stop point.
-https://github.com/mr-sujay-patil/ecomdemo/pull/21
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
-  tag `phase-17-complete` and start Phase 18 (`docs/phases/phase-18-outbox.md`), which exists to
-  close the dual-write gap this phase measured.
+STOPPED at a post-PR stop point. Phase 17 itself is merged, verified and tagged; what is open is
+the ONE-FILE follow-up that merge verification earned.
+https://github.com/mr-sujay-patil/ecomdemo/pull/22
+- If they say `approved, merge it` -> `gh pr merge 22 --merge`, then verify, then start Phase 18
+  (`docs/phases/phase-18-outbox.md`), which exists to close the dual-write gap Phase 17 measured.
+  No new tag: a follow-up is not a phase, and `phase-17-complete` already points at 68769a6.
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say so explicitly.
 - Two things are outstanding for the user's eyes: the Grafana dashboards' RENDER (Phases 15-16)

@@ -165,3 +165,26 @@ Docker Desktop running. Nine containers up (`app`, `db`, `cache`, `prometheus`, 
 `alloy`, `kafka`, `kafka-ui`), schema **V9**. The SonarQube stack was stopped during this phase to
 free memory — `docker compose -f compose.sonar.yaml up -d` brings it back. `.env` holds a real
 `JWT_SECRET` and is gitignored. No stray Java processes.
+
+## 10. Post-merge defect: the Loki wait loop was a coin toss
+
+Merge verification on `main` (2026-09-22, after PR #21 merged) ran the smoke test twice on a
+freshly started stack:
+
+    run 1:  251 passed, 1 failed, 0 skipped   <- "and it finds both requests made under that ID"
+    run 2:  252 passed, 0 failed, 0 skipped
+
+Not the application. The check at `scripts/smoke-test.sh:1551` sends **two** requests under one
+correlation ID, then polls Loki for the lines. The poll broke out of its loop as soon as the count
+was `-gt 0`, but the assertion two lines later asks for `-ge 2`. Alloy batches what it tails, so on
+a cold stack the two requests can land in separate batches: the loop saw the first request's lines,
+declared itself satisfied, and handed the second check a count of 1.
+
+A wait loop has to wait for the strongest condition asserted after it. The exit condition is now
+`-ge 2` — the same ten-second budget, but spent on the right question.
+
+Verified against the failure's own conditions: `docker compose restart loki alloy`, then the smoke
+test immediately, which is what the first run was doing by accident.
+
+    ./mvnw clean verify             BUILD SUCCESS, 278 + 77, 0 failures, 0 skipped, 2m50s
+    scripts/smoke-test.sh (cold)    252 passed, 0 failed, 0 skipped
