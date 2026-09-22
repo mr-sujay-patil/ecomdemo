@@ -1,0 +1,54 @@
+# Prometheus' own configuration (Phase 15).
+#
+# Prometheus is a PULL system: nothing in this file tells the application anything, and the
+# application has no idea Prometheus exists. Prometheus reads this list, walks up to each target
+# on a timer, asks for /actuator/prometheus, and stores whatever numbers come back against the
+# moment it asked. That inversion is the design: an application that does not push cannot be
+# slowed down by a monitoring system that is having a bad day, and a target that goes silent is
+# itself a signal (`up == 0`) rather than an absence nobody notices.
+
+global:
+  # How often every target is scraped unless it says otherwise. 15s is the usual starting point:
+  # fast enough that a one-minute incident has four points in it, slow enough that the storage
+  # cost stays boring. It is also the floor on how quickly anything here can possibly be noticed.
+  scrape_interval: 15s
+
+  # How often the rules in the file below are evaluated. Kept equal to the scrape interval so a
+  # rule never re-reads the same sample twice in a row and never skips one.
+  evaluation_interval: 15s
+
+  # Attached to every series this server collects. It is what keeps data distinguishable after
+  # two Prometheus servers are federated into one, which is the normal end state.
+  external_labels:
+    environment: local
+
+# Alerting rules live in their own file so the scrape configuration and the alert definitions can
+# be read - and reviewed - separately.
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  # --- The application ------------------------------------------------------------------------
+  - job_name: ecomdemo
+    # The path is not /metrics because this is a Spring Boot application: Actuator publishes the
+    # Prometheus exposition format under its own base path.
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # `app:8080`, resolved by Compose's DNS on the shared network. Not localhost - in a
+      # container localhost is that container - and not the published host port, because this
+      # request never leaves the Docker network.
+      - targets: ["app:8080"]
+        labels:
+          # A label added at scrape time, describing where the data came from rather than what it
+          # is. The `application` tag the JVM stamps on every meter is the other half, and the two
+          # answer different questions: this one changes when the deployment moves, that one does
+          # not.
+          service: ecomdemo-app
+
+  # --- Prometheus itself ----------------------------------------------------------------------
+  # A monitoring system that does not monitor itself cannot tell you that it stopped working.
+  # This is one line and it is the difference between "no alerts, everything is fine" and "no
+  # alerts, because nothing has been scraped since Tuesday".
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

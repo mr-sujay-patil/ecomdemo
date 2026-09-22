@@ -1,0 +1,51 @@
+# Alerting rules (Phase 15).
+#
+# The phase asks for ONE rule, and one is what this defines. That restraint is the lesson: an
+# alert is a promise that a human will be woken up and will have something to do about it, and a
+# file of thirty aspirational rules is how a team learns to ignore all of them. Everything else
+# worth watching is on the dashboard, where it is looked at deliberately rather than at 3am.
+#
+# The rule below is written against the RED method - Rate, Errors, Duration - and picks Errors,
+# because a rise in failed checkouts is the one signal here that is always worth a person.
+
+groups:
+  - name: ecomdemo-checkout
+    rules:
+      - alert: CheckoutConflictRateHigh
+        # Read inside out:
+        #   rate(...[5m])            checkouts per second that ended in `conflict`, averaged over
+        #                            5 minutes - a rate, never a raw counter value, because a
+        #                            counter resets to zero on restart and rate() knows that.
+        #   / sum(rate(...[5m]))     divided by the rate of checkouts of EVERY outcome, giving a
+        #                            proportion rather than a count. A proportion is what makes
+        #                            the rule mean the same thing at 10 orders a minute and at
+        #                            10,000; a threshold on the raw count would page on Black
+        #                            Friday and stay silent during an outage at 4am.
+        #   > 0                      in the denominator guard: dividing by zero traffic produces
+        #                            NaN, which is not > 0.05, so a completely idle shop is
+        #                            correctly not an emergency.
+        #
+        # `conflict` specifically, not all failures. out_of_stock and empty_cart rise because
+        # customers did something, and paging someone for that teaches them the alert is noise.
+        # conflict rises because the application is losing optimistic locks it cannot absorb,
+        # which is a system problem with a human fix.
+        expr: |
+          sum(rate(checkout_duration_seconds_count{outcome="conflict"}[5m]))
+            /
+          sum(rate(checkout_duration_seconds_count[5m])) > 0.05
+
+        # The condition must hold continuously for 10 minutes before this fires. `for` is what
+        # separates an alert from a graph: without it, a single unlucky 15-second window during a
+        # deployment pages somebody. With it, the rule describes a situation rather than a sample.
+        for: 10m
+
+        labels:
+          severity: warning
+
+        annotations:
+          summary: "More than 5% of checkouts are failing on lock contention"
+          description: >-
+            {{ $value | humanizePercentage }} of checkouts in the last 5 minutes exhausted their
+            optimistic-locking retries. Customers are being told to try again. Look at which
+            products are contended - a single very popular item is the usual cause - and at
+            whether the retry budget (OrderService.MAX_ATTEMPTS) is still the right size.

@@ -158,6 +158,96 @@ services:
           memory: ${APP_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
+
+  # -------------------------------------------------------------------------------------------
+  # Prometheus (Phase 15) - scrapes the application and stores the numbers
+  # -------------------------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    container_name: ecomdemo-prometheus
+    depends_on:
+      app:
+        # Not strictly required - Prometheus is perfectly happy to scrape a target that is not up
+        # yet and record `up 0` for it, which is the correct behaviour. Waiting anyway just means
+        # the first graph anyone opens is not five minutes of a red line from before the app
+        # started.
+        condition: service_healthy
+    command:
+      # The defaults are repeated explicitly because naming `--config.file` at all discards the
+      # image's whole default command, including the storage path and the web listener.
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      # How long samples are kept. 15 days is the image default; it is written out because
+      # retention is a decision, and a disk that fills up silently is the usual way people find
+      # out they never made it.
+      - --storage.tsdb.retention.time=15d
+      # Lets `curl -X POST localhost:9090/-/reload` apply a changed prometheus.yml or alerts.yml
+      # without losing the stored data to a restart.
+      - --web.enable-lifecycle
+    volumes:
+      # Read-only. Prometheus has no business writing to its own configuration, and :ro means a
+      # typo in a future command line cannot overwrite what is in Git.
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      # The image has no shell and no curl or wget: it is built FROM scratch with the binary and
+      # nothing else. Prometheus itself is therefore the only thing available to make an HTTP
+      # request with, and `promtool` ships in the image for exactly this.
+      test: ["CMD", "promtool", "check", "healthy", "--url=http://localhost:9090"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # Grafana (Phase 15) - draws what Prometheus stored
+  # -------------------------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:12.3.1
+    container_name: ecomdemo-grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      # Local credentials for a local dashboard. Overridable from .env, and the same reasoning as
+      # POSTGRES_PASSWORD applies: this is a throwaway default for a stack that is not reachable
+      # from anywhere, not a pattern to copy into a deployment.
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # Nobody can sign themselves up on a single-user local Grafana, and leaving it on just
+      # means a "Sign up" button that does nothing useful.
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # The dashboard the home page opens on, so `docker compose up` to a useful graph is one
+      # click rather than three. Grafana wants the path it serves the provisioned file from.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/ecomdemo.json
+      # Turns off the phone-home to grafana.com for version checks and usage statistics. A
+      # monitoring tool that makes outbound connections nobody asked for is worth switching off
+      # by default, and it also stops the log filling with failures when there is no internet.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      # Provisioning: read at startup, and the reason this dashboard exists without anyone
+      # clicking anything. All read-only - the files in Git are the source of truth.
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # Grafana's own SQLite database: users, preferences, and which panel you collapsed. Not the
+      # dashboards, which come from the mount above - so losing this volume costs nothing that
+      # matters.
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
 volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
@@ -165,3 +255,10 @@ volumes:
 
   # Uploads staged for the import, the error files beside them, and the nightly sales reports.
   batch-data:
+
+  # Prometheus' time-series database. Worth keeping across a restart for the same reason any
+  # monitoring data is: the graph you want is almost always the one from before the thing broke.
+  prometheus-data:
+
+  # Grafana's SQLite state. Deliberately NOT where the dashboards live.
+  grafana-data:
