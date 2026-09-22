@@ -3,14 +3,15 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 16: Centralized Logging (Grafana Loki)
-- **Branch:** feature/phase-16-logging
+- **Phase:** between phases - Phase 16 is complete and tagged; on `fix/product-cache-eviction`
+- **Branch:** fix/product-cache-eviction
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #18 MERGED (e407627). Follow-up PR #19 raised from the same branch:
+- **PR:** #20 - the cache fix, raised and awaiting review
+  https://github.com/mr-sujay-patil/ecomdemo/pull/20
   https://github.com/mr-sujay-patil/ecomdemo/pull/19
   https://github.com/mr-sujay-patil/ecomdemo/pull/18
-- **Waiting for user:** YES - review and merge the FOLLOW-UP PR #19
+- **Waiting for user:** YES - review and merge PR #20
 
 ## Phase 15 merge verification (passed 2026-09-22)
 PR #17 MERGED with a merge commit (77a9d13, 2 parents: a5ff674 + 8345ab6); the branch is an
@@ -107,16 +108,15 @@ stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted
 holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point, on the FOLLOW-UP PR #19. PR #18 is merged
-(e407627) but `phase-16-complete` is NOT tagged yet: the merge verification found two defects in
-this phase's own work (Alloy's health check never ran; the infrastructure log query used Loki's
-default label window), both fixed on this branch and awaiting review in #19.
-- If they say `merged, continue` -> merge verification of #19 on `main`, then tag
-  `phase-16-complete` and start Phase 17 (`docs/phases/phase-17-kafka.md`). NOTE: the smoke run
-  on `main` may fail the accepted Phase 13 stale-cache check depending on the cache's state -
-  that one is expected and is NOT a reason to stop; every other check must pass.
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
-- Do NOT merge unless they say exactly `approved, merge it`.
-- Do NOT weaken or remove the failing smoke check; it is correct and the application is wrong.
-- Two things are outstanding for the user: look at the Grafana dashboards' RENDER, and decide
-  when the Phase 13 stale-cache defect gets its own fix branch.
+STOPPED after raising PR #20 (the cache fix). Phase 16 is MERGED (PR #18 + follow-up #19) and
+TAGGED `phase-16-complete`; merge verification passed on `main` (269 + 70 green, CI green, smoke
+228/228).
+
+The defect the user accepted during Phase 16 is now FIXED on the user's instruction:
+a checkout evicts both catalogue caches through `@TransactionalEventListener(AFTER_COMMIT)`.
+273 + 73 tests green, smoke **234 passed, 0 failed, 0 skipped**.
+- If they say `merged, continue` -> merge verification of #20 on `main`, then start Phase 17
+  (`docs/phases/phase-17-kafka.md`). No tag: this is a fix branch, not a phase.
+- If they say `changes: <feedback>` -> fix on this same branch and re-run the full protocol.
+- Do NOT merge unless they say so explicitly.
+- Still outstanding for the user: look at the Grafana dashboards' RENDER (Phase 15/16 ⚠️).
