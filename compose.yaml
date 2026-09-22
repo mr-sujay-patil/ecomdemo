@@ -324,7 +324,14 @@ services:
       # the only way left to ask a question over TCP. It proves the server is listening, not that
       # the pipeline is shipping anything. What the pipeline is actually doing is on the Alloy UI
       # at http://localhost:12345 and in the smoke test's Loki queries.
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/12345 || exit 1"]
+      #
+      # `bash` EXPLICITLY, not CMD-SHELL. /dev/tcp is a bash builtin, not a real device: there is
+      # no such file, and the kernel knows nothing about it. CMD-SHELL runs /bin/sh, which in this
+      # Ubuntu-based image is dash - so the first version of this check answered
+      # "cannot create /dev/tcp/localhost/12345: Directory nonexistent" and marked a container
+      # unhealthy 371 times in a row while it was shipping logs perfectly well. A health check
+      # that is wrong is worse than none: it is a red light nobody trusts.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/12345"]
       interval: 15s
       timeout: 5s
       retries: 5

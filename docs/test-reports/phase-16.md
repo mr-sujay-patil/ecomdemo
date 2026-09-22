@@ -207,3 +207,73 @@ earlier: checking out a branch that does not contain a bind-mounted config direc
 and recreates it with a new inode**, and a running container keeps the old one — so Grafana saw an
 empty `/etc/grafana/provisioning`. The fix is `docker compose up -d --force-recreate <service>`
 after switching branches, not a config change.
+
+## 10. Follow-up: two defects found by the merge verification on `main`
+
+PR #18 merged as `e407627` (a merge commit, two parents). The git checks, the build (269 + 70) and
+CI on `main` were all green, but the smoke run against a stack rebuilt from `main` failed a check —
+and it was **not** the accepted §7 one, which happened to pass on that run because the stale cache
+entry had expired. Two genuine defects in this phase's own work, both now fixed on the same
+feature branch and raised as a follow-up PR:
+
+### 10.1 Alloy's container health check never worked
+
+```
+FAIL (docker) ecomdemo-alloy  Up 2 hours (unhealthy)   failing streak: 371
+  /bin/sh: 1: cannot create /dev/tcp/localhost/12345: Directory nonexistent
+```
+
+`/dev/tcp` is not a device. There is no such file and the kernel knows nothing about it — **bash**
+intercepts the name and opens a socket. Compose's `CMD-SHELL` runs `/bin/sh`, which in the
+Ubuntu-based Alloy image is **dash**, which has no such builtin. So the check failed every 15
+seconds from the moment the container started while Alloy was shipping logs perfectly well
+(`loki_write_sent_entries_total` = 1216 at the time of diagnosis).
+
+Fixed by invoking bash explicitly:
+
+```yaml
+test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/12345"]
+```
+
+Two guards added so it cannot come back silently: `LoggingStackConfigTest.alloyHealthCheckUsesBash`
+fails the build if the check reverts to `CMD-SHELL`, and a new smoke check asserts that **Docker's
+own verdict** on the container is `healthy` — because `/-/ready` answering from the host says
+nothing about a check that runs inside the container in a different shell.
+
+**The lesson is the one worth keeping:** a health check that is wrong is worse than no health
+check. A red light on a container that works teaches everybody to ignore red lights, and nothing
+in the application's behaviour ever contradicted it.
+
+### 10.2 The infrastructure-logs check asked Loki the wrong question
+
+```
+FAIL  PostgreSQL and Redis are shipped as well, for the context an app log lacks
+      expected: True    actual: False
+```
+
+Not a pipeline failure — a query failure. `/loki/api/v1/label/<name>/values` answers for a
+**default recent window**, and PostgreSQL and Redis say almost nothing once they are up. On a
+stack that had been running quietly for three hours their lines were outside that window, so the
+label values came back as only the noisy services:
+
+```
+default window        -> ['app', 'grafana']
+explicit 6h window    -> ['app', 'cache', 'db', 'grafana', 'prometheus', 'sonar-db', 'sonarqube']
+```
+
+Fixed by asking for the lines themselves over an explicit 24-hour window and counting the distinct
+`service_name` streams, which is the question the check was always meant to ask. This is a property
+of label endpoints in general and applies to any quiet log source.
+
+### 10.3 After the fixes
+
+```
+./mvnw clean verify   ->  269 unit + 70 integration, 0 failures, 0 skipped
+scripts/smoke-test.sh ->  228 passed, 0 failed, 0 skipped
+docker inspect ecomdemo-alloy --format '{{.State.Health.Status}}'  ->  healthy
+```
+
+Note that the §7 stale-cache check passes in this run: its 300-second TTL had expired, so the
+cached entry had been reloaded from the database. The defect is unchanged and will fail again
+whenever a checkout leaves a fresh stale entry behind. It remains accepted and uncarried by this
+follow-up.

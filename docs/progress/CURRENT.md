@@ -7,9 +7,9 @@
 - **Branch:** feature/phase-16-logging
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #18 — raised, CI green (`Build and test` pass), mergeStateStatus CLEAN
+- **PR:** #18 MERGED (e407627). Follow-up PR #19 raised from the same branch - see below
   https://github.com/mr-sujay-patil/ecomdemo/pull/18
-- **Waiting for user:** YES - review and merge the PR
+- **Waiting for user:** YES - review and merge the FOLLOW-UP PR #19
 
 ## Phase 15 merge verification (passed 2026-09-22)
 PR #17 MERGED with a merge commit (77a9d13, 2 parents: a5ff674 + 8345ab6); the branch is an
