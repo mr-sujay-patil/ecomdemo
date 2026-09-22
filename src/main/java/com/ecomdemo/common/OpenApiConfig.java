@@ -1,9 +1,11 @@
 package com.ecomdemo.common;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
 import java.util.List;
 import org.springframework.context.annotation.Bean;
@@ -27,6 +29,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class OpenApiConfig {
 
+    /** The name operations refer to in {@code @SecurityRequirement(name = "basicAuth")}. */
+    public static final String BASIC_AUTH = "basicAuth";
+
     @Bean
     public OpenAPI ecomdemoOpenApi() {
         return new OpenAPI()
@@ -43,14 +48,32 @@ public class OpenApiConfig {
                                 - Every endpoint lives under `/api`.
                                 - Money is a decimal with two places; totals are always calculated \
                                 on the server and never taken from the request.
-                                - There is exactly one cart, shared by everybody. It is created on \
-                                first use, and checkout empties it. Carts per user arrive with \
-                                authentication in a later phase.
+                                - Every account has its own cart and its own orders. A cart is \
+                                created on first use, and checkout empties it.
+                                - Browsing the catalogue is open to anyone. Changing it requires \
+                                an ADMIN; the cart and orders require a CUSTOMER. Use **Authorize** \
+                                above to send HTTP Basic credentials with "Try it out".
                                 - Every failure returns the same shape, `{"status": <code>, \
                                 "message": <text>}` — see the `ApiError` schema.
                                 """)
                         .contact(new Contact().name("EcomDemo").url("https://github.com/mr-sujay-patil/ecomdemo"))
                         .license(new License().name("MIT")))
-                .servers(List.of(new Server().url("http://localhost:8080").description("Local development")));
+                .servers(List.of(new Server().url("http://localhost:8080").description("Local development")))
+                // Declaring the scheme is what puts the "Authorize" button in Swagger UI and
+                // makes "Try it out" attach an Authorization header. Individual operations opt
+                // into it with @SecurityRequirement("basicAuth"); the ones without it — browsing
+                // the catalogue, registering — are the genuinely public endpoints, so the
+                // document doubles as a readable statement of what needs an account.
+                .components(new Components()
+                        .addSecuritySchemes(
+                                BASIC_AUTH,
+                                new SecurityScheme()
+                                        .type(SecurityScheme.Type.HTTP)
+                                        .scheme("basic")
+                                        .description(
+                                                "Username and password, Base64-encoded into the "
+                                                        + "Authorization header. Base64 is an encoding, "
+                                                        + "not encryption: Basic authentication is only "
+                                                        + "safe over TLS or, as here, on localhost.")));
     }
 }

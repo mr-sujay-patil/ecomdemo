@@ -6,7 +6,10 @@ import com.ecomdemo.order.dto.OrderResponse;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.ecomdemo.security.CurrentUser;
 import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.security.access.prepost.PostAuthorize;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,14 +34,17 @@ public class OrderService {
     private final OrderRepository orderRepository;
     private final OrderPlacementService orderPlacementService;
     private final OrderAuditService orderAuditService;
+    private final CurrentUser currentUser;
 
     public OrderService(
             OrderRepository orderRepository,
             OrderPlacementService orderPlacementService,
-            OrderAuditService orderAuditService) {
+            OrderAuditService orderAuditService,
+            CurrentUser currentUser) {
         this.orderRepository = orderRepository;
         this.orderPlacementService = orderPlacementService;
         this.orderAuditService = orderAuditService;
+        this.currentUser = currentUser;
     }
 
     /**
@@ -56,6 +62,7 @@ public class OrderService {
      * asked for a unit somebody else was buying at that moment, and trying again later is a
      * reasonable thing for it to do.
      */
+    @PreAuthorize("hasRole('CUSTOMER')")
     public OrderResponse place() {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
@@ -84,16 +91,59 @@ public class OrderService {
     }
 
     /**
-     * Read-only. It tells Hibernate not to bother tracking the loaded entities for changes (no
-     * snapshot, no dirty check at flush) and lets the driver mark the connection read-only, which
-     * some databases use to route the query to a replica. It is also a statement of intent: a
-     * write that sneaks into a read path fails instead of quietly committing.
+     * The caller's own order history, newest id last.
+     *
+     * <p><strong>Two layers of authorization, and they are not redundant.</strong> The URL rule
+     * in {@code SecurityConfig} already says {@code /api/orders/**} needs a CUSTOMER, so
+     * {@code @PreAuthorize} here looks like it repeats it. It does — until this method is called
+     * from somewhere that is not that URL: a scheduled job, a message listener, a new controller
+     * in Phase 17. A URL rule protects a URL; a method rule protects the method. Method security
+     * travels with the code, which is why the sensitive ones carry both.
+     *
+     * <p>The "only your own" part is not an annotation at all. It is the {@code userId} argument
+     * to the query: the rows never leave the database. Filtering after the fact would mean this
+     * method had already read other people's orders into memory and was relying on remembering
+     * to drop them.
+     *
+     * <p>Read-only tells Hibernate not to track the loaded entities for changes (no snapshot, no
+     * dirty check at flush) and lets the driver mark the connection read-only, which some
+     * databases use to route the query to a replica. It is also a statement of intent: a write
+     * that sneaks into a read path fails instead of quietly committing.
      */
+    @PreAuthorize("hasRole('CUSTOMER')")
     @Transactional(readOnly = true)
     public List<OrderResponse> findAll() {
-        return orderRepository.findAllWithItems().stream().map(OrderResponse::from).toList();
+        return orderRepository.findAllByUserIdWithItems(currentUser.id()).stream()
+                .map(OrderResponse::from)
+                .toList();
     }
 
+    /**
+     * One order, if it is yours.
+     *
+     * <p><strong>Why {@code @PostAuthorize} and not {@code @PreAuthorize}.</strong> The rule is
+     * "the order must belong to the caller", and nothing but the id is known before the method
+     * runs — whose order it is, is in the row. {@code @PreAuthorize} is evaluated <em>before</em>
+     * the call and can only see the arguments and the authentication, so it cannot express this.
+     * {@code @PostAuthorize} runs after, with the return value bound to {@code returnObject},
+     * which is exactly what the check needs. The price is that the work is already done when the
+     * answer turns out to be no: only ever put it on a read. On a method that writes, the write
+     * would be rolled back by the exception, but the side effects outside the transaction — a
+     * log line, an email, a message on a queue — would not be.
+     *
+     * <p>{@code authentication.name} is the username Spring Security authenticated, not
+     * something from the request, so it cannot be spoofed by the caller.
+     *
+     * <p><strong>403 or 404?</strong> This answers 403 for somebody else's order, which admits
+     * that the order exists. The alternative — filtering by user id in the query and returning
+     * 404 — tells the caller nothing, and for something like a private document that matters:
+     * "403" on a sequential id is a working existence oracle. Order ids here are already
+     * sequential and visible to whoever placed them, and being told plainly "that is not yours"
+     * is more useful than a 404 that makes a client think its own order has vanished. It is a
+     * judgement call, and it is worth making consciously rather than by accident.
+     */
+    @PreAuthorize("hasRole('CUSTOMER')")
+    @PostAuthorize("returnObject.username() == authentication.name")
     @Transactional(readOnly = true)
     public OrderResponse findById(Long id) {
         return orderRepository

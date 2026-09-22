@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 /**
  * Proves the "Done when" of Phase 5: the database is built entirely by Flyway, and Hibernate's
@@ -45,13 +46,13 @@ class FlywayMigrationTest {
             """;
 
     @Test
-    @DisplayName("V1 to V4 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V6 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4");
+                .containsExactly("1", "2", "3", "4", "5", "6");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -89,7 +90,9 @@ class FlywayMigrationTest {
                 "init schema",
                 "seed products",
                 "add product category",
-                "add product version and order audit");
+                "add product version and order audit",
+                "add users",
+                "cart and orders per user");
     }
 
     @Test
@@ -188,5 +191,71 @@ class FlywayMigrationTest {
                                 + "WHERE upper(index_name) = 'IDX_ORDER_AUDIT_RECORDED_AT'",
                         Integer.class))
                 .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("V5 added the users table and seeded exactly one administrator")
+    void addsTheUsersTableAndSeedsTheAdmin() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM users WHERE username = 'admin' AND role = 'ADMIN'",
+                        Integer.class))
+                .as("the first ADMIN cannot come from the API, so a migration puts it there")
+                .isEqualTo(1);
+
+        // The stored value is a BCrypt hash, not a password. The prefix is the algorithm and the
+        // cost factor, and the whole string is always 60 characters.
+        String stored = jdbc.queryForObject(
+                "SELECT password FROM users WHERE username = 'admin'", String.class);
+        assertThat(stored).startsWith("$2a$10$").hasSize(60);
+        assertThat(stored).as("a password must never be stored as typed").isNotEqualTo("admin123");
+
+        // And the hash really is the hash of the documented development password, so the README's
+        // "log in as admin/admin123" cannot quietly stop being true.
+        assertThat(new BCryptPasswordEncoder().matches("admin123", stored))
+                .as("the seeded administrator can actually log in")
+                .isTrue();
+
+        // Uniqueness is the database's job: a "is this name free?" check in Java is a read
+        // followed by a write, and two registrations can race between the two.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.table_constraints "
+                                + "WHERE upper(table_name) = 'USERS' AND constraint_type = 'UNIQUE'",
+                        Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("V6 attached the cart and the orders to a user")
+    void attachesTheCartAndTheOrdersToAUser() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        // Both columns are NOT NULL: data that belongs to nobody is exactly what this migration
+        // exists to make impossible.
+        assertThat(nullabilityOf(jdbc, "CART", "USER_ID")).isEqualTo("NO");
+        assertThat(nullabilityOf(jdbc, "ORDERS", "USER_ID")).isEqualTo("NO");
+
+        // One cart per account, enforced by the database rather than assumed by the code.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.table_constraints "
+                                + "WHERE upper(table_name) = 'CART' AND constraint_type = 'UNIQUE'",
+                        Integer.class))
+                .isEqualTo(1);
+
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.indexes "
+                                + "WHERE upper(index_name) = 'IDX_ORDERS_USER'",
+                        Integer.class))
+                .isEqualTo(1);
+    }
+
+    private static String nullabilityOf(JdbcTemplate jdbc, String table, String column) {
+        return jdbc.queryForObject(
+                "SELECT is_nullable FROM information_schema.columns "
+                        + "WHERE upper(table_name) = ? AND upper(column_name) = ?",
+                String.class,
+                table,
+                column);
     }
 }

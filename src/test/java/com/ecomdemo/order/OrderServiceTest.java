@@ -13,7 +13,10 @@ import static org.mockito.Mockito.when;
 import com.ecomdemo.common.ConcurrentUpdateException;
 import com.ecomdemo.common.ConflictException;
 import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.customer.User;
 import com.ecomdemo.order.dto.OrderResponse;
+import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.support.TestData;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -36,6 +39,14 @@ import org.springframework.test.util.ReflectionTestUtils;
  * {@code OrderPlacementServiceTest}. Mocking that collaborator here is what lets these tests
  * make an attempt lose its optimistic lock on demand — something no amount of real data would
  * do reliably in a unit test.
+ *
+ * <p>The {@code @PreAuthorize} and {@code @PostAuthorize} annotations on the service are
+ * <strong>not</strong> exercised here and cannot be: method security is applied by a Spring
+ * proxy, and these tests call the object directly with {@code new}. That is the right split —
+ * this class is about the retry budget and the mapping — and it is why
+ * {@code OrderControllerTest} and {@code OrderApiIT} cover the rules instead. A unit test that
+ * appeared to prove an authorization rule while bypassing the proxy would be worse than no test
+ * at all.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderServiceTest {
@@ -49,8 +60,13 @@ class OrderServiceTest {
     @Mock
     private OrderAuditService orderAuditService;
 
+    @Mock
+    private CurrentUser currentUser;
+
     @InjectMocks
     private OrderService orderService;
+
+    private static final User SHOPPER = TestData.customer();
 
     @Nested
     @DisplayName("place")
@@ -134,7 +150,8 @@ class OrderServiceTest {
         @Test
         void findAll_whenOrdersExist_returnsThemWithTheirLines() {
             // Given
-            when(orderRepository.findAllWithItems())
+            when(currentUser.id()).thenReturn(SHOPPER.getId());
+            when(orderRepository.findAllByUserIdWithItems(SHOPPER.getId()))
                     .thenReturn(List.of(order("100.00"), order("250.00")));
 
             // When
@@ -152,7 +169,8 @@ class OrderServiceTest {
         @Test
         void findAll_whenNoOrdersHaveBeenPlaced_returnsEmptyList() {
             // Given
-            when(orderRepository.findAllWithItems()).thenReturn(List.of());
+            when(currentUser.id()).thenReturn(SHOPPER.getId());
+            when(orderRepository.findAllByUserIdWithItems(SHOPPER.getId())).thenReturn(List.of());
 
             // When / Then
             assertThat(orderService.findAll()).isEmpty();
@@ -196,7 +214,7 @@ class OrderServiceTest {
      * through a double first and yields 100.0.
      */
     private static Order order(String total) {
-        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"));
+        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"), SHOPPER);
         order.addItem(10L, "Lamp", new BigDecimal(total), 1);
         return order;
     }

@@ -7,15 +7,17 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
+import static org.springframework.http.HttpStatus.FORBIDDEN;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 import static org.springframework.http.HttpStatus.OK;
+import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
-import com.ecomdemo.common.GlobalExceptionHandler;
 import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.support.WithSecurityRules;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -23,17 +25,23 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.test.context.support.WithAnonymousUser;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 
 /**
  * Web-slice tests for {@link CartController}: the HTTP contract of the cart endpoints, with
  * {@link CartService} mocked away.
+ *
+ * <p>Every test runs as a CUSTOMER because every cart endpoint requires one. The nested
+ * {@link Access} class is where the other two cases — nobody, and an administrator — are
+ * checked.
  */
 @WebMvcTest(CartController.class)
-@Import(GlobalExceptionHandler.class)
+@WithSecurityRules
+@WithMockUser(username = "shopper", roles = "CUSTOMER")
 class CartControllerTest {
 
     private static final CartResponse CART_WITH_ONE_LINE = new CartResponse(
@@ -239,6 +247,46 @@ class CartControllerTest {
 
             // When / Then
             assertThat(mvc.delete().uri("/api/cart/items/10")).hasStatus(NOT_FOUND);
+        }
+    }
+
+    @Nested
+    @DisplayName("access rules")
+    class Access {
+
+        @Test
+        @WithAnonymousUser
+        void everyCartEndpoint_whenAnonymous_returns401() {
+            assertThat(mvc.get().uri("/api/cart")).hasStatus(UNAUTHORIZED);
+            assertThat(mvc.post().uri("/api/cart/items")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"productId":10,"quantity":1}"""))
+                    .hasStatus(UNAUTHORIZED);
+            assertThat(mvc.delete().uri("/api/cart/items/10")).hasStatus(UNAUTHORIZED);
+            // and nothing reached the service
+            verify(cartService, never()).view();
+            verify(cartService, never()).addItem(any());
+            verify(cartService, never()).removeItem(any());
+        }
+
+        @Test
+        @WithMockUser(username = "admin", roles = "ADMIN")
+        void everyCartEndpoint_whenAuthenticatedAsAdmin_returns403() {
+            assertThat(mvc.get().uri("/api/cart")).hasStatus(FORBIDDEN);
+            assertThat(mvc.delete().uri("/api/cart/items/10")).hasStatus(FORBIDDEN);
+            verify(cartService, never()).view();
+        }
+
+        @Test
+        @WithAnonymousUser
+        void refusedRequest_returnsTheStandardErrorShape() {
+            assertThat(mvc.get().uri("/api/cart"))
+                    .hasStatus(UNAUTHORIZED)
+                    .bodyJson()
+                    .isLenientlyEqualTo("""
+                            {"status":401,"message":"Authentication required. Send HTTP Basic credentials with this request."}
+                            """);
         }
     }
 }

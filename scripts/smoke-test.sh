@@ -9,6 +9,11 @@
 #   Usage:  ./mvnw spring-boot:run          # in one terminal
 #           scripts/smoke-test.sh           # in another
 #
+# Since Phase 8 the API needs credentials. The script authenticates as the ADMIN seeded by
+# migration V5 for catalogue writes, and as a CUSTOMER it registers for itself for everything
+# else. Both passwords are throwaway local development credentials and can be overridden:
+# SMOKE_ADMIN_PASSWORD, SMOKE_CUSTOMER_PASSWORD.
+#
 #   BASE_URL overrides the target, e.g. BASE_URL=http://localhost:9090 scripts/smoke-test.sh
 #
 # The script is re-runnable: it empties the cart before starting, so it does not care whether
@@ -54,15 +59,64 @@ section() {
     printf '\n\033[1m%s\033[0m\n' "$1"
 }
 
+# --------------------------------------------------------------------------------------------
+# Who the next request is sent as
+# --------------------------------------------------------------------------------------------
+# HTTP Basic: curl's -u puts "user:password", Base64-encoded, into the Authorization header. The
+# encoding is not encryption - anyone who can see the request can read the password - which is
+# why Basic is only acceptable over TLS or, as here, on localhost.
+#
+# The credentials below are throwaway local development values. The admin's is the one migration
+# V5 seeds; the customer's belongs to an account this script registers for itself through the
+# public endpoint, so the password really is hashed by the application.
+ADMIN_USER="admin"
+ADMIN_PASSWORD="${SMOKE_ADMIN_PASSWORD:-admin123}"
+CUSTOMER_USER="${SMOKE_CUSTOMER:-smoke-customer}"
+CUSTOMER_PASSWORD="${SMOKE_CUSTOMER_PASSWORD:-smoke-test-password}"
+# A second shopper, so the script can prove one customer cannot read another's order.
+OTHER_USER="${SMOKE_CUSTOMER_B:-smoke-customer-b}"
+
+AUTH=""   # empty means "send no credentials at all"
+
+as_anonymous() { AUTH=""; }
+as_admin()     { AUTH="$ADMIN_USER:$ADMIN_PASSWORD"; }
+as_customer()  { AUTH="$CUSTOMER_USER:$CUSTOMER_PASSWORD"; }
+as_other()     { AUTH="$OTHER_USER:$CUSTOMER_PASSWORD"; }
+
 # request <METHOD> <PATH> [JSON] -> echoes the HTTP status, body lands in $BODY
+# Sends whatever $AUTH currently holds, so a test switches identity by calling as_admin() etc.
+# Spelled out in four branches rather than built up in an array: macOS still ships bash 3.2,
+# where expanding an empty array under `set -u` is an unbound-variable error.
 request() {
     local method="$1" path="$2" data="${3:-}"
-    if [ -n "$data" ]; then
+    if [ -n "$AUTH" ]; then
+        if [ -n "$data" ]; then
+            curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" \
+                -u "$AUTH" -H 'Content-Type: application/json' -d "$data"
+        else
+            curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" -u "$AUTH"
+        fi
+    elif [ -n "$data" ]; then
         curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" \
             -H 'Content-Type: application/json' -d "$data"
     else
         curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path"
     fi
+}
+
+# register <username> -> creates a CUSTOMER account, or accepts that it already exists.
+# The script is re-runnable against a long-lived database, so 409 is a normal outcome: the
+# account is there either way and its password has not changed.
+register() {
+    local username="$1" status saved="$AUTH"
+    as_anonymous
+    status="$(request POST /api/customers/register \
+        "{\"username\":\"$username\",\"password\":\"$CUSTOMER_PASSWORD\",\"fullName\":\"Smoke Test $username\"}")"
+    AUTH="$saved"
+    case "$status" in
+        201|409) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # jget <python expression over `d`> -> prints the value from the last response body
@@ -88,6 +142,70 @@ if [ "$STATUS" != "200" ]; then
     exit 1
 fi
 pass "application is up at $BASE_URL"
+
+# --------------------------------------------------------------------------------------------
+# 0b. Authentication and authorization
+# --------------------------------------------------------------------------------------------
+section "Authentication and authorization"
+
+# Browsing the catalogue is the shop window: no account, no header, 200.
+as_anonymous
+check "anonymous GET /api/products returns 200" "200" "$(request GET /api/products)"
+
+# The cart is somebody's. With no credentials the server cannot know whose, so it asks for them.
+# 401 means "unauthenticated" despite the name: sending credentials could change the answer.
+check "anonymous GET /api/cart returns 401" "401" "$(request GET /api/cart)"
+check "and the 401 uses the standard error shape" "401" "$(jget "d['status']")"
+
+# A wrong password is the same 401 with the same body as a username that does not exist, so the
+# API cannot be used to find out which accounts are real.
+AUTH="$ADMIN_USER:definitely-not-the-password"
+check "a wrong password returns 401" "401" "$(request GET /api/customers/me)"
+WRONG_PASSWORD_MESSAGE="$(jget "d['message']")"
+AUTH="no-such-account-at-all:definitely-not-the-password"
+check "an unknown username returns 401" "401" "$(request GET /api/customers/me)"
+check "and says exactly the same thing, so usernames cannot be enumerated" \
+    "$WRONG_PASSWORD_MESSAGE" "$(jget "d['message']")"
+
+# Registration has to be reachable by someone with no account - requiring one would be a closed
+# loop. A second run finds the account already there, which is a 409 and equally fine.
+if register "$CUSTOMER_USER"; then
+    pass "a customer account exists (registered, or already present)"
+else
+    fail "a customer account exists" "201 or 409" "$(jget "d['status']")"
+    printf '\nCannot continue without a customer account.\n'
+    exit 1
+fi
+register "$OTHER_USER" && pass "a second customer account exists"
+
+as_customer
+check "the new account can read its own profile" "200" "$(request GET /api/customers/me)"
+check "and the profile is its own" "$CUSTOMER_USER" "$(jget "d['username']")"
+check "registration never hands out an ADMIN role" "CUSTOMER" "$(jget "d['role']")"
+check "no endpoint ever returns the password or its hash" "True" \
+    "$(jget "'password' not in d")"
+
+# 403, not 401: the server knows exactly who this is and the answer is still no. Repeating the
+# request with the same credentials will never help - only a different role would.
+STATUS="$(request POST /api/products \
+    '{"name":"Forbidden Probe","description":"a customer may not create this","price":1.00,"stockQuantity":1,"category":"TEST"}')"
+check "a CUSTOMER creating a product returns 403" "403" "$STATUS"
+check "and the 403 uses the standard error shape" "403" "$(jget "d['status']")"
+
+as_admin
+STATUS="$(request POST /api/products \
+    '{"name":"Admin Probe","description":"an admin may create this","price":1.00,"stockQuantity":1,"category":"TEST"}')"
+check "an ADMIN creating the same product returns 201" "201" "$STATUS"
+ADMIN_PROBE_ID="$(jget "d['id']")"
+request DELETE "/api/products/$ADMIN_PROBE_ID" >/dev/null
+pass "the admin probe product is cleaned up"
+
+# An administrator is refused on the cart: these endpoints act on "my" cart, and an admin has
+# none. Nothing about being an admin implies being a customer.
+check "an ADMIN reading the cart returns 403" "403" "$(request GET /api/cart)"
+
+# Everything from here on is the shopping flow, so it runs as the customer.
+as_customer
 
 # Empty the cart so the run starts from a known state.
 request GET /api/cart >/dev/null
@@ -271,8 +389,10 @@ if [ -f "$STATE_FILE" ]; then
         fail "the probe product from the previous run is still there (id=$PROBE_ID)" \
             "200" "$STATUS - the data did not survive; is the database still in memory?"
     fi
-    # Tidy up, so repeated runs do not grow the catalogue.
+    # Tidy up, so repeated runs do not grow the catalogue. Deleting is a catalogue write.
+    as_admin
     request DELETE "/api/products/$PROBE_ID" >/dev/null
+    as_customer
 else
     pass "first run: no previous probe to check (run again after a restart to verify persistence)"
 fi
@@ -281,8 +401,10 @@ fi
 # a fresh one.
 PROBE_NAME="Persistence Probe $(date +%Y%m%d-%H%M%S)"
 PROBE_PRICE="4242.42"
+as_admin
 STATUS="$(request POST /api/products \
     "{\"name\":\"$PROBE_NAME\",\"description\":\"written by the smoke test to survive a restart\",\"price\":$PROBE_PRICE,\"stockQuantity\":1}")"
+as_customer
 check "a probe product is created for the next run" "201" "$STATUS"
 PROBE_ID="$(jget "d['id']")"
 
@@ -328,7 +450,7 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V4, all successful" "1:ok,2:ok,3:ok,4:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V6, all successful" "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -348,13 +470,38 @@ if HISTORY="$(psql_query \
         "SELECT count(*) FROM information_schema.columns \
          WHERE table_name = 'product' AND column_name = 'version';" | tr -d '\r ')"
     check "V4's product.version column exists" "1" "$VERSION_COLUMN"
+
+    ADMIN_ROW="$(psql_query \
+        "SELECT count(*) FROM users WHERE username = 'admin' AND role = 'ADMIN';" | tr -d '\r ')"
+    check "V5 seeded exactly one administrator" "1" "$ADMIN_ROW"
+
+    # The stored credential must be a BCrypt hash, never the password. $2a$ is the algorithm,
+    # 10 the cost factor; the whole string is always 60 characters.
+    HASHED="$(psql_query \
+        "SELECT count(*) FROM users WHERE password LIKE '\$2a\$10\$%' AND length(password) = 60;" \
+        | tr -d '\r ')"
+    TOTAL_USERS="$(psql_query "SELECT count(*) FROM users;" | tr -d '\r ')"
+    check "every stored password is a BCrypt hash, not a password" "$TOTAL_USERS" "$HASHED"
+
+    OWNED_CARTS="$(psql_query \
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_name = 'cart' AND column_name = 'user_id' AND is_nullable = 'NO';" \
+        | tr -d '\r ')"
+    check "V6's cart.user_id exists and is NOT NULL" "1" "$OWNED_CARTS"
+
+    ORPHAN_ORDERS="$(psql_query "SELECT count(*) FROM orders WHERE user_id IS NULL;" | tr -d '\r ')"
+    check "no order belongs to nobody" "0" "$ORPHAN_ORDERS"
 else
-    skip "flyway_schema_history shows V1-V4, all successful" \
+    skip "flyway_schema_history shows V1-V6, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V3's idx_product_category index exists" "same as above"
     skip "V4's order_audit table exists" "same as above"
     skip "V4's product.version column exists" "same as above"
+    skip "V5 seeded exactly one administrator" "same as above"
+    skip "every stored password is a BCrypt hash, not a password" "same as above"
+    skip "V6's cart.user_id exists and is NOT NULL" "same as above"
+    skip "no order belongs to nobody" "same as above"
 fi
 
 # The column V3 added has to reach the API, not just the database. The seeded product is looked
@@ -367,6 +514,7 @@ check "the seeded keyboard was backfilled by V3" "PERIPHERALS" \
     "$(jget "next(p['category'] for p in d if p['name'] == 'Mechanical Keyboard')")"
 
 # A category can be set through the API on the way in, and comes back out again.
+as_admin
 STATUS="$(request POST /api/products \
     '{"name":"Category Probe","description":"created with a category","price":10.00,"stockQuantity":1,"category":"STORAGE"}')"
 check "a product can be created with a category" "201" "$STATUS"
@@ -383,21 +531,27 @@ check "and comes back with category null" "True" "$(jget "d['category'] is None"
 
 request DELETE "/api/products/$CATEGORISED_ID" >/dev/null
 request DELETE "/api/products/$UNCATEGORISED_ID" >/dev/null
+as_customer
 pass "the two category probe products are cleaned up"
 
 # --------------------------------------------------------------------------------------------
 # Transactions and concurrency (Phase 6)
 # --------------------------------------------------------------------------------------------
 # The oversell race, against the running application and a real PostgreSQL rather than a test
-# harness and H2. A product with exactly one unit in stock, two checkouts of the shared cart
+# harness and H2. A product with exactly one unit in stock, two checkouts of ONE customer's cart
 # fired at the same moment, and only one of them may come back with a 201. Before this phase both
 # would: each read stock 1, each decided there was enough, and each wrote 0.
+#
+# The two requests are one shopper clicking twice, not two shoppers: since Phase 8 two accounts
+# have two separate carts and could not collide over the same cart at all.
 section "Transactions and concurrency"
 
+as_admin
 STATUS="$(request POST /api/products \
     '{"name":"Race Probe","description":"one unit, two buyers","price":25.00,"stockQuantity":1,"category":"TEST"}')"
 check "a product with exactly one unit in stock is created" "201" "$STATUS"
 RACE_ID="$(jget "d['id']")"
+as_customer
 
 request DELETE "/api/cart/items/$RACE_ID" >/dev/null
 STATUS="$(request POST /api/cart/items "{\"productId\":$RACE_ID,\"quantity\":1}")"
@@ -410,6 +564,7 @@ check "the last unit is in the cart" "200" "$STATUS"
 # do overlap, and the application log shows the versioned UPDATE being rejected.
 # -o is given twice because -o applies to one transfer each; -w prints per transfer.
 RACE_RESULT="$(curl -sS --parallel --parallel-immediate -X POST \
+    -u "$CUSTOMER_USER:$CUSTOMER_PASSWORD" \
     -o /dev/null -o /dev/null -w '%{http_code}\n' \
     "$BASE_URL/api/orders" "$BASE_URL/api/orders" | sort | paste -sd, -)"
 check "two simultaneous checkouts return exactly one 201 and one 409" "201,409" "$RACE_RESULT"
@@ -446,8 +601,61 @@ STATUS="$(request POST /api/orders)"
 check "checking out an empty cart returns 409" "409" "$STATUS"
 check "and says why" "True" "$(jget "'cart is empty' in d['message']")"
 
+as_admin
 request DELETE "/api/products/$RACE_ID" >/dev/null
+as_customer
 pass "the race probe product is cleaned up"
+
+# --------------------------------------------------------------------------------------------
+# Data ownership (Phase 8)
+# --------------------------------------------------------------------------------------------
+# The rules above are about endpoints. These are about rows: two accounts using the same
+# endpoints must not be able to reach each other's data. Before this phase there was one cart
+# for the whole world and every order was readable by anybody who could guess an id.
+section "Data ownership"
+
+as_admin
+STATUS="$(request POST /api/products \
+    '{"name":"Ownership Probe","description":"bought by one customer only","price":8.00,"stockQuantity":5,"category":"TEST"}')"
+check "an ownership probe product is created" "201" "$STATUS"
+OWNED_ID="$(jget "d['id']")"
+
+# Customer A buys one.
+as_customer
+request DELETE "/api/cart/items/$OWNED_ID" >/dev/null
+request POST /api/cart/items "{\"productId\":$OWNED_ID,\"quantity\":1}" >/dev/null
+STATUS="$(request POST /api/orders)"
+check "customer A places an order" "201" "$STATUS"
+OWNED_ORDER_ID="$(jget "d['id']")"
+check "the order records who placed it" "$CUSTOMER_USER" "$(jget "d['username']")"
+
+# Customer B has a cart of their own, and it is empty even though A has been shopping.
+as_other
+request GET /api/cart >/dev/null
+check "customer B's cart is their own, and empty" "0" "$(jget "len(d['items'])")"
+
+# 403, not 404: the order exists, it is simply not theirs. @PostAuthorize compares the owner
+# with the authenticated username after loading the row, because whose order it is, is IN the row.
+STATUS="$(request GET "/api/orders/$OWNED_ORDER_ID")"
+check "customer B cannot read customer A's order" "403" "$STATUS"
+check "and the refusal uses the standard error shape" "403" "$(jget "d['status']")"
+
+request GET /api/orders >/dev/null
+check "nor does it appear in customer B's order list" "0" \
+    "$(jget "sum(1 for o in d if o['id'] == $OWNED_ORDER_ID)")"
+
+# The owner, of course, can.
+as_customer
+check "customer A can still read their own order" "200" "$(request GET "/api/orders/$OWNED_ORDER_ID")"
+request GET /api/orders >/dev/null
+check "and it is in their own order list" "1" \
+    "$(jget "sum(1 for o in d if o['id'] == $OWNED_ORDER_ID)")"
+check "every order in the list belongs to the caller" "True" \
+    "$(jget "all(o['username'] == '$CUSTOMER_USER' for o in d)")"
+
+# The probe product was ordered, so it cannot be deleted while an order references it (V1's
+# RESTRICT foreign key). Leaving it is correct; the order history is what keeps it alive.
+pass "the ownership probe order is left in history, as an order should be"
 
 # --------------------------------------------------------------------------------------------
 # Summary

@@ -7,13 +7,18 @@ import com.ecomdemo.cart.CartService;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.customer.Role;
+import com.ecomdemo.customer.UserRepository;
 import com.ecomdemo.order.OrderService;
 import com.ecomdemo.order.OrderStatus;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.product.dto.ProductRequest;
 import com.ecomdemo.product.dto.ProductResponse;
 import com.ecomdemo.product.ProductService;
+import com.ecomdemo.support.TestAuthentication;
 import java.math.BigDecimal;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -25,6 +30,10 @@ import org.springframework.boot.test.context.SpringBootTest;
  * <p>{@code @SpringBootTest} starts the application the same way {@code main} does — component
  * scanning, auto-configuration, JPA, the lot — so this proves the wiring works, not just the
  * logic. Phase 2 adds the fast, focused unit and slice tests underneath it.
+ *
+ * <p>Since Phase 8 the cart and the orders belong to somebody, and the services are wrapped by
+ * method-security proxies, so the test has to say who it is before it can shop. See
+ * {@link TestAuthentication} for why {@code @WithMockUser} is not enough here.
  */
 @SpringBootTest
 class PlaceOrderFlowTest {
@@ -37,6 +46,21 @@ class PlaceOrderFlowTest {
 
     @Autowired
     private OrderService orderService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    /** A shopper of this class's own, so its cart cannot collide with another test class's. */
+    @BeforeEach
+    void signIn() {
+        TestAuthentication.authenticateAs(
+                TestAuthentication.account(userRepository, "flow-test-shopper", Role.CUSTOMER));
+    }
+
+    @AfterEach
+    void signOut() {
+        TestAuthentication.clear();
+    }
 
     @Test
     void placingAnOrderChargesTheCartTotalReducesStockAndEmptiesTheCart() {

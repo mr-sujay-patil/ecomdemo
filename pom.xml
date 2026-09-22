@@ -44,6 +44,23 @@
 		</dependency>
 
 		<!--
+			Spring Security. Adding this one starter changes the application before a line of
+			our code runs: it registers a servlet Filter that sits in front of every request,
+			and its auto-configuration locks the whole application down by default. That default
+			is the point — a new endpoint added in a later phase is protected until somebody
+			deliberately opens it, rather than public until somebody remembers to close it.
+			`SecurityConfig` replaces the defaults with this application's own rules.
+
+			It also brings `spring-security-crypto`, which is where BCryptPasswordEncoder lives,
+			so password hashing needs no separate dependency. The version comes from the Spring
+			Boot BOM (Spring Security 7.x for Boot 4.x).
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
+		<!--
 			The PostgreSQL JDBC driver. It is only ever loaded by reflection through the JDBC URL,
 			so runtime scope is enough - no application code imports it. The version comes from
 			the Spring Boot BOM, which pins a driver known to work with the managed HikariCP.
@@ -111,6 +128,19 @@
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			`spring-security-test`, by way of Boot 4's starter. It contributes @WithMockUser and
+			the SecurityMockMvcRequestPostProcessors that let a slice test say "run this request
+			as an ADMIN" without a real login, and it is what makes the 401/403 assertions in the
+			controller tests possible at all — a @WebMvcTest builds the security filter chain,
+			so without an authenticated user every request in those tests would simply be a 401.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 

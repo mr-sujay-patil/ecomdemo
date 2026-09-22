@@ -41,7 +41,9 @@ class OpenApiDocumentationTest {
             "/api/cart/items",
             "/api/cart/items/{productId}",
             "/api/orders",
-            "/api/orders/{id}");
+            "/api/orders/{id}",
+            "/api/customers/register",
+            "/api/customers/me");
 
     @Autowired
     private MockMvcTester mvc;
@@ -178,5 +180,36 @@ class OpenApiDocumentationTest {
     @FunctionalInterface
     private interface OperationAssertion {
         void check(String path, String method, JsonNode operation);
+    }
+
+    @Test
+    void apiDocs_declaresTheBasicAuthScheme() {
+        // Without this the "Authorize" button does not appear in Swagger UI and "Try it out"
+        // cannot send credentials, which makes the UI useless for everything but browsing.
+        JsonNode scheme = spec.path("components").path("securitySchemes").path("basicAuth");
+        assertThat(scheme.isMissingNode()).as("the document declares basicAuth").isFalse();
+        assertThat(scheme.path("type").asString("")).isEqualTo("http");
+        assertThat(scheme.path("scheme").asString("")).isEqualTo("basic");
+    }
+
+    @Test
+    void apiDocs_marksTheProtectedOperationsAndLeavesThePublicOnesOpen() {
+        // The document doubles as a readable statement of what needs an account, so the two
+        // genuinely public operations must NOT carry a security requirement...
+        assertThat(requiresAuth("/api/products", "get")).as("browsing is public").isFalse();
+        assertThat(requiresAuth("/api/customers/register", "post"))
+                .as("registering cannot require an account")
+                .isFalse();
+
+        // ...and everything else must.
+        assertThat(requiresAuth("/api/products", "post")).as("creating a product").isTrue();
+        assertThat(requiresAuth("/api/products/{id}", "delete")).as("deleting a product").isTrue();
+        assertThat(requiresAuth("/api/cart", "get")).as("viewing the cart").isTrue();
+        assertThat(requiresAuth("/api/orders", "post")).as("checking out").isTrue();
+        assertThat(requiresAuth("/api/customers/me", "get")).as("your own profile").isTrue();
+    }
+
+    private boolean requiresAuth(String path, String method) {
+        return !spec.path("paths").path(path).path(method).path("security").isEmpty();
     }
 }

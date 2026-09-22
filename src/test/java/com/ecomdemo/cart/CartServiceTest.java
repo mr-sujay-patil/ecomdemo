@@ -13,8 +13,10 @@ import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.customer.User;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
+import com.ecomdemo.security.CurrentUser;
 import com.ecomdemo.support.TestData;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -34,9 +36,14 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * repository in with it. Mocking at the service boundary is what keeps a failure here pointing
  * at {@code CartService} and nothing else.
  *
- * <p>{@code findCart()} is stubbed once and returns the same instance every time, which is what
- * a transaction would give the service: inside one unit of work the cart is a managed entity, so
- * every lookup and the save that follows are all the same object.
+ * <p>{@code findByUserId()} is stubbed once and returns the same instance every time, which is
+ * what a transaction would give the service: inside one unit of work the cart is a managed
+ * entity, so every lookup and the save that follows are all the same object.
+ *
+ * <p>{@code CurrentUser} is mocked too, and that is the reason it exists as a bean rather than
+ * as a static call to {@code SecurityContextHolder}. A static thread-local would have to be
+ * populated and torn down around every test here; an injected collaborator is simply stubbed
+ * like any other.
  */
 @ExtendWith(MockitoExtension.class)
 class CartServiceTest {
@@ -47,8 +54,22 @@ class CartServiceTest {
     @Mock
     private ProductService productService;
 
+    @Mock
+    private CurrentUser currentUser;
+
     @InjectMocks
     private CartService cartService;
+
+    private static final User OWNER = TestData.customer();
+
+    /**
+     * Stubs "who is calling" and "what is in their cart" together, because in this service they
+     * are always used together: the cart is found BY the caller.
+     */
+    private void givenTheCallersCartIs(Cart cart) {
+        when(currentUser.id()).thenReturn(OWNER.getId());
+        when(cartRepository.findByUserId(OWNER.getId())).thenReturn(Optional.of(cart));
+    }
 
     @Nested
     @DisplayName("view")
@@ -60,7 +81,7 @@ class CartServiceTest {
             Cart cart = TestData.cart(1L);
             cart.addItem(TestData.product(10L, "Lamp", "1500.00", 9), 2);
             cart.addItem(TestData.product(11L, "Cable", "100.50", 9), 3);
-            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            givenTheCallersCartIs(cart);
 
             // When
             CartResponse view = cartService.view();
@@ -76,7 +97,7 @@ class CartServiceTest {
         @Test
         void view_whenTheCartIsEmpty_returnsNoLinesAndAZeroTotal() {
             // Given
-            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+            givenTheCallersCartIs(TestData.cart(1L));
 
             // When
             CartResponse view = cartService.view();
@@ -96,7 +117,7 @@ class CartServiceTest {
             // Given
             Cart cart = TestData.cart(1L);
             Product product = TestData.product(10L, "Lamp", "1500.00", 9);
-            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            givenTheCallersCartIs(cart);
             when(productService.requireProduct(10L)).thenReturn(product);
 
             // When
@@ -114,7 +135,7 @@ class CartServiceTest {
             // Given: the cart already holds 2 of product 10
             Product product = TestData.product(10L, "Lamp", "1500.00", 9);
             Cart cart = TestData.cartWith(1L, product, 2);
-            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            givenTheCallersCartIs(cart);
             when(productService.requireProduct(10L)).thenReturn(product);
 
             // When
@@ -129,7 +150,7 @@ class CartServiceTest {
         @Test
         void addItem_whenTheProductDoesNotExist_throwsNotFoundAndSavesNothing() {
             // Given
-            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+            givenTheCallersCartIs(TestData.cart(1L));
             when(productService.requireProduct(404L)).thenThrow(NotFoundException.product(404L));
 
             // When / Then
@@ -149,7 +170,7 @@ class CartServiceTest {
             // Given
             Product product = TestData.product(10L, "Lamp", "1500.00", 9);
             Cart cart = TestData.cartWith(1L, product, 2);
-            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            givenTheCallersCartIs(cart);
 
             // When
             CartResponse view = cartService.updateItem(10L, new UpdateCartItemRequest(5));
@@ -163,7 +184,7 @@ class CartServiceTest {
         @Test
         void updateItem_whenTheProductIsNotInTheCart_throwsNotFoundAndSavesNothing() {
             // Given
-            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+            givenTheCallersCartIs(TestData.cart(1L));
 
             // When / Then
             assertThatThrownBy(() -> cartService.updateItem(10L, new UpdateCartItemRequest(5)))
@@ -183,7 +204,7 @@ class CartServiceTest {
             Cart cart = TestData.cart(1L);
             cart.addItem(TestData.product(10L, "Lamp", "1500.00", 9), 2);
             cart.addItem(TestData.product(11L, "Cable", "100.50", 9), 3);
-            when(cartRepository.findCart()).thenReturn(Optional.of(cart));
+            givenTheCallersCartIs(cart);
 
             // When
             CartResponse view = cartService.removeItem(10L);
@@ -199,7 +220,7 @@ class CartServiceTest {
         @Test
         void removeItem_whenTheProductIsNotInTheCart_throwsNotFoundAndSavesNothing() {
             // Given
-            when(cartRepository.findCart()).thenReturn(Optional.of(TestData.cart(1L)));
+            givenTheCallersCartIs(TestData.cart(1L));
 
             // When / Then
             assertThatThrownBy(() -> cartService.removeItem(10L))
@@ -217,7 +238,7 @@ class CartServiceTest {
         void currentCart_whenACartAlreadyExists_returnsItWithoutCreatingAnother() {
             // Given
             Cart existing = TestData.cart(1L);
-            when(cartRepository.findCart()).thenReturn(Optional.of(existing));
+            givenTheCallersCartIs(existing);
 
             // When
             Cart found = cartService.currentCart();
@@ -228,10 +249,12 @@ class CartServiceTest {
         }
 
         @Test
-        void currentCart_whenNoCartExistsYet_createsAndSavesTheOneSharedCart() {
+        void currentCart_whenNoCartExistsYet_createsAndSavesOneForTheCaller() {
             // Given
             Cart created = TestData.cart(1L);
-            when(cartRepository.findCart()).thenReturn(Optional.empty());
+            when(currentUser.id()).thenReturn(OWNER.getId());
+            when(currentUser.require()).thenReturn(OWNER);
+            when(cartRepository.findByUserId(OWNER.getId())).thenReturn(Optional.empty());
             when(cartRepository.save(any(Cart.class))).thenReturn(created);
 
             // When

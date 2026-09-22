@@ -16,8 +16,10 @@ import com.ecomdemo.common.ConflictException;
 import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
+import com.ecomdemo.customer.User;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
+import com.ecomdemo.security.CurrentUser;
 import com.ecomdemo.support.TestData;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -58,8 +60,13 @@ class OrderPlacementServiceTest {
     @Mock
     private OrderAuditService orderAuditService;
 
+    @Mock
+    private CurrentUser currentUser;
+
     @InjectMocks
     private OrderPlacementService placementService;
+
+    private static final User SHOPPER = TestData.customer();
 
     @Captor
     private ArgumentCaptor<Order> orderCaptor;
@@ -73,6 +80,7 @@ class OrderPlacementServiceTest {
         cart.addItem(lamp, 2);
         cart.addItem(cable, 3);
         when(cartService.currentCart()).thenReturn(cart);
+        when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -96,6 +104,7 @@ class OrderPlacementServiceTest {
         // Given
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
+        when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -164,6 +173,7 @@ class OrderPlacementServiceTest {
         // Given: the boundary — requesting exactly what is available is allowed
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
+        when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -211,6 +221,7 @@ class OrderPlacementServiceTest {
         // Given
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
+        when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
