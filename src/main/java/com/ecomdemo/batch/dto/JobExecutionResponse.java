@@ -31,6 +31,9 @@ public record JobExecutionResponse(long id, long instanceId, String jobName, Str
         long writeCount, long skipCount, String failureMessage,
         List<StepExecutionResponse> steps) {
 
+    /** How many links of a cause chain the failure message shows. */
+    private static final int MAX_CAUSE_CHAIN = 4;
+
     public static JobExecutionResponse from(JobExecution execution) {
         List<StepExecutionResponse> steps = execution.getStepExecutions().stream()
                 .map(StepExecutionResponse::from)
@@ -50,11 +53,36 @@ public record JobExecutionResponse(long id, long instanceId, String jobName, Str
                 steps);
     }
 
+    /**
+     * The first failure, rendered as its chain of causes rather than only its outermost link.
+     *
+     * <p>That matters more than it sounds. The framework's own wrapper is almost always the
+     * useless one — a skip limit being exceeded reaches the top as
+     * {@code FatalStepExecutionException: Unable to process chunk}, and the sentence an operator
+     * actually needs ("Skip limit of '50' exceeded", then the row that tipped it over) is two
+     * links down. The chain is capped so that a deeply nested framework failure cannot turn one
+     * field of a JSON response into a wall of text.
+     */
     private static String firstFailure(JobExecution execution) {
         return execution.getAllFailureExceptions().stream()
                 .findFirst()
-                .map(t -> t.getClass().getSimpleName()
-                        + (t.getMessage() == null ? "" : ": " + t.getMessage()))
+                .map(JobExecutionResponse::describeChain)
                 .orElse(null);
+    }
+
+    private static String describeChain(Throwable failure) {
+        StringBuilder text = new StringBuilder();
+        Throwable current = failure;
+        for (int link = 0; current != null && link < MAX_CAUSE_CHAIN; link++) {
+            if (link > 0) {
+                text.append("; caused by ");
+            }
+            text.append(current.getClass().getSimpleName());
+            if (current.getMessage() != null) {
+                text.append(": ").append(current.getMessage());
+            }
+            current = current.getCause() == current ? null : current.getCause();
+        }
+        return text.toString();
     }
 }

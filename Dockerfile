@@ -81,6 +81,20 @@ COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/spring-boot-loader/
 COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/snapshot-dependencies/ ./
 COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/application/ ./
 
+# Where the batch jobs (Phase 14) read uploads and write reports and error files.
+#
+# NOT under /app. The working directory is owned by root and the application runs as `ecomdemo`,
+# so the first upload would fail on mkdir with a permission error that looks nothing like a
+# permission error by the time it reaches the client. Created here, owned by the runtime user,
+# and mounted as a named volume in compose.
+#
+# It has to be a volume rather than container-local scratch: a restart re-reads the SAME staged
+# file by path, so an import that failed before a container was replaced could not be resumed if
+# its input had gone with the container.
+RUN mkdir -p /var/lib/ecomdemo/batch \
+    && chown -R ecomdemo:ecomdemo /var/lib/ecomdemo
+ENV BATCH_DIR=/var/lib/ecomdemo/batch
+
 USER ecomdemo:ecomdemo
 
 EXPOSE 8080

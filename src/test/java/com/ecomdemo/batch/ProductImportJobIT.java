@@ -124,13 +124,20 @@ class ProductImportJobIT extends IntegrationTest {
         assertThat(response.execution().writeCount()).isEqualTo(validRows);
         assertThat(response.execution().skipCount()).isEqualTo(badRows.size());
 
-        // Committed in chunks of 100, so a hundred transactions rather than one - and rolled back
-        // more than once, because finding which item of a chunk was skippable means replaying it.
+        // Committed in chunks of 100, so a hundred transactions rather than one. That is the
+        // chunk size doing its job, and it is the number to look at when tuning: one transaction
+        // for the whole file would hold locks for its duration and lose everything on the last
+        // row, and one per row would pay a commit ten thousand times.
         assertThat(response.execution().steps()).singleElement()
                 .satisfies(step -> {
                     assertThat(step.name()).isEqualTo(ProductImportJobConfig.IMPORT_STEP);
                     assertThat(step.commitCount()).isGreaterThan(50);
-                    assertThat(step.rollbackCount()).isPositive();
+                    // Note what is NOT asserted: rollbacks. Spring Batch 6's chunk-oriented step
+                    // handles a skippable item as it meets it, where the pre-6.0 implementation
+                    // rolled the chunk back and replayed it item by item to find the culprit.
+                    // Same outcome, considerably less work - and a rollback count of zero on a
+                    // run with skips, which under the old model would have been a bug.
+                    assertThat(step.rollbackCount()).isZero();
                 });
 
         assertThat(countImported()).isEqualTo(validRows);

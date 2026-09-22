@@ -655,7 +655,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V6, all successful" "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V8, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -697,7 +698,7 @@ if HISTORY="$(psql_query \
     ORPHAN_ORDERS="$(psql_query "SELECT count(*) FROM orders WHERE user_id IS NULL;" | tr -d '\r ')"
     check "no order belongs to nobody" "0" "$ORPHAN_ORDERS"
 else
-    skip "flyway_schema_history shows V1-V6, all successful" \
+    skip "flyway_schema_history shows V1-V8, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V3's idx_product_category index exists" "same as above"
@@ -951,6 +952,150 @@ else
     skip "deleting the product evicts the entry" "same as above"
     skip "and the product is really gone" "same as above"
 fi
+
+# --------------------------------------------------------------------------------------------
+# Batch processing (Phase 14)
+# --------------------------------------------------------------------------------------------
+# Uploads a product CSV whose rows are deliberately part good and part bad, and checks the three
+# things the phase promises: the job ends COMPLETED, the catalogue grows by exactly the number of
+# good rows, and the skip count equals the number of bad ones.
+#
+# The products it creates are named "Smoke Import NN" and deleted at the end, so the catalogue is
+# the same size after this section as before it. Running the script twice is safe either way: the
+# import upserts by name, so a second run updates the same rows rather than adding more.
+section "Batch processing"
+
+IMPORT_GOOD=12
+IMPORT_BAD=4
+
+# The file. Four bad rows, one per kind of rejection: no name, a price that is not a number, a
+# negative stock, and a line with too few columns (which fails in the READER rather than in
+# validation, and is counted just the same).
+IMPORT_CSV="$(mktemp)"
+{
+    echo "name,description,price,stock_quantity,category"
+    for i in $(seq 1 "$IMPORT_GOOD"); do
+        printf 'Smoke Import %02d,imported by the smoke test,%d.50,%d,SMOKE\n' "$i" "$((9 + i))" "$i"
+    done
+    echo ",no name at all,9.99,1,SMOKE"
+    echo "Smoke Import bad price,x,twelve,1,SMOKE"
+    echo "Smoke Import bad stock,x,9.99,-3,SMOKE"
+    echo "Smoke Import short row,9.99"
+} > "$IMPORT_CSV"
+
+# How many products there are now. Everything below is measured against this.
+as_anonymous
+request GET /api/products > /dev/null
+PRODUCTS_BEFORE="$(jget "len(d)")"
+
+# The upload. `request` only speaks JSON, so this one call uses curl directly: -F turns it into a
+# multipart/form-data POST with a file part named `file`, which is what the endpoint binds.
+as_admin
+IMPORT_STATUS="$(curl -sS -o "$BODY" -w '%{http_code}' -X POST \
+    "$BASE_URL/api/admin/batch/product-import" \
+    -H "Authorization: Bearer $AUTH" -F "file=@$IMPORT_CSV;filename=smoke-products.csv;type=text/csv")"
+check "uploading a product CSV returns 200" "200" "$IMPORT_STATUS"
+
+# A 200 means the job RAN. Whether it worked is in the body - which is the distinction the
+# endpoint exists to make, and the reason this is a separate check.
+check "the import job ends COMPLETED" "COMPLETED" "$(jget "d['execution']['status']")"
+check "it ran the import job" "productImportJob" "$(jget "d['execution']['jobName']")"
+check "every good row was written" "$IMPORT_GOOD" "$(jget "d['execution']['writeCount']")"
+check "and every bad row was skipped, not imported" "$IMPORT_BAD" \
+    "$(jget "d['execution']['skipCount']")"
+
+# One chunk-oriented step, and the counters the JobRepository recorded for it.
+check "the job reports its one step" "importProducts" "$(jget "d['execution']['steps'][0]['name']")"
+IMPORT_COMMITS="$(jget "d['execution']['steps'][0]['commitCount']")"
+if [ -n "${IMPORT_COMMITS:-}" ] && [ "$IMPORT_COMMITS" -ge 1 ]; then
+    pass "the step committed its chunks ($IMPORT_COMMITS)"
+else
+    fail "the step committed its chunks" "at least 1" "${IMPORT_COMMITS:-<none>}"
+fi
+
+IMPORT_EXECUTION_ID="$(jget "d['execution']['id']")"
+IMPORT_ERROR_FILE="$(jget "d['execution'] and d['errorFile']")"
+
+# The catalogue really grew, and by exactly the good rows.
+as_anonymous
+request GET /api/products > /dev/null
+check "the catalogue grew by exactly the good rows" "$((PRODUCTS_BEFORE + IMPORT_GOOD))" \
+    "$(jget "len(d)")"
+
+# ... and the listing being served is the fresh one. The import evicts the Phase 13 caches after
+# the step commits; without that this check would still see the pre-import catalogue.
+check "an imported product is in the cached listing" "True" \
+    "$(jget "any(p['name'] == 'Smoke Import 01' for p in d)")"
+
+# Every rejected row is written down, with its line number and the reason - the file is the only
+# way anyone finds out WHICH rows were skipped. It lives on the application's filesystem, so it
+# is read through the container when there is one.
+if [ -n "${IMPORT_ERROR_FILE:-}" ] && [ "$IMPORT_ERROR_FILE" != "None" ]; then
+    pass "the response names an error file"
+    if command -v docker >/dev/null 2>&1 && docker exec ecomdemo-app true >/dev/null 2>&1; then
+        # `sh -c` so the redirection runs INSIDE the container: `docker exec ... wc -l < file`
+        # would have the host's shell try to open a path that only exists in the container.
+        ERROR_LINES="$(docker exec ecomdemo-app sh -c "wc -l < '$IMPORT_ERROR_FILE'" 2>/dev/null \
+            | tr -d ' \r')"
+        check "it holds one line per rejected row, plus a header" "$((IMPORT_BAD + 1))" \
+            "${ERROR_LINES:-<unreadable>}"
+    elif [ -r "$IMPORT_ERROR_FILE" ]; then
+        check "it holds one line per rejected row, plus a header" "$((IMPORT_BAD + 1))" \
+            "$(wc -l < "$IMPORT_ERROR_FILE" | tr -d ' ')"
+    else
+        skip "it holds one line per rejected row, plus a header" \
+            "the file is on the application's filesystem and no container named 'ecomdemo-app' is running"
+    fi
+else
+    fail "the response names an error file" "a path" "${IMPORT_ERROR_FILE:-<none>}"
+fi
+
+# The run was WRITTEN DOWN. This is the check that would have caught Spring Batch 6 quietly using
+# its in-memory JobRepository, under which everything above still passes and nothing survives a
+# restart.
+as_admin
+check "the execution can be read back from the JobRepository" "200" \
+    "$(request GET "/api/admin/batch/executions/$IMPORT_EXECUTION_ID")"
+check "and it is the same run" "$IMPORT_GOOD" "$(jget "d['writeCount']")"
+
+# A completed run is not a restartable one. The refusal is the JobRepository doing its job.
+check "a completed run cannot be restarted" "409" \
+    "$(request POST "/api/admin/batch/executions/$IMPORT_EXECUTION_ID/restart")"
+
+# Importing the same catalogue again updates rather than duplicates, which is what makes a
+# restart safe: the rows of a rolled-back chunk get processed a second time.
+IMPORT_STATUS="$(curl -sS -o "$BODY" -w '%{http_code}' -X POST \
+    "$BASE_URL/api/admin/batch/product-import" \
+    -H "Authorization: Bearer $AUTH" -F "file=@$IMPORT_CSV;filename=smoke-products.csv;type=text/csv")"
+check "re-importing the same file returns 200" "200" "$IMPORT_STATUS"
+check "and completes" "COMPLETED" "$(jget "d['execution']['status']")"
+as_anonymous
+request GET /api/products > /dev/null
+check "the catalogue did not grow again: the import upserts" \
+    "$((PRODUCTS_BEFORE + IMPORT_GOOD))" "$(jget "len(d)")"
+
+# Only an ADMIN may rewrite the catalogue from a file.
+as_customer
+IMPORT_STATUS="$(curl -sS -o "$BODY" -w '%{http_code}' -X POST \
+    "$BASE_URL/api/admin/batch/product-import" \
+    -H "Authorization: Bearer $AUTH" -F "file=@$IMPORT_CSV;filename=smoke-products.csv;type=text/csv")"
+check "a CUSTOMER cannot import a catalogue" "403" "$IMPORT_STATUS"
+as_anonymous
+IMPORT_STATUS="$(curl -sS -o "$BODY" -w '%{http_code}' -X POST \
+    "$BASE_URL/api/admin/batch/product-import" -F "file=@$IMPORT_CSV;filename=smoke-products.csv;type=text/csv")"
+check "and an anonymous caller certainly cannot" "401" "$IMPORT_STATUS"
+
+# Clean up: leave the catalogue exactly as it was found.
+as_admin
+request GET /api/products > /dev/null
+for id in $(jget "' '.join(str(p['id']) for p in d if p['name'].startswith('Smoke Import'))"); do
+    request DELETE "/api/products/$id" > /dev/null
+done
+as_anonymous
+request GET /api/products > /dev/null
+check "the imported products are cleaned up again" "$PRODUCTS_BEFORE" "$(jget "len(d)")"
+rm -f "$IMPORT_CSV"
+as_customer
 
 # --------------------------------------------------------------------------------------------
 # Summary

@@ -156,7 +156,8 @@ class SalesReportJobConfig {
             JdbcCursorItemReader<TopProduct> topProductReader,
             FlatFileItemWriter<TopProduct> topProductWriter, BatchProperties properties) {
         return new StepBuilder(TOP_PRODUCTS_STEP, jobRepository)
-                .<TopProduct, TopProduct>chunk(properties.chunkSize(), transactionManager)
+                .<TopProduct, TopProduct>chunk(properties.chunkSize())
+                .transactionManager(transactionManager)
                 .reader(topProductReader)
                 // No processor. An ItemProcessor is optional, and a step that only moves rows
                 // from a query to a file has nothing to transform - an identity processor would

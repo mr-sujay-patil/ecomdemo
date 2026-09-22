@@ -86,15 +86,19 @@ class ProductImportJobConfig {
             ProductUpsertWriter productUpsertWriter, RejectedRowRecorder rejectedRowRecorder,
             BatchProperties properties) {
         return new StepBuilder(IMPORT_STEP, jobRepository)
-                .<ProductCsvRow, Product>chunk(properties.chunkSize(), transactionManager)
+                // chunk(size) and a separate transactionManager(...), not the one-call
+                // chunk(size, transactionManager): that overload builds the pre-6.0
+                // implementation, which Spring Batch 6 deprecates and 7 removes. It still works,
+                // and it announces itself in the log on every startup.
+                .<ProductCsvRow, Product>chunk(properties.chunkSize())
+                .transactionManager(transactionManager)
                 .reader(productCsvReader)
                 .processor(processor)
                 .writer(productUpsertWriter)
                 .faultTolerant()
-                .skip(FlatFileParseException.class)
-                .skip(InvalidProductRowException.class)
+                .skip(FlatFileParseException.class, InvalidProductRowException.class)
                 .skipLimit(properties.skipLimit())
-                .listener(rejectedRowRecorder)
+                .skipListener(rejectedRowRecorder)
                 .listener(productUpsertWriter)
                 .build();
     }
