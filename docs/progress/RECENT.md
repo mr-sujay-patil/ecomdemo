@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 15: Metrics & Monitoring (tag: pending, PR: pending)
+## Phase 15: Metrics & Monitoring (tag: phase-15-complete, PR #17)
 **What exists now:** The application is observable. Actuator publishes health (with separate
 liveness and readiness groups), info, metrics and a Prometheus scrape endpoint; three business
 meters describe checkout; Prometheus scrapes every 15s and Grafana draws an 11-panel dashboard,

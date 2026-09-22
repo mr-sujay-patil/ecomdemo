@@ -3,97 +3,61 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 15: Metrics & Monitoring
-- **Branch:** feature/phase-15-metrics
-- **Step:** PR_OPEN
+- **Phase:** 16: Centralized Logging (Grafana Loki)
+- **Branch:** feature/phase-16-logging
+- **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #17 — raised, CI green (`Build and test` pass, 2m00s), mergeStateStatus CLEAN
-- **Waiting for user:** YES — review and merge PR #17, then say `merged, continue`
+- **PR:** none yet
+- **Waiting for user:** NO
 
-## Phase 14 merge verification (passed 2026-09-22)
-PR #16 MERGED with a merge commit (a5ff674, 2 parents: d674e1c + e11d777); the branch is an
-ancestor of `main`; no commits and no file diffs between branch and `main`; all 15 branches intact
-on GitHub. The whole `com.ecomdemo.batch` package, `V7__batch_job_repository.sql`,
-`V8__index_product_name.sql` and the 7 batch test classes are present in `main`.
-**CI on `main` green** (run 35711849347: `Build and test` SUCCESS, `Publish image to GHCR` SUCCESS).
-`./mvnw clean verify` on `main` -> BUILD SUCCESS, 229 unit + 47 IT, 0 failures, 0 skipped.
-`docker compose up -d --build` from `main` rebuilt `ecomdemo:latest` (identical digest, so no
-container recreate); `scripts/smoke-test.sh` -> 156 passed, 0 failed, 0 skipped.
-Tag `phase-14-complete` pushed.
+## Phase 15 merge verification (passed 2026-09-22)
+PR #17 MERGED with a merge commit (77a9d13, 2 parents: a5ff674 + 8345ab6); the branch is an
+ancestor of `main`; no commits and no file diffs between branch and `main`; all 16 branches
+intact on GitHub. The whole `com.ecomdemo.metrics` package, `docker/prometheus/*`,
+`docker/grafana/*` and the Phase 15 test classes are present in `main`.
+**CI on `main` green** (run 35716925251: `Build and test` SUCCESS, `Publish image to GHCR` SUCCESS).
+`./mvnw clean verify` on `main` -> BUILD SUCCESS, 241 unit + 62 IT, 0 failures, 0 skipped, 1m12s.
+`docker compose up -d --build` from `main` recreated `ecomdemo-app`; `scripts/smoke-test.sh`
+-> 204 passed, 0 failed, 0 skipped. Tag `phase-15-complete` pushed.
+**Environment gotcha found during verification:** `git checkout main` deleted `docker/grafana/`
+and `docker/prometheus/` (they did not exist in `main` before the merge) and the pull recreated
+them with new inodes, so the already-running Grafana container's bind mounts pointed at the stale
+directories and saw them EMPTY - the 2 dashboard smoke checks failed. Fix:
+`docker compose up -d --force-recreate grafana prometheus`. Not a code defect; re-run was clean.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] Exposed endpoints: health (with liveness and readiness groups), info, metrics, prometheus
-- [x] Business metrics: `orders.placed`, `order.value`, and a checkout timer
-- [x] Prometheus and Grafana in Compose, with a provisioned dashboard and one alert rule
-- [x] Done when: the dashboard shows live traffic and business metrics (data verified;
-      the visual render is ⚠️ manual - see below)
-- [x] Smoke test additions: after placing an order, `/actuator/prometheus` shows
-      `orders_placed_total` incremented; liveness and readiness are UP - 48 new checks
-- [x] Testing protocol run in full + docs/test-reports/phase-15.md
-- [x] README section, docs/decisions.md entries (16), RECENT.md rotation (Phase 13 archived),
+- [ ] Structured JSON console logging
+- [ ] A correlation ID filter with MDC, also returned in a response header
+- [ ] Loki and Grafana Alloy in Compose, with Loki as a Grafana data source
+- [ ] No sensitive data in logs
+- [ ] Done when: all logs for one request can be found in Grafana by correlation ID
+- [ ] Smoke test additions: every response carries an `X-Correlation-Id` header; querying Loki's
+      API for that ID returns log lines
+- [ ] Testing protocol run in full + docs/test-reports/phase-16.md
+- [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 14 archived),
       tracker -> 🔵
-- [x] PR raised (#17)
+- [ ] PR raised
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 241 (was 229) + Failsafe 62
-  (was 47), 0 failures, 0 skipped. One postgres + one redis for the whole Failsafe run.
-- 2026-09-22: `./mvnw clean test` -> 241, 0 "Creating container" lines; the fast suite is still
-  Docker-free.
-- 2026-09-22: `scripts/smoke-test.sh` -> 204 passed (was 156), 0 failed, **0 skipped**.
-- 2026-09-22: DashboardMetricsTest verified by MUTATION - renaming the counter in the dashboard
-  and the timer in the alert rule each fail the suite; both files restored and green.
-- 2026-09-22: all 16 dashboard panel queries run through the Prometheus API after ~105 real
-  orders -> every one returns data. The alert expression evaluates to 0 for `conflict`, and the
-  same expression with `empty_cart` (0.21) crosses the threshold and returns a row, so the rule
-  shape does fire.
-- 2026-09-22: failure scenarios by hand. Redis stopped -> /health DOWN, **readiness UP**,
-  catalogue still 200. PostgreSQL stopped -> readiness `{"status":"DOWN"}` 503 after **10.07s**
-  (driver connectTimeout), liveness UP, container eventually `unhealthy`. Both recovered.
+- 2026-09-22 (merge verification on `main`): `./mvnw clean verify` -> 241 + 62, 0 failures,
+  0 skipped. `scripts/smoke-test.sh` -> 204 passed, 0 failed, 0 skipped.
 
 ## Open issues / blockers
-- ⚠️ The Grafana dashboard could not be screenshotted: Chrome's site permissions block
-  localhost:3000 for browser automation in this environment. Verified instead by running all 16
-  of the dashboard's own panel queries through the Prometheus API - every one returns live data.
-  The visual render needs the user's eyes; steps are in `docs/test-reports/phase-15.md` §8.
-- The failure test corrected a README claim: readiness with the DB down answers
-  `{"status":"DOWN"}` 503, NOT `OUT_OF_SERVICE`, and takes ~10s. README rewritten to the
-  measured behaviour.
+- Carried over from Phase 15: the Grafana dashboard's RENDER has still never been looked at by
+  human eyes (its data is fully verified through the Prometheus API). Chrome's site permissions
+  block localhost:3000 for browser automation here. Steps: `docs/test-reports/phase-15.md` §8.
 
-## Decisions this phase (copied to docs/decisions.md ✅ — 16 entries)
-- Actuator stays on the main port 8080; the production answer (management.server.port on an
-  internal-only network) is named in SecurityConfig and deliberately out of scope.
-- health/info/prometheus are anonymous because their callers are machines with no credentials;
-  everything else Actuator exposes is ADMIN via EndpointRequest.toAnyEndpoint().
-- Exposure is an explicit allow-list, so /actuator/env is a 404 even for an ADMIN.
-- Readiness = readinessState + db. Redis is deliberately excluded: a cache outage is a
-  slowdown the app survives, and including it would turn that into an outage.
-- Liveness = livenessState alone. No dependency belongs in the probe whose remedy is a restart.
-- The container healthcheck moved from /api/products to /actuator/health/readiness.
-- checkout.duration wraps the whole retry loop, so one checkout is one observation.
-- Five outcome tag values including a catch-all `error`, so the RED error rate cannot lie by
-  omission.
-- Every meter pre-registered in the CheckoutMetrics constructor: an absent series is not zero,
-  and an alert on one can never fire.
-- percentiles-histogram, not percentiles: quantiles are computed by Prometheus from buckets so
-  they can be aggregated across instances.
-- A MeterFilter drops /actuator URIs, so the scrape is not the busiest endpoint in the shop.
-- One alert rule, on the conflict SHARE rather than the count, with `for: 10m`.
-- Grafana datasource and dashboard are provisioned from files; UI edits are overwritten.
+## Decisions this phase (copy to docs/decisions.md before the PR)
+- (none yet)
 
 ## Environment left behind
 Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`,
-`ecomdemo-cache`), schema v8, image built from `main`. SonarQube stack (`ecomdemo-sonarqube`,
-`ecomdemo-sonar-db`) also up at http://localhost:9000; stop it with
-`docker compose -f compose.sonar.yaml down` if the memory is wanted back. `.env` holds a real
-JWT_SECRET and is gitignored. No stray Java processes.
+`ecomdemo-cache`, `ecomdemo-prometheus`, `ecomdemo-grafana`), schema v8, image built from `main`.
+SonarQube stack (`ecomdemo-sonarqube`, `ecomdemo-sonar-db`) also up at http://localhost:9000;
+stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted back. `.env`
+holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR #17 is open, CI is green, mergeStateStatus CLEAN.
-`Publish image to GHCR` shows skipping because that job only runs on `main`.
-https://github.com/mr-sujay-patil/ecomdemo/pull/17
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
-  tag `phase-15-complete` and start Phase 16 (`docs/phases/phase-16-logging.md`).
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
-- Do NOT merge unless they say exactly `approved, merge it`.
-- One ⚠️ is outstanding for the user: look at the Grafana dashboard's RENDER (its data is fully
-  verified). Steps in `docs/test-reports/phase-15.md` §8.
+Start IMPLEMENTING Phase 16 on `feature/phase-16-logging`, first checklist item first:
+structured JSON console logging. Read `docs/phases/phase-16-logging.md` for the scope and
+`docs/process/testing-protocol.md` before the PR. Nothing is waiting on the user.
