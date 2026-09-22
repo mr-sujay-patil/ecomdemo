@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 09: JWT Authentication (tag: pending, PR: pending)
+## Phase 09: JWT Authentication (tag: phase-09-complete, PR #9)
 **What exists now:** The password is sent once. `POST /api/auth/login` returns a signed HS256 JWT
 (15 min) carrying `sub`, `uid` and `roles`; every other call sends `Authorization: Bearer <token>`
 and the OAuth2 Resource Server filter verifies signature, expiry and issuer. No session, no
