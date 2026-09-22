@@ -7,7 +7,8 @@
 - **Branch:** feature/phase-19-modulith
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** raised, CI pending
+- **PR:** #24 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
+  https://github.com/mr-sujay-patil/ecomdemo/pull/24
 - **Waiting for user:** YES — review and merge
 
 ## Phase 18 merge verification (PASSED 2026-09-23)
@@ -37,7 +38,7 @@ memory written for the interim preference has been deleted. Do not re-raise this
 - [x] Testing protocol run in full + docs/test-reports/phase-19.md
 - [x] README section, docs/decisions.md entries (8), RECENT.md rotation (Phase 17 archived),
       tracker -> 🔵
-- [x] PR raised
+- [x] PR raised (#24)
 
 ## Where the code is today (surveyed, not yet moved)
 Domain-ish: `product` (6), `customer` (6), `cart` (6), `order` (12), `notification` (4).
