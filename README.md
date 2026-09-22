@@ -4,18 +4,38 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · GitHub Actions · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · GitHub Actions · SonarQube + JaCoCo · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 11: Continuous Integration** — every pull request is now built and tested by GitHub
-Actions before anyone can merge it, and every merge to `main` publishes a container image to
-GHCR tagged with the commit SHA.
+**Phase 12: Code Quality** — the project is now measured rather than assumed. JaCoCo covers
+**both** test suites (the unit run and the integration run fork separate JVMs, so each gets its
+own agent and the results are merged), and SonarQube runs in its own compose stack behind a
+quality gate.
+
+```
+Coverage 96.1%  ·  Bugs 0  ·  Vulnerabilities 0  ·  Code smells 0  ·  Debt 0 min
+Reliability A   ·  Security A  ·  Maintainability A  ·  QUALITY GATE: OK
+```
+
+That started at 16 issues and 92 minutes of debt. One was a real bug (a `SecureRandom` rebuilt on
+every call), two were confirmed by the compiler rather than taken on trust, and five were tests
+whose assertions did not pin down which call was supposed to throw. The one finding that was not
+"fixed" — CSRF being disabled — is a *review* rule with a deliberate answer, suppressed in the
+code with its reasoning attached rather than dismissed in a server database that a rebuild wipes.
+
+<details>
+<summary>Phase 11: Continuous Integration</summary>
+
+Every pull request is built and tested by GitHub Actions before anyone can merge it, and every
+merge to `main` publishes a container image to GHCR tagged with the commit SHA.
 
 The gate is not a claim: a deliberately failing test was committed, watched turn the run red, and
 reverted — with the publish job skipped and the test reports still uploaded, which is the only
 time anybody wants them. A build takes about a minute, and the Maven cache takes ~20% off that.
 Dependabot watches Maven and the actions weekly.
+
+</details>
 
 <details>
 <summary>Phase 10: Containerization</summary>
@@ -93,9 +113,10 @@ ecomdemo/
 ├── Dockerfile     # multi-stage: JDK+Maven to build, JRE to run, non-root, layered jar
 ├── .dockerignore  # keeps target/, .git and .env out of the build context
 ├── compose.yaml   # the app + PostgreSQL: health checks, a named volume, one network
+├── compose.sonar.yaml  # SonarQube + its own PostgreSQL, started only for an analysis
 ├── .env.example   # every variable, documented; .env itself is gitignored
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
-├── scripts/       # smoke-test.sh
+├── scripts/       # smoke-test.sh, sonar-setup.sh (the quality gate as code)
 └── .github/
     ├── workflows/ci.yml   # build + test every PR; publish the image on merge to main
     ├── dependabot.yml     # weekly Maven and Actions updates
@@ -639,6 +660,151 @@ curl -s "${BEN[@]}" localhost:8080/api/cart
 # 403 - the order exists, it is simply not his
 curl -s -i "${BEN[@]}" localhost:8080/api/orders/1 | head -1
 ```
+
+## Code quality
+
+Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually
+ran. **SonarQube** reads the code and reports what is wrong with it. Neither is a substitute for
+the other, and neither is a substitute for tests that assert something.
+
+### Coverage across both suites
+
+```bash
+./mvnw clean verify
+open target/site/jacoco-merged/index.html
+```
+
+```
+INSTRUCTION  96.5%   LINE  97.3%   BRANCH  81.0%   CLASS  100%
+```
+
+The interesting part is *how* that is measured. Surefire and Failsafe fork **separate JVMs**, so
+JaCoCo runs two agents and merges the results:
+
+```
+prepare-agent             -> target/jacoco-unit.exec     (Surefire)
+prepare-agent-integration -> target/jacoco-it.exec       (Failsafe)
+merge  + report           -> target/site/jacoco-merged/
+```
+
+A single `prepare-agent` — the configuration in most tutorials — instruments the unit run only.
+Here that would have silently excluded the 30 integration tests, which are the only ones
+exercising the controllers over real HTTP. The report would have been wrong in the direction that
+flatters.
+
+There was a second trap already in the pom. Surefire and Failsafe both pin an `<argLine>` for the
+Mockito agent, and a literal `<argLine>` **overrides** the one JaCoCo injects — coverage would
+have read 0% with nothing to explain it. Both now read it from a property, with `@{...}` late
+evaluation:
+
+```xml
+<argLine>@{jacocoUnitArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+```
+
+`@{...}` is resolved when the JVM is forked; `${...}` would expand at parse time, when the
+property is still empty.
+
+### Running an analysis
+
+```bash
+docker compose -f compose.sonar.yaml up -d      # ~2 GB, first boot takes a minute
+scripts/sonar-setup.sh                          # creates the project and the quality gate
+open http://localhost:9000                      # admin / admin, then change it
+
+./mvnw clean verify sonar:sonar \
+  -Dsonar.host.url=http://localhost:9000 \
+  -Dsonar.token=<a token from My Account -> Security> \
+  -Dsonar.qualitygate.wait=true
+
+docker compose -f compose.sonar.yaml down       # stop, keeping the analysis history
+```
+
+SonarQube lives in **its own compose file** because it needs ~2 GB and an embedded Elasticsearch,
+while the application stack needs neither — `docker compose up` stays the lean two-container dev
+stack.
+
+`verify` before `sonar:sonar` is not optional: the scanner reads the compiled classes and the
+merged JaCoCo report, and analysing without them reports no coverage at all.
+`-Dsonar.qualitygate.wait=true` makes the **build** fail on a red gate, rather than printing a
+link to a dashboard nobody opens.
+
+### Bugs, vulnerabilities, smells and hotspots
+
+Four categories, and the distinction is the point:
+
+| | What it means | Example found here |
+|---|---|---|
+| **Bug** | Code that is wrong — it will misbehave | `new SecureRandom()` on every call |
+| **Vulnerability** | Code that is exploitable | — |
+| **Security hotspot** | A *question*, not a defect: security-sensitive code a human must judge | CSRF disabled |
+| **Code smell** | Correct, but harder to maintain than it needs to be | a method named `record` |
+
+A hotspot is the one people get wrong. It is not "a vulnerability we haven't fixed" — it is code
+where the right answer depends on context the analyser cannot see. The gate demands that hotspots
+are **reviewed**, not that there are none.
+
+### Technical debt
+
+Sonar prices every smell in minutes and adds them up — this project started at **92 minutes** and
+is now at **0**. Treat that as a relative signal, not a schedule: the estimates are generic, and
+"we have 40 hours of debt" is a sentence to be suspicious of. What the number is good for is
+noticing it grow.
+
+Complexity gets the same treatment. **Cyclomatic complexity** counts branches — how many paths
+through a method. **Cognitive complexity** weights them by how hard they are for a *person* to
+follow, so nesting costs more than a flat sequence of `if`s. This project sits at 216 and 28.
+
+### The quality gate, and why it only looks at new code
+
+```
+new_coverage                   >= 80%
+new_violations                 = 0
+new_duplicated_lines_density   <= 3%
+new_security_hotspots_reviewed = 100%
+new_reliability_rating         = A
+new_security_rating            = A
+```
+
+Every condition is on **new code**. A rule about the whole project either passes on day one and
+never teaches anything, or fails on day one and gets switched off within a week. "Leave it cleaner
+than you found it" is a rule a team can actually keep, and it converges on the same place without
+ever blocking unrelated work.
+
+Coverage on new code stays at Sonar's 80 rather than the 70 the phase brief suggested: the project
+is at 97.4%, so lowering it would be loosening a gate it already beats.
+
+**The gate is in Git**, not just in the server. `scripts/sonar-setup.sh` creates it through the
+Web API and is idempotent — because a gate configured in SonarQube's database is deleted by
+`down -v`, and a colleague starting the stack would silently get Sonar's defaults instead. That
+script was tested by destroying the server and rebuilding from nothing.
+
+### What coverage does not tell you
+
+96.1% is a good number and it is not a claim that the code is correct. Coverage measures which
+lines *ran*, not whether anything *checked the result* — a suite with no assertions at all can
+reach 100%.
+
+The 81% **branch** figure is the more honest one, because it counts decisions rather than lines.
+And what actually makes this suite worth something is not the percentage: it is the Phase 6
+oversell race, the Phase 8 ownership tests and the Phase 9 tampered-token test — none of which
+coverage can see. The number is a floor, and the gate treats it as one.
+
+### One finding that was reviewed rather than fixed
+
+```java
+@SuppressWarnings("java:S4502")   // "Make sure disabling CSRF protection is safe here"
+@Bean
+public SecurityFilterChain securityFilterChain(HttpSecurity http) {
+```
+
+The answer is in the section on CSRF below: this API is stateless, sets no cookie, and reads a
+Bearer token from a header the client must attach deliberately, so there is no ambient authority
+to forge.
+
+It was first marked "Accepted" in SonarQube — and then the server was wiped to test the setup
+script, and the finding came straight back, because that decision lived only in a database. So it
+moved into the code, where it is version-controlled, visible in review, and where deleting the
+annotation is what makes the rule speak up again the day this application adopts cookies.
 
 ## How CI works
 
@@ -1333,6 +1499,12 @@ cost a container start each time.
   nothing runs it; deployment arrives with **Phases 25–26**.
 - **Nothing scans the published image.** Dependabot watches the Maven dependencies and the
   actions, not the base image or the built artefact. **Phase 31** adds scanning.
+- **The quality gate is not enforced in CI.** SonarQube runs locally, on demand; nothing checks
+  it on a pull request. SonarQube Cloud with PR decoration is the usual answer and was left out
+  of scope deliberately — so the gate is a tool you run, not a gate that stops you.
+- **Branch coverage sits at 81% against 97% line coverage.** Several `else` paths are defensive
+  and only reachable through states the API does not permit. That gap is the honest one to look
+  at; the line figure flatters.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the
   code it reaches. **Phase 12** adds JaCoCo and SonarQube.
 - **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without
