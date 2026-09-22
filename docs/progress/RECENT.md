@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 14: Batch Processing (tag: pending, PR: pending)
+## Phase 14: Batch Processing (tag: phase-14-complete, PR #16)
 **What exists now:** Two Spring Batch jobs. `productImportJob` reads a product CSV uploaded by an
 ADMIN, validates each row, upserts by product name, skips bad rows up to a limit and writes them
 to an error file beside the upload; it is restartable. `salesReportJob` writes a CSV of one day's
