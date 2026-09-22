@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-15-metrics
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #17 — raised, awaiting CI
+- **PR:** #17 — raised, CI green (`Build and test` pass, 2m00s), mergeStateStatus CLEAN
 - **Waiting for user:** YES — review and merge PR #17, then say `merged, continue`
 
 ## Phase 14 merge verification (passed 2026-09-22)
@@ -88,7 +88,8 @@ Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomd
 JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR #17 is open:
+STOPPED at the mandatory post-PR stop point. PR #17 is open, CI is green, mergeStateStatus CLEAN.
+`Publish image to GHCR` shows skipping because that job only runs on `main`.
 https://github.com/mr-sujay-patil/ecomdemo/pull/17
 - If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
   tag `phase-15-complete` and start Phase 16 (`docs/phases/phase-16-logging.md`).
