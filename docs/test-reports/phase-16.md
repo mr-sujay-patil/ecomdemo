@@ -180,8 +180,10 @@ check will not be weakened or removed to get green.
 2. Merge Phase 16, then fix it in a `fix/` branch and PR of its own before Phase 17.
 3. Accept it as a known defect and carry it in the follow-ups.
 
-Recommendation: **(2)**. It keeps this phase's diff about logging, gives the fix its own review and
-its own test, and it is a small change — but it should not ride along inside a logging PR.
+Recommendation was **(2)**. **The user chose (3): accept it as a known defect.** It is therefore
+carried in the follow-ups of `docs/progress/RECENT.md` and named in the PR description, the smoke
+test stays red on this one check until someone picks it up, and the check itself was left exactly
+as it is — it is telling the truth.
 
 ## 8. ⚠️ Still outstanding from Phase 15
 

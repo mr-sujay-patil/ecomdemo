@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 16: Centralized Logging (Grafana Loki)
 - **Branch:** feature/phase-16-logging
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES - a decision on the pre-existing stale-cache bug (see below)
+- **Waiting for user:** YES - review and merge the PR
 
 ## Phase 15 merge verification (passed 2026-09-22)
 PR #17 MERGED with a merge commit (77a9d13, 2 parents: a5ff674 + 8345ab6); the branch is an
@@ -36,7 +36,7 @@ directories and saw them EMPTY - the 2 dashboard smoke checks failed. Fix:
 - [x] Testing protocol run in full + docs/test-reports/phase-16.md
 - [x] README section, docs/decisions.md entries (15), RECENT.md rotation (Phase 14 archived),
       tracker -> 🔵
-- [ ] PR raised - BLOCKED, see below
+- [x] PR raised
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 268 (was 241) + Failsafe 70
@@ -56,15 +56,16 @@ directories and saw them EMPTY - the 2 dashboard smoke checks failed. Fix:
   string that IS in the logs and 0 for the password and the bearer token.
 
 ## Open issues / blockers
-- 🛑 **BLOCKING THE PR.** `scripts/smoke-test.sh` fails one check, "failed checkout did not touch
+- ⚠️ **KNOWN DEFECT, accepted by the user (2026-09-22), carried not fixed.**
+  `scripts/smoke-test.sh` fails one check, "failed checkout did not touch
   stock". It is NOT this phase's: placing an order decrements product.stock_quantity in the
   database and evicts NEITHER Phase 13 cache, so GET /api/products/{id} serves the pre-order
   stock for up to the 300s TTL. Reproduced directly (DB 2, API 4); the `order` package contains
   no eviction at all; `git diff main -- src/main/java/com/ecomdemo/{order,product,cache}` is
   empty. Fixing it is Phase 13 scope (hard rule 7) and weakening the check is forbidden (hard
-  rule 8), so the user chooses: (1) fix inside this PR as a documented exception, (2) merge
-  Phase 16 and fix in its own `fix/` branch and PR before Phase 17 - RECOMMENDED, or (3) accept
-  it as a known defect. Full evidence in `docs/test-reports/phase-16.md` §7.
+  rule 8). The user chose to ACCEPT it as a known defect: the check stays exactly as it is and
+  the smoke test stays red on it until a later phase picks it up. Full evidence in
+  `docs/test-reports/phase-16.md` §7.
 - Carried over from Phase 15: the Grafana dashboards' RENDER has still never been looked at by
   human eyes (all data behind them is verified). Chrome's site permissions block localhost:3000
   for browser automation here. Steps: `docs/test-reports/phase-15.md` §8, and for this phase the
@@ -104,11 +105,13 @@ stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted
 holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED before raising the PR, waiting on the user's answer to the blocker above. Everything
-else in Phase 16 is done and committed on `feature/phase-16-logging`: code, tests (338 = 268 +
-70), 23 smoke checks, test report, README, decisions, RECENT rotation, tracker 🔵.
-- If they say `fix it here` -> add the eviction + a test on THIS branch, re-run the full
-  testing protocol, then raise the PR.
-- If they say `raise the PR` (option 2 or 3) -> `gh pr create --base main` with the template,
-  the known failure named in the PR body, then STOP for review.
-- Do NOT weaken or remove the failing smoke check under any option.
+STOPPED at the mandatory post-PR stop point. PR raised with the known defect named in its body.
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
+  tag `phase-16-complete` and start Phase 17 (`docs/phases/phase-17-kafka.md`). NOTE: the merge
+  verification's smoke run on `main` will fail the same one check - that is expected and
+  accepted, and is NOT a reason to stop, but every other check must pass.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
+- Do NOT weaken or remove the failing smoke check; it is correct and the application is wrong.
+- Two things are outstanding for the user: look at the Grafana dashboards' RENDER, and decide
+  when the Phase 13 stale-cache defect gets its own fix branch.
