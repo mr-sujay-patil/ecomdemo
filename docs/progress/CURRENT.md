@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 8: Spring Security
 - **Branch:** feature/phase-08-spring-security
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** no
@@ -29,16 +29,25 @@ in the app log; tag `phase-07-complete` pushed.
 - [x] `@PreAuthorize` so users only see their own orders
 - [x] 401 and 403 in the standard error format
 - [x] `@WithMockUser` tests covering allowed and denied access per role
-- [ ] Smoke test additions (anon read 200, anon cart 401, customer create product 403, admin 201,
+- [x] Smoke test additions (anon read 200, anon cart 401, customer create product 403, admin 201,
       customer A cannot read customer B's order, full flow as a logged-in customer)
-- [ ] Testing protocol run in full + docs/test-reports/phase-08.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 06 archived), tracker -> 🔵
+- [x] Testing protocol run in full + docs/test-reports/phase-08.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 06 archived), tracker -> 🔵
 - [ ] PR raised
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 163 tests (was 120), Failsafe 23
-  tests (was 15), 0 failures. New: CustomerServiceTest (8), CustomerControllerTest (11),
-  AppUserDetailsServiceTest (4), per-controller "access rules" nests, FlywayMigrationTest V5/V6.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 163 (was 120), Failsafe 23 (was 15),
+  0 failures, 0 skipped. Run four times, all green (36.1 / 31.4 / 31.8 / 33.3 s).
+- 2026-09-22: `./mvnw clean test` -> 163 tests, 11.4 s, zero "Creating container" lines: the fast
+  suite still needs no Docker.
+- 2026-09-22: the app started against the live Phase 7 database and applied V5 and V6
+  incrementally ("Successfully applied 2 migrations ... now at version v6"); a restart then
+  re-validated 6 migrations. 0 ERROR in the log.
+- 2026-09-22: `scripts/smoke-test.sh` -> 110 passed, 0 failed, 0 skipped. Run three times (twice
+  on one instance, once after a restart, which satisfied the persistence check).
+- 2026-09-22: manual checks - 401 carries no WWW-Authenticate, a registration body with
+  "role":"ADMIN" still yields CUSTOMER, that account gets 403 on POST /api/products, duplicate
+  registration is 409, /v3/api-docs declares basicAuth. Probe account deleted afterwards.
 
 ## Open issues / blockers
 - none.
@@ -61,7 +70,4 @@ Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING,
 processes. Docker Desktop must stay running (Testcontainers needs it for `./mvnw verify`).
 
 ## Next action
-Continue the checklist: smoke test additions (anon read 200, anon cart 401, customer creates a
-product 403 / admin 201, customer A cannot read customer B's order, full flow as a logged-in
-customer), then the full testing protocol + docs/test-reports/phase-08.md, then README +
-decisions.md + RECENT.md rotation (archive Phase 06) + tracker -> 🔵, then the PR.
+Push the branch and raise the PR (`gh pr create --base main`), then STOP for the user's review.
