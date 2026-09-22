@@ -8,13 +8,15 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.ecomdemo.cart.Cart;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.common.InsufficientStockException;
+import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.customer.User;
@@ -65,13 +67,18 @@ class OrderPlacementServiceTest {
     private CurrentUser currentUser;
 
     /**
-     * Phase 17 added this. The service announces a placed order through Spring's event publisher
-     * and knows nothing about Kafka; what listens is {@code OrderEventPublisher}, and that it
-     * listens AFTER the commit is a claim about a real transaction, made in
-     * {@code OrderPlacedKafkaIT} rather than here.
+     * Phase 17 announced the order through Spring's event publisher; Phase 18 appends it to the
+     * outbox instead. The service still knows nothing about Kafka — what changed is that the
+     * event is now written to the database rather than handed to a listener, so it commits or
+     * rolls back with the order.
+     *
+     * <p>What this mock cannot show is the part that matters: that the append really does join
+     * the order's transaction. A mock has no transaction to join, and {@code MANDATORY} is
+     * enforced by Spring's proxy, not by the method. That claim is made against a real database
+     * in {@code OutboxWriterIT} and against a real broker in {@code OutboxRelayKafkaIT}.
      */
     @Mock
-    private org.springframework.context.ApplicationEventPublisher events;
+    private OutboxWriter outbox;
 
     @InjectMocks
     private OrderPlacementService placementService;
@@ -247,11 +254,11 @@ class OrderPlacementServiceTest {
     }
 
     @Test
-    void placeOnce_whenTheOrderIsPlaced_announcesItForPublication() {
-        // The event is published INSIDE the transaction and delivered after it commits, so this
-        // assertion is about the announcement and not about Kafka. The event id is generated here,
-        // once, and travels with the message - which is what lets the consumer recognise a
-        // redelivery (see NotificationServiceTest).
+    void placeOnce_whenTheOrderIsPlaced_appendsItToTheOutbox() {
+        // The event goes into the outbox inside the order's transaction, so this assertion is
+        // about what was recorded and not about Kafka. The event id is generated here, once, and
+        // travels with the message - which is what lets the consumer recognise a redelivery (see
+        // NotificationServiceTest), and what lets the relay republish a row safely.
         Product product = TestData.product(1L, "Desk Lamp", "1200.00", 5);
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, product, 2));
         when(currentUser.require()).thenReturn(SHOPPER);
@@ -260,10 +267,23 @@ class OrderPlacementServiceTest {
         placementService.placeOnce();
 
         ArgumentCaptor<OrderPlacedEvent> captor = ArgumentCaptor.forClass(OrderPlacedEvent.class);
-        verify(events).publishEvent(captor.capture());
-        OrderPlacedEvent published = captor.getValue();
-        assertThat(published.username()).isEqualTo(SHOPPER.getUsername());
-        assertThat(published.itemCount()).isEqualTo(1);
-        assertThat(published.eventId()).isNotNull();
+        verify(outbox).append(captor.capture());
+        OrderPlacedEvent appended = captor.getValue();
+        assertThat(appended.username()).isEqualTo(SHOPPER.getUsername());
+        assertThat(appended.itemCount()).isEqualTo(1);
+        assertThat(appended.eventId()).isNotNull();
+    }
+
+    @Test
+    void placeOnce_whenTheCartIsEmpty_appendsNothingToTheOutbox() {
+        // The other half of the guarantee, and the half that is easy to forget: an event that
+        // announces an order which does not exist is as wrong as an order with no event. A
+        // rejected checkout must leave the outbox untouched.
+        when(cartService.currentCart()).thenReturn(TestData.cart(1L));
+
+        assertThatThrownBy(() -> placementService.placeOnce())
+                .isInstanceOf(ConflictException.class);
+
+        verifyNoInteractions(outbox);
     }
 }

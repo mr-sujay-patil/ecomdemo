@@ -52,7 +52,7 @@ class FlywayMigrationTest {
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -95,7 +95,8 @@ class FlywayMigrationTest {
                 "cart and orders per user",
                 "batch job repository",
                 "index product name",
-                "notifications and processed events");
+                "notifications and processed events",
+                "outbox events");
     }
 
     @Test
@@ -299,6 +300,53 @@ class FlywayMigrationTest {
         assertThat(jdbc.queryForObject(
                         "SELECT count(*) FROM information_schema.indexes "
                                 + "WHERE upper(index_name) = 'IDX_PRODUCT_NAME'",
+                        Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("V10 created the outbox, with the two identifiers and the nullable published_at")
+    void createsTheOutbox() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.tables "
+                                + "WHERE upper(table_name) = 'OUTBOX_EVENT'",
+                        Integer.class))
+                .isEqualTo(1);
+
+        // The event id is UNIQUE and the sequence is the PRIMARY KEY, which is the whole reason
+        // there are two columns rather than one. The sequence orders publication; the event id is
+        // the idempotency key the consumer matches on and must survive republication unchanged. A
+        // second row claiming the same event id would defeat that recognition, so the database
+        // refuses it rather than trusting the relay not to do it.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.table_constraints "
+                                + "WHERE upper(table_name) = 'OUTBOX_EVENT' "
+                                + "AND constraint_type = 'UNIQUE'",
+                        Integer.class))
+                .as("the unique constraint on event_id")
+                .isEqualTo(1);
+
+        // NULL means pending, and that is the entire state machine. If this column were NOT NULL
+        // every row would have to be born published, and the outbox would have no way to say
+        // "not yet".
+        assertThat(nullabilityOf(jdbc, "OUTBOX_EVENT", "PUBLISHED_AT"))
+                .as("published_at must be nullable: NULL is what 'pending' means")
+                .isEqualTo("YES");
+
+        // The relay's query is `WHERE published_at IS NULL ORDER BY id`, and this composite index
+        // serves both halves - the filter and the sort - so the query needs no sort step.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.indexes "
+                                + "WHERE upper(index_name) = 'IDX_OUTBOX_EVENT_PENDING'",
+                        Integer.class))
+                .isEqualTo(1);
+
+        // The cleanup job's query.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.indexes "
+                                + "WHERE upper(index_name) = 'IDX_OUTBOX_EVENT_PUBLISHED_AT'",
                         Integer.class))
                 .isEqualTo(1);
     }

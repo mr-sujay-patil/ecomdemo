@@ -41,7 +41,19 @@ BODY="$(mktemp)"
 # the same snapshot is read several times per check, so re-fetching it per assertion would both
 # be slow and - worse - compare two different moments in time.
 SCRAPE="$(mktemp)"
-trap 'rm -f "$BODY" "$SCRAPE"' EXIT
+# The Phase 18 section stops the Kafka container on purpose. If anything between the stop and the
+# start fails - a failed check under `set -e`, or a Ctrl-C - the broker would be left down and
+# every later run of this script would report a broken stack rather than a failed check. This
+# restores it on the way out, whatever happened.
+KAFKA_WAS_STOPPED=false
+restore_kafka() {
+    if [ "$KAFKA_WAS_STOPPED" = true ]; then
+        printf '\033[33mrestoring the Kafka container, which this script had stopped\033[0m\n' >&2
+        docker start "${KAFKA_CONTAINER:-ecomdemo-kafka}" >/dev/null 2>&1 || true
+    fi
+}
+
+trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka' EXIT
 
 PASSED=0
 FAILED=0
@@ -708,8 +720,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V9, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V10, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -1875,6 +1887,185 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
             | awk '$1 == "ecomdemo-notification" && $6 ~ /^[0-9]+$/ {lag += $6} END {print (lag == "" ? 0 : lag)}')"
 else
     skip "Kafka checks" "no Kafka container ($KAFKA_CONTAINER); set KAFKA_CONTAINER to override"
+fi
+
+as_customer
+
+# --------------------------------------------------------------------------------------------
+# 14. Reliable event publishing (Phase 18)
+# --------------------------------------------------------------------------------------------
+# THE PHASE'S "DONE WHEN", and the only place in the build where it can be proved honestly: stop
+# the broker for real, place an order, start it again, and watch the notification arrive.
+#
+# The integration tests cannot do this. Testcontainers shares one Kafka across the whole suite, so
+# a test that stopped it would break every class that ran afterwards. What they prove is the
+# MECHANISM - that the row is written in the order's transaction, that a failed send leaves it
+# pending, that a republished row costs a duplicate send and not a duplicate notification. What
+# this section proves is the CLAIM: that an outage costs nothing at all.
+#
+# Phase 17 measured the old behaviour under exactly this test and lost four orders their
+# notification, permanently. The number to beat is zero.
+section "Reliable event publishing"
+
+if command -v docker >/dev/null 2>&1 \
+    && docker exec "$KAFKA_CONTAINER" true >/dev/null 2>&1 \
+    && psql_query "SELECT 1;" >/dev/null 2>&1; then
+
+    # --- The outbox exists and is being drained ------------------------------------------------
+    # A healthy outbox is nearly EMPTY, which is the opposite of how most tables are judged. Rows
+    # accumulate here only while the broker is unreachable; a pending count that stays high is the
+    # single clearest signal that publication has stopped.
+    check "the outbox table exists" "1" \
+        "$(psql_query "SELECT count(*) FROM information_schema.tables WHERE table_name = 'outbox_event';" | tr -d ' ')"
+
+    OUTBOX_PENDING_BEFORE="$(psql_query "SELECT count(*) FROM outbox_event WHERE published_at IS NULL;" | tr -d ' ')"
+    check "and nothing is stuck in it before the outage" "0" "${OUTBOX_PENDING_BEFORE:-unknown}"
+
+    # --- An ordinary order leaves a published row ----------------------------------------------
+    request GET /api/products >/dev/null
+    OUTBOX_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
+    request POST /api/cart/items "{\"productId\":$OUTBOX_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    check "an order placed with the broker UP returns 201" "201" "$(request POST /api/orders)"
+    OUTBOX_ORDER_ID="$(jget "d['id']")"
+
+    # The row is written in the order's own transaction, so it is there the instant the checkout
+    # returns - no waiting, no polling. That is the difference this phase made.
+    check "its event was written to the outbox in the same transaction" "1" \
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID';" | tr -d ' ')"
+
+    OUTBOX_PUBLISHED=0
+    for _ in $(seq 1 30); do
+        OUTBOX_PUBLISHED="$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID' AND published_at IS NOT NULL;" | tr -d ' ')"
+        [ "${OUTBOX_PUBLISHED:-0}" -ge 1 ] && break
+        sleep 1
+    done
+    check "and the relay published it and marked it sent" "1" "${OUTBOX_PUBLISHED:-0}"
+
+    # Zero attempts, because the broker was up. The counter is what makes a stuck row visible, so
+    # it should be silent when nothing is wrong.
+    check "with no failed attempts recorded against it" "0" \
+        "$(psql_query "SELECT coalesce(max(attempts), -1) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID';" | tr -d ' ')"
+
+    # --- THE OUTAGE ----------------------------------------------------------------------------
+    # Everything above this line is the system working. Everything below is the system being
+    # broken on purpose.
+    docker stop "$KAFKA_CONTAINER" >/dev/null 2>&1
+    KAFKA_WAS_STOPPED=true   # the EXIT trap restores it if anything below fails
+
+    # The checkout must still succeed, and must still be FAST. Phase 17's failure test found a
+    # 97-second checkout here, because the AFTER_COMMIT send blocked the request thread waiting
+    # for cluster metadata. Now the request never touches Kafka at all - it writes a row - so the
+    # broker being down should be invisible to the customer.
+    request GET /api/products >/dev/null
+    OUTAGE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
+    request POST /api/cart/items "{\"productId\":$OUTAGE_PRODUCT_ID,\"quantity\":1}" >/dev/null
+
+    OUTAGE_STARTED_AT="$(date +%s)"
+    OUTAGE_STATUS="$(request POST /api/orders)"
+    OUTAGE_ELAPSED=$(( $(date +%s) - OUTAGE_STARTED_AT ))
+    OUTAGE_ORDER_ID="$(jget "d['id']")"
+
+    check "an order placed with the broker DOWN still returns 201" "201" "$OUTAGE_STATUS"
+
+    # Ten seconds is generous - it should be well under one - but this is a laptop running nine
+    # containers and the assertion that matters is "the broker is not in the request path", not a
+    # millisecond budget.
+    check "and the checkout did not wait for the broker (under 10s)" "True" \
+        "$([ "$OUTAGE_ELAPSED" -lt 10 ] && echo True || echo False)"
+
+    # The event survived the outage because it is in PostgreSQL, not in the memory of a process
+    # talking to a broker that is not there. This single check is the whole phase.
+    check "its event is safe in the outbox, waiting, not lost" "1" \
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID' AND published_at IS NULL;" | tr -d ' ')"
+
+    # The relay keeps trying and keeps failing, and says so in the row rather than only in a log.
+    OUTAGE_ATTEMPTS=0
+    for _ in $(seq 1 15); do
+        OUTAGE_ATTEMPTS="$(psql_query "SELECT coalesce(max(attempts), 0) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID';" | tr -d ' ')"
+        [ "${OUTAGE_ATTEMPTS:-0}" -ge 1 ] && break
+        sleep 1
+    done
+    check "the relay is retrying it, and the attempt count says so" "True" \
+        "$([ "${OUTAGE_ATTEMPTS:-0}" -ge 1 ] && echo True || echo False)"
+
+    check "and the reason is recorded on the row, not only in a log" "True" \
+        "$([ -n "$(psql_query "SELECT last_error FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID' AND last_error IS NOT NULL;" | tr -d ' ')" ] && echo True || echo False)"
+
+    # No notification yet, obviously - nothing has been published. Asserted so that the recovery
+    # below is a real transition and not a re-statement of something already true.
+    check "no notification has been written for it yet" "0" \
+        "$(psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
+
+    # --- RECOVERY ------------------------------------------------------------------------------
+    docker start "$KAFKA_CONTAINER" >/dev/null 2>&1
+    KAFKA_WAS_STOPPED=false
+
+    for _ in $(seq 1 60); do
+        docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
+        sleep 1
+    done
+
+    # Nobody re-places the order and nobody replays anything by hand. The relay finds the row on
+    # its next tick and sends it, because the row never stopped being there.
+    #
+    # Ninety seconds because recovery is not instant: the broker has to finish starting, and the
+    # producer's client has to notice it is back, which takes as long as its reconnect backoff
+    # takes. The claim is that it arrives, not that it arrives immediately.
+    OUTAGE_NOTIFIED=0
+    for _ in $(seq 1 90); do
+        OUTAGE_NOTIFIED="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
+        [ "${OUTAGE_NOTIFIED:-0}" -ge 1 ] && break
+        sleep 1
+    done
+
+    # THE "DONE WHEN": no events are lost while Kafka is down.
+    check "once the broker is back, the order IS notified - nothing was lost" "1" \
+        "${OUTAGE_NOTIFIED:-0}"
+
+    check "and the outbox row is now marked published" "1" \
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID' AND published_at IS NOT NULL;" | tr -d ' ')"
+
+    # Exactly one, not two. The relay retried this row many times during the outage and published
+    # it once afterwards; had any of those attempts actually reached the broker, the consumer's
+    # processed_event table would have absorbed the duplicate. At-least-once at the producer,
+    # exactly-once in the effect.
+    check "exactly ONE notification for it, despite every retry" "1" \
+        "$(psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
+
+    # The outbox drains back to empty. A backlog that never clears would mean the relay recovered
+    # for one row and stopped, which is the failure mode this check exists to catch.
+    OUTBOX_PENDING_AFTER=1
+    for _ in $(seq 1 30); do
+        OUTBOX_PENDING_AFTER="$(psql_query "SELECT count(*) FROM outbox_event WHERE published_at IS NULL;" | tr -d ' ')"
+        [ "${OUTBOX_PENDING_AFTER:-1}" -eq 0 ] && break
+        sleep 1
+    done
+    check "and the outbox has drained back to empty" "0" "${OUTBOX_PENDING_AFTER:-unknown}"
+
+    # --- The sweep keeps what is still pending -------------------------------------------------
+    # The cleanup job runs at 03:00, so this exercises the QUERY it uses rather than waiting for
+    # the clock. The dangerous mistake would be a sweep that deletes by age alone: an outage is
+    # exactly what makes a pending row old, so such a sweep would delete the events it exists to
+    # protect, at the moment they mattered.
+    psql_query "INSERT INTO outbox_event (event_id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at, attempts) VALUES ('00000000-0000-0000-0000-0000000000aa', 'Order', '-1', 'OrderPlacedEvent', '{}', CURRENT_TIMESTAMP - INTERVAL '400 days', NULL, 99);" >/dev/null 2>&1
+
+    # A second row, identical in age but PUBLISHED, so the two differ in exactly one column.
+    psql_query "INSERT INTO outbox_event (event_id, aggregate_type, aggregate_id, event_type, payload, created_at, published_at, attempts) VALUES ('00000000-0000-0000-0000-0000000000bb', 'Order', '-2', 'OrderPlacedEvent', '{}', CURRENT_TIMESTAMP - INTERVAL '400 days', CURRENT_TIMESTAMP - INTERVAL '400 days', 0);" >/dev/null 2>&1
+
+    # The sweep's own predicate, run as a SELECT: `published_at IS NOT NULL AND published_at <
+    # cutoff`. Against the pending row it matches nothing...
+    check "a 400-day-old PENDING row matches no sweep, however old it is" "0" \
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE event_id = '00000000-0000-0000-0000-0000000000aa' AND published_at IS NOT NULL AND published_at < CURRENT_TIMESTAMP - INTERVAL '7 days';" | tr -d ' ')"
+
+    # ...and against the published one it matches, which is what stops the check above from being
+    # a tautology. One column apart, opposite outcomes.
+    check "while the same row PUBLISHED is swept, so the predicate is doing real work" "1" \
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE event_id = '00000000-0000-0000-0000-0000000000bb' AND published_at IS NOT NULL AND published_at < CURRENT_TIMESTAMP - INTERVAL '7 days';" | tr -d ' ')"
+
+    psql_query "DELETE FROM outbox_event WHERE event_id IN ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000bb');" >/dev/null 2>&1
+else
+    skip "Outbox checks" "needs both the Kafka container ($KAFKA_CONTAINER) and database access"
 fi
 
 as_customer

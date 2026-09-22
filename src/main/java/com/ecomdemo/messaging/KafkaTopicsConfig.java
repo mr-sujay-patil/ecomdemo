@@ -21,8 +21,8 @@ import org.springframework.kafka.config.TopicBuilder;
  * here means up to three notification consumers; a fourth would sit idle. It also means messages
  * for different orders can be processed out of order relative to each other, which is fine because
  * nothing about a notification depends on another order's — and the key (see
- * {@code OrderEventPublisher}) is what keeps one order's own events together if a later phase adds
- * a second one.
+ * {@code OutboxBatchPublisher}, which keys by the aggregate id) is what keeps one order's own
+ * events together if a later phase adds a second one.
  */
 @Configuration
 public class KafkaTopicsConfig {

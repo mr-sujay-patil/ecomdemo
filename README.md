@@ -1691,7 +1691,7 @@ Two details worth stealing:
 Nothing consumes the dead-letter topic on purpose. A DLT is a queue of messages that need a person;
 re-driving it automatically without fixing the cause just refills it.
 
-### The gap this phase leaves — and Phase 18 closes
+### The gap Phase 17 left — closed by Phase 18
 
 The event is published **after the transaction commits**, because a message cannot be un-sent and
 an order that might still roll back must not be announced. That leaves a window:
@@ -1715,7 +1715,7 @@ docker exec ecomdemo-db psql -U ecomdemo -d ecomdemo -c \
 ```
 
 The fix is to write the event to the *same database* in the *same transaction* and relay it
-afterwards. That is the transactional outbox, and it is Phase 18.
+afterwards. That is the transactional outbox, and it is the next section.
 
 ### Why checkout does not wait for Kafka (a bug this phase caught)
 
@@ -1725,10 +1725,15 @@ with the broker stopped a checkout returned 201 **after 97 seconds**. Two things
 seconds by default), and an `AFTER_COMMIT` listener runs on the thread that committed — the request
 thread.
 
-The fix is `@Async` onto a small bounded pool plus `max.block.ms=5000`. Same outage, same test:
-**0.18s**. The pool uses an abort policy rather than `CallerRunsPolicy`, which is the usual advice
-and exactly wrong here — it hands the work back to the request thread, which is the blocking being
-avoided.
+The fix at the time was `@Async` onto a small bounded pool plus `max.block.ms=5000`. Same outage,
+same test: **0.18s**. The pool used an abort policy rather than `CallerRunsPolicy`, which is the
+usual advice and exactly wrong here — it hands the work back to the request thread, which is the
+blocking being avoided.
+
+Phase 18 deleted both the publisher and its pool. The checkout no longer talks to Kafka at all —
+it writes a row — so there is nothing left to move off the request thread. `max.block.ms=5000`
+stayed, now protecting the relay instead: without it a dead broker would park a relay tick for a
+minute per attempt, holding a database transaction open the whole time.
 
 ### Try it yourself
 
@@ -1754,6 +1759,168 @@ echo 'poison:{"not":"an event"}' | docker exec -i ecomdemo-kafka \
 docker exec ecomdemo-kafka /opt/kafka/bin/kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 --describe --group ecomdemo-notification
 ```
+
+## Reliable event publishing
+
+The outbox exists for one sentence: **the event and the order have to commit together, or the
+event is not reliable.** Everything below is a consequence of that.
+
+Phase 17 published after the commit, which left the window drawn above. Phase 18 removes the
+window by not having two writes:
+
+```text
+   Phase 17            BEGIN ─ save order ─ COMMIT ──X──> send to Kafka
+                                                  two writes, one transaction
+
+   Phase 18            BEGIN ─ save order ─ save outbox row ─ COMMIT
+                                                  one write, one transaction
+                                     ...later, separately: relay reads the row and sends it
+```
+
+The guarantee changes from *"published unless something goes wrong"* to **"published at least
+once, eventually"**. That is a weaker-sounding promise and a much stronger one: the first is a
+hope, the second is a property.
+
+### Why retrying was never going to fix it
+
+This is the part worth sitting with. A retry needs something to retry **from**. If the only copy
+of the event was in the memory of a process that has now exited, there is nothing to retry from
+and no amount of error handling around `send()` invents one. The event has to be *durable* before
+the send is attempted — and the only storage that can be made durable atomically with the order is
+the database the order is already being written to.
+
+### The table
+
+| Column | Why it is there |
+|---|---|
+| `id` (BIGINT identity) | The publication **order**. Monotonic by construction; `created_at` is not — two rows can share a timestamp and a clock can step backwards |
+| `event_id` (UUID) | The **identity**. Travels in the message, is the same on every republication, and is what `processed_event` matches on the consumer side |
+| `payload` (TEXT) | The message body, serialised *at write time* — so the event records what happened then, not what the order looks like now |
+| `published_at` | The entire state machine. `NULL` means pending. A nullable timestamp cannot contradict itself the way a `status` column can |
+| `attempts`, `last_error` | So a stuck row is **visible** rather than merely retried |
+
+Two identifiers, not one, and they are not interchangeable: a sequence has an order but means
+nothing outside this database; a UUID travels but has no order.
+
+### MANDATORY is the design, stated as an assertion
+
+```java
+@Transactional(propagation = Propagation.MANDATORY)
+public void append(OrderPlacedEvent event) { ... }
+```
+
+`REQUIRED` — the default — would quietly open a *second* transaction if there were none, which is
+the dual-write problem again, one layer down, behind code that looks exactly like a working
+outbox. `MANDATORY` joins the caller's transaction and throws if there isn't one. It is the rare
+case where the stricter propagation is not defensiveness but the specification, and
+`OutboxRelayKafkaIT` asserts the refusal actually happens.
+
+### The relay
+
+A `@Scheduled(fixedDelay)` timer reads the oldest pending rows, sends each one, **waits for the
+broker's acknowledgement**, and marks it published — all in one transaction.
+
+It waits rather than attaching a callback because marking a row published when `send()` returns
+would mark it done while the bytes were still in the producer's buffer, removing the only durable
+copy from the pending set before it was safe. It can afford to wait precisely because it runs on a
+scheduler thread that nobody is waiting for. That is the whole difference from the publisher it
+replaced.
+
+**It stops the batch at the first failure**, for two independent reasons. *Ordering*: publishing
+event N+1 after event N has failed puts them on the topic in the wrong order, and leaves N to
+arrive after the event that logically follows it. *Cost*: a failure almost always means the broker
+is unreachable, which is not a property of this event — continuing would spend `max.block.ms` on
+every remaining row, which at the defaults is over eight minutes of a held-open transaction
+achieving nothing.
+
+**There is no maximum attempt count.** The failure this is built for is "the broker is
+unreachable", which is temporary and affects every row equally; giving up after N tries would mean
+the outage the outbox exists to survive still loses events, just later and with a number attached.
+A row with 400 attempts is an alert, not a state transition.
+
+### The duplicate it creates on purpose
+
+A relay that publishes a row and dies before committing the mark will publish it again. That is
+real, and it is why Phase 17 had to build the idempotent consumer *first*: the republished message
+carries the same `event_id`, `processed_event` refuses it, and the cost is a duplicate **send**
+rather than a duplicate notification. An outbox is only an improvement because something
+downstream already absorbs what it produces.
+
+### The cleanup, and its one dangerous mistake
+
+```sql
+DELETE FROM outbox_event WHERE published_at IS NOT NULL AND published_at < :cutoff
+```
+
+The `IS NOT NULL` is load-bearing. A sweep written as "older than the cutoff" alone would delete
+**pending** rows precisely because an outage had made them old — deleting the exact events the
+whole design exists to protect, at the exact moment they mattered, and leaving a system that looks
+healthy afterwards because the evidence is gone. A pending row is never old enough. Both the
+repository test and the smoke test assert it explicitly.
+
+### Try it yourself — break it on purpose
+
+```bash
+docker compose up -d --build
+
+# Stop the broker. This is the whole demo.
+docker stop ecomdemo-kafka
+
+# Place an order through the API. It returns 201, immediately.
+# The event is now sitting in PostgreSQL, not lost in a dead process:
+docker exec ecomdemo-db psql -U ecomdemo -d ecomdemo -c \
+  "SELECT id, aggregate_id, published_at, attempts, left(last_error, 60) FROM outbox_event
+   WHERE published_at IS NULL;"
+
+# Watch the attempt count climb while the relay keeps trying.
+
+docker start ecomdemo-kafka
+
+# Nobody replays anything. The relay finds the row on its next tick:
+docker exec ecomdemo-db psql -U ecomdemo -d ecomdemo -c \
+  "SELECT count(*) FROM orders o WHERE NOT EXISTS
+     (SELECT 1 FROM notification n WHERE n.order_id = o.id);"
+# 0  <- Phase 17 answered 4 here
+```
+
+`scripts/smoke-test.sh` runs exactly that sequence as 18 scripted checks.
+
+### A bug this phase caught, which had nothing to do with the outbox
+
+The relay needs a `StringSerializer` producer to send the committed bytes verbatim. The obvious
+way to get one is a second `@Bean` of type `KafkaTemplate`. It is wrong twice over:
+
+1. Boot auto-configures its `kafkaTemplate` under
+   `@ConditionalOnMissingBean(KafkaTemplate.class)`. **Any** template bean makes Boot back off, so
+   declaring one silently deleted the application's own template.
+2. Spring Kafka's `DeadLetterPublishingRecoverer` resolves a template **by type**. It found the
+   only one left, tried to send an `OrderPlacedEvent` through a serializer that accepts strings,
+   and threw `ClassCastException` *inside the recoverer* — so a poison record could not be moved
+   to a retry topic, its offset was never committed, and **the whole partition stopped**.
+
+Head-of-line blocking, exactly what the retry topics exist to prevent, reintroduced by a bean in a
+different package. `./mvnw clean verify` was green throughout; only the smoke test caught it,
+because catching it needs two templates *and* a poison message in the same running system.
+
+The relay's producer is now private to `OutboxKafkaSender` and is not a bean at all.
+`KafkaTemplateWiringTest` asserts there is exactly one `KafkaTemplate` in the context, so the
+mistake cannot come back quietly.
+
+**The general lesson:** `@ConditionalOnMissingBean` and resolution-by-type make the bean factory a
+shared namespace. Adding a bean is not a local change.
+
+### What this deliberately does not solve
+
+**Two instances would both publish.** The relay takes no lock, so two application instances polling
+the same table can read the same row and both send it. Survivable — the consumer dedupes — but the
+proper fix is `SELECT ... FOR UPDATE SKIP LOCKED`, left out because it is a PostgreSQL-flavoured
+query the H2 unit suite could not run, and because a lock is the wrong thing to introduce in the
+phase about durability.
+
+**CDC (Debezium) is the other answer.** It reads the database's replication log and needs no
+application change at all, which makes it the better choice at scale and the wrong one to learn
+first: it moves the problem into infrastructure before the problem is understood, and it publishes
+row changes rather than domain events.
 
 ## Code quality
 
@@ -2561,6 +2728,16 @@ cost a container start each time.
 
 ## Known gaps (closed by later phases)
 
+- **Two application instances would both publish every outbox row.** The relay takes no lock, so
+  two instances polling the same table can read the same pending row and both send it. It is
+  survivable rather than broken — the duplicate carries the same `event_id` and the consumer's
+  `processed_event` table refuses it, so the cost is duplicate *sends* and not duplicate
+  notifications. The proper fix is `SELECT ... FOR UPDATE SKIP LOCKED`; it is left out because it
+  is a PostgreSQL-flavoured query the H2 unit suite could not run.
+- **Nothing watches the outbox.** A pending count that stops falling is the single clearest signal
+  that publication has broken, and there is no gauge on it and no health indicator for it — the
+  `attempts` and `last_error` columns make a stuck row visible only to somebody already looking.
+  A Micrometer gauge and an Actuator contributor are the obvious follow-up and were out of scope.
 - **Nothing delivers the alert anywhere.** Prometheus evaluates `CheckoutConflictRateHigh` and
   would mark it firing, and that is where it stops: there is no Alertmanager, so no email, no
   pager, no Slack. The rule was proven to fire in shape — the identical expression with a label
