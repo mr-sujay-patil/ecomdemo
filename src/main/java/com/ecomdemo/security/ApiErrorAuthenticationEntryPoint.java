@@ -49,11 +49,17 @@ public class ApiErrorAuthenticationEntryPoint implements AuthenticationEntryPoin
     }
 
     /** Sent when a token was presented and rejected. */
-    static final String INVALID_TOKEN =
+    public static final String INVALID_TOKEN =
             "The token is invalid or has expired. Log in again at POST /api/auth/login.";
 
-    /** Sent when no token was presented at all. */
-    static final String NO_TOKEN =
+    /**
+     * Sent when no token was presented at all.
+     *
+     * <p>Public because {@code GlobalExceptionHandler} answers the same situation from the other
+     * side of the filter chain — a method-security denial against an anonymous caller — and the
+     * two must say the same thing. One constant is the only way to keep that true.
+     */
+    public static final String NO_TOKEN =
             "Authentication required. Log in at POST /api/auth/login and send the token as "
                     + "'Authorization: Bearer <token>'.";
 

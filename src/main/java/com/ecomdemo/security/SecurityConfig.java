@@ -3,14 +3,10 @@ package com.ecomdemo.security;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.ProviderManager;
-import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
@@ -169,24 +165,6 @@ public class SecurityConfig {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(authorities);
         return converter;
-    }
-
-    /**
-     * The password check, still done the Phase 8 way — but now only at {@code /api/auth/login}.
-     *
-     * <p>Spring Boot contributes an {@code AuthenticationManager} automatically only when the
-     * application has no {@code SecurityFilterChain} of its own. This one does, so the manager
-     * has to be declared: a {@code DaoAuthenticationProvider} pairing the
-     * {@code UserDetailsService} with the {@code PasswordEncoder}, wrapped in a
-     * {@code ProviderManager}. That is exactly what {@code httpBasic()} was building behind the
-     * scenes before; the phase moved it from "every request" to "once per login".
-     */
-    @Bean
-    public AuthenticationManager authenticationManager(
-            UserDetailsService userDetailsService, PasswordEncoder passwordEncoder) {
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
-        provider.setPasswordEncoder(passwordEncoder);
-        return new ProviderManager(provider);
     }
 
     /**

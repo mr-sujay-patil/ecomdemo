@@ -43,7 +43,8 @@ class OpenApiDocumentationTest {
             "/api/orders",
             "/api/orders/{id}",
             "/api/customers/register",
-            "/api/customers/me");
+            "/api/customers/me",
+            "/api/auth/login");
 
     @Autowired
     private MockMvcTester mvc;
@@ -183,13 +184,19 @@ class OpenApiDocumentationTest {
     }
 
     @Test
-    void apiDocs_declaresTheBasicAuthScheme() {
+    void apiDocs_declaresTheBearerScheme() {
         // Without this the "Authorize" button does not appear in Swagger UI and "Try it out"
-        // cannot send credentials, which makes the UI useless for everything but browsing.
-        JsonNode scheme = spec.path("components").path("securitySchemes").path("basicAuth");
-        assertThat(scheme.isMissingNode()).as("the document declares basicAuth").isFalse();
+        // cannot send a token, which makes the UI useless for everything but browsing.
+        JsonNode scheme = spec.path("components").path("securitySchemes").path("bearerAuth");
+        assertThat(scheme.isMissingNode()).as("the document declares bearerAuth").isFalse();
         assertThat(scheme.path("type").asString("")).isEqualTo("http");
-        assertThat(scheme.path("scheme").asString("")).isEqualTo("basic");
+        assertThat(scheme.path("scheme").asString("")).isEqualTo("bearer");
+        // Documentation rather than configuration: it tells a reader, and a code generator, that
+        // the opaque string is a JWT.
+        assertThat(scheme.path("bearerFormat").asString("")).isEqualTo("JWT");
+        assertThat(spec.path("components").path("securitySchemes").has("basicAuth"))
+                .as("Basic authentication is gone, so the document must not still advertise it")
+                .isFalse();
     }
 
     @Test
@@ -199,6 +206,9 @@ class OpenApiDocumentationTest {
         assertThat(requiresAuth("/api/products", "get")).as("browsing is public").isFalse();
         assertThat(requiresAuth("/api/customers/register", "post"))
                 .as("registering cannot require an account")
+                .isFalse();
+        assertThat(requiresAuth("/api/auth/login", "post"))
+                .as("you cannot present a token in order to get a token")
                 .isFalse();
 
         // ...and everything else must.

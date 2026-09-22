@@ -1,5 +1,6 @@
 package com.ecomdemo.common;
 
+import com.ecomdemo.security.ApiErrorAuthenticationEntryPoint;
 import java.util.stream.Collectors;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
@@ -86,9 +87,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex) {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || trustResolver.isAnonymous(authentication)) {
-            return build(
-                    HttpStatus.UNAUTHORIZED,
-                    "Authentication required. Send HTTP Basic credentials with this request.");
+            return build(HttpStatus.UNAUTHORIZED, ApiErrorAuthenticationEntryPoint.NO_TOKEN);
         }
         return build(
                 HttpStatus.FORBIDDEN, "Your account does not have permission to perform this action.");

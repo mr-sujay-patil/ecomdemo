@@ -210,7 +210,7 @@ class OrderControllerTest {
                     .hasStatus(UNAUTHORIZED)
                     .bodyJson()
                     .isLenientlyEqualTo("""
-                            {"status":401,"message":"Authentication required. Send HTTP Basic credentials with this request."}
+                            {"status":401,"message":"Authentication required. Log in at POST /api/auth/login and send the token as 'Authorization: Bearer <token>'."}
                             """);
         }
 

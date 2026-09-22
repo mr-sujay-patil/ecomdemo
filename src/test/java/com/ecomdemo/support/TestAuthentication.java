@@ -4,25 +4,35 @@ import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.customer.UserRepository;
 import com.ecomdemo.security.AppUserDetails;
+import com.ecomdemo.security.JwtConfig;
 import java.time.Instant;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 /**
  * Signs a {@code @SpringBootTest} in as a real account.
  *
  * <p>{@code @WithMockUser} is the usual way to do this and is the right tool in the
  * {@code @WebMvcTest} slices, but it cannot be used here. It puts a Spring Security
- * {@code org.springframework.security.core.userdetails.User} in the context, and this
- * application's {@code CurrentUser} insists on an {@link AppUserDetails} because it needs the
- * account's database id — the cart and the orders are keyed by it. A fabricated principal would
- * also name an account that does not exist, and the very first {@code currentUser.require()}
- * would fail looking it up.
+ * {@code org.springframework.security.core.userdetails.User} in the context, and since Phase 9
+ * {@code CurrentUser} reads a {@link Jwt} — the account's id and username are <em>claims</em>
+ * now, not fields on a {@code UserDetails}. A fabricated principal of the wrong type fails on
+ * the first call, and one naming an account that does not exist fails on the first
+ * {@code currentUser.require()}.
  *
- * <p>So these tests authenticate as a row they actually persisted. That is a little more setup
- * than an annotation, and it buys something worth having: the id in the principal, the row in
- * {@code users} and the {@code user_id} on the cart all genuinely agree, which is exactly what a
- * test that exercises per-user data has to get right.
+ * <p>So these tests build the same principal the filter chain would: a {@link Jwt} carrying the
+ * claims {@link com.ecomdemo.auth.TokenService} writes, for a row that was actually persisted.
+ * That keeps the token, the {@code users} row and the cart's {@code user_id} genuinely in
+ * agreement.
+ *
+ * <p>The token here is <strong>not signed</strong>, and does not need to be: it is installed
+ * directly into the {@code SecurityContext}, downstream of the decoder that would have verified
+ * it. These tests call services, not HTTP. Signature verification is exercised where it belongs
+ * — over real HTTP in the {@code *ApiIT} classes, which log in for a genuine token.
  */
 public final class TestAuthentication {
 
@@ -51,10 +61,21 @@ public final class TestAuthentication {
      * empty context.
      */
     public static void authenticateAs(User user) {
-        AppUserDetails details = new AppUserDetails(user);
+        Instant issuedAt = Instant.now();
+        Jwt jwt = Jwt.withTokenValue("test-token-not-signed")
+                .header("alg", "none")
+                .issuedAt(issuedAt)
+                .expiresAt(issuedAt.plus(15, ChronoUnit.MINUTES))
+                .subject(user.getUsername())
+                .claim(JwtConfig.Claims.USER_ID, user.getId())
+                .claim(JwtConfig.Claims.ROLES, List.of(user.getRole().name()))
+                .build();
+
         SecurityContextHolder.getContext()
-                .setAuthentication(UsernamePasswordAuthenticationToken.authenticated(
-                        details, null, details.getAuthorities()));
+                .setAuthentication(new JwtAuthenticationToken(
+                        jwt,
+                        List.of(new SimpleGrantedAuthority(AppUserDetails.ROLE_PREFIX + user.getRole().name())),
+                        user.getUsername()));
     }
 
     /** Clears the context, so an authenticated thread cannot leak into the next test. */
