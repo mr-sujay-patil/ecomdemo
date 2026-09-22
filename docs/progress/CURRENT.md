@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 16: Centralized Logging (Grafana Loki)
 - **Branch:** feature/phase-16-logging
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES - a decision on the pre-existing stale-cache bug (see below)
 
 ## Phase 15 merge verification (passed 2026-09-22)
 PR #17 MERGED with a merge commit (77a9d13, 2 parents: a5ff674 + 8345ab6); the branch is an
@@ -26,38 +26,89 @@ directories and saw them EMPTY - the 2 dashboard smoke checks failed. Fix:
 `docker compose up -d --force-recreate grafana prometheus`. Not a code defect; re-run was clean.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Structured JSON console logging
-- [ ] A correlation ID filter with MDC, also returned in a response header
-- [ ] Loki and Grafana Alloy in Compose, with Loki as a Grafana data source
-- [ ] No sensitive data in logs
-- [ ] Done when: all logs for one request can be found in Grafana by correlation ID
-- [ ] Smoke test additions: every response carries an `X-Correlation-Id` header; querying Loki's
-      API for that ID returns log lines
-- [ ] Testing protocol run in full + docs/test-reports/phase-16.md
-- [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 14 archived),
+- [x] Structured JSON console logging
+- [x] A correlation ID filter with MDC, also returned in a response header
+- [x] Loki and Grafana Alloy in Compose, with Loki as a Grafana data source
+- [x] No sensitive data in logs
+- [x] Done when: all logs for one request can be found in Grafana by correlation ID
+- [x] Smoke test additions: every response carries an `X-Correlation-Id` header; querying Loki's
+      API for that ID returns log lines - 23 new checks, all passing
+- [x] Testing protocol run in full + docs/test-reports/phase-16.md
+- [x] README section, docs/decisions.md entries (15), RECENT.md rotation (Phase 14 archived),
       tracker -> 🔵
-- [ ] PR raised
+- [ ] PR raised - BLOCKED, see below
 
 ## Last test run
-- 2026-09-22 (merge verification on `main`): `./mvnw clean verify` -> 241 + 62, 0 failures,
-  0 skipped. `scripts/smoke-test.sh` -> 204 passed, 0 failed, 0 skipped.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 268 (was 241) + Failsafe 70
+  (was 62), 0 failures, 0 skipped, 1m04s.
+- 2026-09-22: `./mvnw clean test` -> 268, 0 "Creating container" lines; the fast suite is still
+  Docker-free.
+- 2026-09-22: `scripts/smoke-test.sh` -> 227 passed, 0 failed, 0 skipped on the first runs;
+  now **226 passed, 1 failed** on a PRE-EXISTING bug (see below). All 23 of this phase's own
+  checks pass in every run.
+- 2026-09-22: drift guards verified by MUTATION - renaming the correlation field in
+  config.alloy fails StructuredLoggingTest; widening the derived-field regex fails
+  LoggingStackConfigTest. Both files restored and green.
+- 2026-09-22: failure scenario. Loki STOPPED -> the app answered 200 with no added latency and
+  the line written during the outage arrived in Loki after recovery (Alloy buffered and
+  retried).
+- 2026-09-22: secrecy checks proved non-vacuous - the same Loki query returns 344 lines for a
+  string that IS in the logs and 0 for the password and the bearer token.
 
 ## Open issues / blockers
-- Carried over from Phase 15: the Grafana dashboard's RENDER has still never been looked at by
-  human eyes (its data is fully verified through the Prometheus API). Chrome's site permissions
-  block localhost:3000 for browser automation here. Steps: `docs/test-reports/phase-15.md` §8.
+- 🛑 **BLOCKING THE PR.** `scripts/smoke-test.sh` fails one check, "failed checkout did not touch
+  stock". It is NOT this phase's: placing an order decrements product.stock_quantity in the
+  database and evicts NEITHER Phase 13 cache, so GET /api/products/{id} serves the pre-order
+  stock for up to the 300s TTL. Reproduced directly (DB 2, API 4); the `order` package contains
+  no eviction at all; `git diff main -- src/main/java/com/ecomdemo/{order,product,cache}` is
+  empty. Fixing it is Phase 13 scope (hard rule 7) and weakening the check is forbidden (hard
+  rule 8), so the user chooses: (1) fix inside this PR as a documented exception, (2) merge
+  Phase 16 and fix in its own `fix/` branch and PR before Phase 17 - RECOMMENDED, or (3) accept
+  it as a known defect. Full evidence in `docs/test-reports/phase-16.md` §7.
+- Carried over from Phase 15: the Grafana dashboards' RENDER has still never been looked at by
+  human eyes (all data behind them is verified). Chrome's site permissions block localhost:3000
+  for browser automation here. Steps: `docs/test-reports/phase-15.md` §8, and for this phase the
+  "EcomDemo Logs" dashboard with a correlation ID pasted into its textbox.
 
-## Decisions this phase (copy to docs/decisions.md before the PR)
-- (none yet)
+## Decisions this phase (copied to docs/decisions.md ✅ — 15 entries)
+- LOG_FORMAT as an environment variable, not a baked-in property: the format is a deployment
+  decision, and an empty value is Boot's own "not structured".
+- ECS rather than logstash/gelf, and NO logback-spring.xml - structured logging is native to
+  Boot since 3.4, so the whole feature is two properties and no new dependency.
+- MDC key `correlation_id` (flat) vs header `X-Correlation-Id`: a dotted MDC key becomes a
+  NESTED JSON object in ECS output.
+- An inbound ID is validated against [A-Za-z0-9_-]{8,64} and REPLACED, never rejected: log
+  injection is the threat, and a 400 would turn diagnostics into an availability problem.
+- CorrelationIdFilter at HIGHEST_PRECEDENCE, ahead of Spring Security at -100, and the header is
+  set BEFORE the chain runs.
+- MDC cleared in a `finally` and shouldNotFilterErrorDispatch() false - a leaked ID files the
+  NEXT request's lines under this one's story.
+- RequestLogFilter describes a request but never quotes it: no headers, no body, no query string.
+- RequestLogFilter skips /actuator; CorrelationIdFilter deliberately does not.
+- correlation_id is STRUCTURED METADATA, not a Loki label: one value per request would be one
+  Loki stream per request.
+- The application writes to stdout and knows nothing about Loki; Alloy ships.
+- Alloy uses an allow-list of services (compose.sonar.yaml shares the Compose project name).
+- No HTTP health check for Loki (distroless image) or Alloy (no curl/wget); readiness is checked
+  from the host in the smoke test.
+- 7-day retention WITH compactor.retention_enabled - without it the period configures nothing.
+- A second dashboard rather than log panels on the Phase 15 overview.
+- StructuredLoggingTest asserts config.alloy's JMESPath expressions against a real ECS document.
 
 ## Environment left behind
 Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`,
-`ecomdemo-cache`, `ecomdemo-prometheus`, `ecomdemo-grafana`), schema v8, image built from `main`.
+`ecomdemo-cache`, `ecomdemo-prometheus`, `ecomdemo-grafana`, `ecomdemo-loki`, `ecomdemo-alloy`),
+schema v8, image built from this branch.
 SonarQube stack (`ecomdemo-sonarqube`, `ecomdemo-sonar-db`) also up at http://localhost:9000;
 stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted back. `.env`
 holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-Start IMPLEMENTING Phase 16 on `feature/phase-16-logging`, first checklist item first:
-structured JSON console logging. Read `docs/phases/phase-16-logging.md` for the scope and
-`docs/process/testing-protocol.md` before the PR. Nothing is waiting on the user.
+STOPPED before raising the PR, waiting on the user's answer to the blocker above. Everything
+else in Phase 16 is done and committed on `feature/phase-16-logging`: code, tests (338 = 268 +
+70), 23 smoke checks, test report, README, decisions, RECENT rotation, tracker 🔵.
+- If they say `fix it here` -> add the eviction + a test on THIS branch, re-run the full
+  testing protocol, then raise the PR.
+- If they say `raise the PR` (option 2 or 3) -> `gh pr create --base main` with the template,
+  the known failure named in the PR body, then STOP for review.
+- Do NOT weaken or remove the failing smoke check under any option.
