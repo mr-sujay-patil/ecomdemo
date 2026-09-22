@@ -57,7 +57,13 @@ services:
     healthcheck:
       # The status endpoint reports STARTING for a long while before UP - Elasticsearch has to
       # come up first. A plain port check would call it ready far too early.
-      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      #
+      # `curl`, not `wget`: this image ships curl and no wget, so a wget probe fails with
+      # "wget: not found" for ever. The service keeps working and the container is simply marked
+      # unhealthy - which is worse than a loud failure, because anything waiting on
+      # `service_healthy` then waits for ever. (The application image is Alpine-based and has
+      # busybox wget, which is why compose.yaml can use it.)
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
       interval: 15s
       timeout: 5s
       retries: 20
