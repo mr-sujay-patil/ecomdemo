@@ -19,9 +19,18 @@
 
 32 new unit tests and 5 new integration tests. Nothing skipped, nothing disabled.
 
-The fast suite is still Docker-free: `./mvnw clean test` starts no containers, because
-`application-test.properties` keeps the Kafka listener and the admin client switched off and the
-outbox's own tests either mock the broker or use `@DataJpaTest`.
+The fast suite is still Docker-free:
+
+    ./mvnw clean test  ->  310 tests, 0 failures, 59.6s, and ZERO "Creating container" lines
+
+`application-test.properties` keeps the Kafka listener and the admin client switched off, and the
+outbox's own tests either mock the broker or use `@DataJpaTest`. `KafkaTemplateWiringTest` is a
+full `@SpringBootTest` but costs 0.2s, because its annotations match the context-cache key the
+other `@SpringBootTest` classes already use — a different set would have bought a second context.
+
+(Phase 17 recorded 29s for this suite. The difference is the machine, not the tests: this run had
+the nine-container compose stack up alongside it. The per-class timings add up to well under the
+total either way, and the four new outbox classes cost 1.6s between them.)
 
 ## 2. Every "Done when" item
 
