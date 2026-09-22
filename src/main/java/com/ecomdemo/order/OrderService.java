@@ -1,8 +1,13 @@
 package com.ecomdemo.order;
 
 import com.ecomdemo.common.ConcurrentUpdateException;
+import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.metrics.CheckoutMetrics;
+import com.ecomdemo.metrics.CheckoutOutcome;
 import com.ecomdemo.order.dto.OrderResponse;
+import io.micrometer.core.instrument.Timer;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,16 +40,19 @@ public class OrderService {
     private final OrderPlacementService orderPlacementService;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
+    private final CheckoutMetrics checkoutMetrics;
 
     public OrderService(
             OrderRepository orderRepository,
             OrderPlacementService orderPlacementService,
             OrderAuditService orderAuditService,
-            CurrentUser currentUser) {
+            CurrentUser currentUser,
+            CheckoutMetrics checkoutMetrics) {
         this.orderRepository = orderRepository;
         this.orderPlacementService = orderPlacementService;
         this.orderAuditService = orderAuditService;
         this.currentUser = currentUser;
+        this.checkoutMetrics = checkoutMetrics;
     }
 
     /**
@@ -64,6 +72,51 @@ public class OrderService {
      */
     @PreAuthorize("hasRole('CUSTOMER')")
     public OrderResponse place() {
+        Timer.Sample sample = checkoutMetrics.start();
+        try {
+            OrderResponse placed = placeWithRetries();
+            checkoutMetrics.placed(sample, placed.totalAmount());
+            return placed;
+
+        // The catch order is not style: ConcurrentUpdateException and InsufficientStockException
+        // are both subclasses of ConflictException, so the compiler requires the specific ones
+        // first — and if they were not required, putting the general one first would quietly
+        // label every failure `empty_cart` and make the tag useless.
+        } catch (ConcurrentUpdateException ex) {
+            checkoutMetrics.failed(sample, CheckoutOutcome.CONFLICT);
+            throw ex;
+        } catch (InsufficientStockException ex) {
+            checkoutMetrics.failed(sample, CheckoutOutcome.OUT_OF_STOCK);
+            throw ex;
+
+        // A plain ConflictException from checkout means the cart was empty; that is the only
+        // one placeOnce() raises. The assumption is worth naming, because it is the line that
+        // has to change the day a second reason is added — and the failure mode if it is
+        // forgotten is silent, not loud: a new rejection reason mislabelled as `empty_cart`
+        // still produces a perfectly convincing graph.
+        } catch (ConflictException ex) {
+            checkoutMetrics.failed(sample, CheckoutOutcome.EMPTY_CART);
+            throw ex;
+
+        // Everything unforeseen. Rethrown untouched — instrumentation observes, it does not
+        // handle. Swallowing here would turn a 500 into a 200 with no order, which is the one
+        // way a metrics change can be worse than no metrics at all.
+        } catch (RuntimeException ex) {
+            checkoutMetrics.failed(sample, CheckoutOutcome.ERROR);
+            throw ex;
+        }
+    }
+
+    /**
+     * The retry loop itself, unchanged since Phase 6 apart from being given a name.
+     *
+     * <p>Splitting it out is what keeps the timer around <em>all</em> the attempts. Timing each
+     * attempt separately would report a checkout that lost two locks and succeeded on the third
+     * as three quick checkouts, none of which anybody experienced; what the customer waited for
+     * is the whole of this method. It is an ordinary private call, not a proxied one, so it adds
+     * no transaction boundary and changes nothing about the behaviour described above.
+     */
+    private OrderResponse placeWithRetries() {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
                 OrderResponse placed = orderPlacementService.placeOnce();

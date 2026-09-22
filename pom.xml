@@ -138,6 +138,39 @@
 		</dependency>
 
 		<!--
+			Actuator (Phase 15). It adds the /actuator endpoints - health, info, metrics - and,
+			more importantly, the Micrometer MeterRegistry that everything else in this phase
+			builds on. Spring Boot auto-instruments what it already owns the moment the starter
+			is present: HTTP request timings, the HikariCP pool, the JVM's heap, GC and threads,
+			Hibernate's statistics, the Redis cache from Phase 13 and the Spring Batch jobs from
+			Phase 14 all start publishing meters without a line of code from us.
+
+			Nothing is exposed over HTTP by default except /actuator/health: the endpoints a
+			deployment actually publishes are an explicit list in application.properties.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!--
+			The Prometheus registry. Micrometer is a facade - meters are recorded against its API
+			and a registry decides what that means for one monitoring system. This one holds the
+			values in memory and renders them, on request, in Prometheus' text exposition format
+			at /actuator/prometheus. That is the whole of the "pull model": the application never
+			connects to Prometheus, it just answers when Prometheus asks.
+
+			Swapping this artifact for micrometer-registry-otlp or -datadog would change the
+			destination without touching a single instrumented line, which is the point of the
+			facade. The version comes from the Spring Boot BOM.
+		-->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!--
 			Spring Security's OAuth2 Resource Server. "Resource server" is the OAuth2 word for
 			an API that ACCEPTS tokens rather than one that issues them: it adds a filter that
 			pulls a Bearer token off the Authorization header, verifies its signature and its
@@ -292,6 +325,21 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+				<executions>
+					<!--
+						Writes target/classes/META-INF/build-info.properties at package time.
+						Actuator turns that file into a BuildProperties bean, which is what makes
+						/actuator/info report the artifact, version and build timestamp. Without
+						this execution the info endpoint answers `{}` and there is no way to tell
+						from a running container WHICH build is running - the first question
+						anyone asks when a deployment behaves unexpectedly.
+					-->
+					<execution>
+						<goals>
+							<goal>build-info</goal>
+						</goals>
+					</execution>
+				</executions>
 			</plugin>
 
 			<!--
