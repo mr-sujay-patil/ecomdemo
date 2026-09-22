@@ -3,6 +3,7 @@ package com.ecomdemo.messaging;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
@@ -42,6 +43,20 @@ public class OrderEventPublisher {
         this.kafkaTemplate = kafkaTemplate;
     }
 
+    /**
+     * {@code @Async} as well as {@code AFTER_COMMIT}, and the combination is load-bearing.
+     *
+     * <p>A transactional listener runs on the thread that committed the transaction — the request
+     * thread. {@code KafkaTemplate.send} looks non-blocking because it returns a future, but it
+     * blocks inside {@code send} until the producer has cluster metadata, for up to
+     * {@code max.block.ms}. Without this annotation a stopped broker turned a checkout into a
+     * <b>97-second</b> request that still returned 201; the failure test in
+     * {@code docs/test-reports/phase-17.md} is where that number comes from.
+     *
+     * <p>So the publication moves to the pool in {@link MessagingAsyncConfig}. The customer's
+     * request finishes the moment the transaction commits, whatever Kafka is doing.
+     */
+    @Async(MessagingAsyncConfig.PUBLISHER_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onOrderPlaced(OrderPlacedEvent event) {
         publish(event);
@@ -50,11 +65,12 @@ public class OrderEventPublisher {
     /**
      * Sends, and does not wait.
      *
-     * <p>{@code send} returns a future; this method attaches a callback and returns. Blocking on
-     * {@code get()} would put the broker's round trip inside the checkout request — turning a
-     * Kafka hiccup into checkout latency, which is the coupling the whole asynchronous design is
-     * meant to remove. The producer's own retries and {@code delivery.timeout.ms} cover the
-     * transient case; the callback is there so a genuine failure is visible rather than silent.
+     * <p>{@code send} returns a future and this method attaches a callback rather than calling
+     * {@code get()}. Note that returning a future is NOT the same as never blocking: the call
+     * blocks until the producer has metadata for the topic, bounded by {@code max.block.ms},
+     * which is why the caller runs on the publisher pool rather than on a request thread. The
+     * producer's own retries cover the transient case; the callback is there so a genuine failure
+     * is visible rather than silent.
      *
      * <p>A failure here is logged and nothing else, because there is nothing else honest to do:
      * the order is committed and the customer has been told. Throwing would not un-place it. The

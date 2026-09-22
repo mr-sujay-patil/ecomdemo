@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 17: Messaging (Apache Kafka, KRaft)
 - **Branch:** feature/phase-17-kafka
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -34,17 +34,26 @@ No tag - a fix branch is not a phase. Report: `docs/test-reports/fix-product-cac
 - [x] Retry topics with backoff and a dead-letter topic
 - [x] An idempotent consumer backed by a `processed_events` table
 - [x] A Testcontainers Kafka test
-- [ ] Done when: each order produces exactly one notification, and poison messages land in the DLT
-- [ ] Smoke test additions: after placing an order, exactly one notification row exists for it,
-      and the event is on the `orders.placed` topic
-- [ ] Testing protocol run in full + docs/test-reports/phase-17.md
-- [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 15 archived),
+- [x] Done when: each order produces exactly one notification, and poison messages land in the DLT
+- [x] Smoke test additions: after placing an order, exactly one notification row exists for it,
+      and the event is on the `orders.placed` topic - 18 new checks
+- [x] Testing protocol run in full + docs/test-reports/phase-17.md
+- [x] README section, docs/decisions.md entries (13), RECENT.md rotation (Phase 15 archived),
       tracker -> 🔵
 - [ ] PR raised
 
 ## Last test run
-- 2026-09-22 (merge verification on `main`): `./mvnw clean verify` -> 273 + 73, 0 failures,
-  0 skipped, 4m58s. `scripts/smoke-test.sh` -> 234 passed, 0 failed, 0 skipped.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 278 (was 273) + Failsafe 77
+  (was 73), 0 failures, 0 skipped, 1m55s.
+- 2026-09-22: `./mvnw clean test` -> 278, 0 "Creating container" lines, 29s. Still Docker-free.
+- 2026-09-22: `scripts/smoke-test.sh` -> 252 passed (was 234), 0 failed, 0 skipped.
+- 2026-09-22: FAILURE SCENARIO found a real bug. Kafka stopped -> checkout returned 201 after
+  **97.77s**, because KafkaTemplate.send blocks for max.block.ms (60s default) waiting for
+  metadata and the AFTER_COMMIT listener runs on the request thread. Fixed with @Async onto a
+  bounded pool + max.block.ms=5000: the same test now gives 0.18s and 0.05s. On recovery the
+  next order is notified, though the first one lags tens of seconds while clients reconnect.
+- 2026-09-22: the outage cost 4 orders their notification, permanently - the dual-write gap
+  Phase 18 closes. Measured, not assumed.
 
 ## Open issues / blockers
 - Carried from Phases 15-16: the Grafana dashboards' RENDER has still never been looked at by
@@ -52,21 +61,37 @@ No tag - a fix branch is not a phase. Report: `docs/test-reports/fix-product-cac
   for browser automation here. Steps: `docs/test-reports/phase-15.md` §8 and the "EcomDemo Logs"
   dashboard with a correlation ID pasted into its textbox.
 
-## Decisions this phase (copy to docs/decisions.md before the PR)
-- (none yet)
+## Decisions this phase (copied to docs/decisions.md ✅ — 13 entries)
+- KRaft, one broker, every replication factor written out as 1 (the internal topics default to 3
+  and fail when first needed).
+- Two listeners: INTERNAL kafka:9092 and HOST localhost:29092 - a client reconnects to the
+  ADVERTISED address, so one address cannot serve both callers.
+- Topics from NewTopic beans with auto.create.topics.enable=false.
+- A hand-written event record, not the entity; keyed by order id so one order's events share a
+  partition.
+- AFTER_COMMIT publication, with the dual-write gap documented and measured rather than hidden.
+- @Async on a bounded pool with an ABORT policy, plus max.block.ms=5000 (found by the failure
+  test - see above).
+- Idempotency is the consumer's job: processed_event's PRIMARY KEY is the event id from the
+  message; marker and work in one transaction, marker first.
+- Retries on separate TOPICS, not in the consumer thread (head-of-line blocking).
+- Retry topics suffixed by INDEX, not delay (jitter would create new topics every restart).
+- ErrorHandlingDeserializer, or a malformed message stops the partition for ever.
+- Nothing consumes the DLT.
+- A real broker in Testcontainers; Kafka switched off entirely in the fast suite.
+- spring-boot-starter-kafka, not the bare spring-kafka (Boot 4 auto-config modules).
 
 ## Environment left behind
-Docker Desktop RUNNING. Seven containers up and healthy (`ecomdemo-app`, `-db`, `-cache`,
-`-prometheus`, `-grafana`, `-loki`, `-alloy`), schema v8, image built from `main`. SonarQube
-stack also up at http://localhost:9000; stop it with `docker compose -f compose.sonar.yaml down`
-if the memory is wanted back. `.env` holds a real JWT_SECRET and is gitignored.
+Docker Desktop RUNNING. NINE containers up (`ecomdemo-app`, `-db`, `-cache`, `-prometheus`,
+`-grafana`, `-loki`, `-alloy`, `-kafka`, `-kafka-ui`), schema **v9**, image built from this
+branch. The SonarQube stack was STOPPED during this phase to free memory for Testcontainers;
+`docker compose -f compose.sonar.yaml up -d` brings it back. `.env` holds a real JWT_SECRET and
+is gitignored.
 
 ## Next action
-Continue on `feature/phase-17-kafka`: the smoke test additions are next (after an order, exactly
-one notification row and the event on `orders.placed`), then the full testing protocol, then the
-docs and the PR. Nothing is waiting on the user.
+Raise the PR for Phase 17 and STOP for the user's review.
 
-Four traps already hit and fixed, worth keeping in the test report:
+Five traps hit and fixed, all in the test report:
 1. `spring-kafka` alone gives no auto-configuration in Boot 4 - the auto-config lives in
    `spring-boot-kafka`, so the dependency must be `spring-boot-starter-kafka`. The symptom is a
    missing KafkaTemplate BEAN, which reads like an application bug.
@@ -78,3 +103,4 @@ Four traps already hit and fixed, worth keeping in the test report:
 4. Retry topics are named after the DELAY by default, and `@BackOff(jitter=...)` makes that a
    different number every run - `orders.placed-retry-1031`, `-retry-1661`, new ones for ever.
    Fixed with `TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE`.
+5. The 97-second checkout (see Last test run). The fix is @Async + max.block.ms.

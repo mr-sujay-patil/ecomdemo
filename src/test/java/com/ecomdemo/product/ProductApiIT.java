@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -112,7 +113,15 @@ class ProductApiIT extends IntegrationTest {
         assertThat(updated.getBody().price()).isEqualByComparingTo("549.00");
         assertThat(updated.getBody().stockQuantity()).isEqualTo(4);
 
-        admin.delete("/api/products/" + created.id());
+        // The DELETE's own status is asserted rather than ignored. `TestRestTemplate.delete()`
+        // returns void and swallows it, so a delete that was refused used to surface one line
+        // later as a JSON parse error — the GET returned the product, and Jackson complained that
+        // it could not map a null `status` into ApiError's int. That is a genuinely confusing way
+        // to be told "the delete did not happen".
+        ResponseEntity<Void> deleted =
+                admin.exchange(
+                        "/api/products/" + created.id(), HttpMethod.DELETE, null, Void.class);
+        assertThat(deleted.getStatusCode()).isEqualTo(HttpStatus.NO_CONTENT);
         createdIds.remove(created.id());
 
         assertThat(rest.getForEntity("/api/products/" + created.id(), ApiError.class).getStatusCode())
