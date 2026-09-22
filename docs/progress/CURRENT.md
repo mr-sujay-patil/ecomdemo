@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 14: Batch Processing
 - **Branch:** feature/phase-14-spring-batch
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #16 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
+- **Waiting for user:** YES — review and merge PR #16, then say `merged, continue`
 
 ## Phase 13 merge verification (passed 2026-09-22)
 PR #15 MERGED with a merge commit (d674e1c, 2 parents: 1b03f5f + 8ecee91); branch is an ancestor
@@ -33,7 +33,7 @@ Tag `phase-13-complete` pushed.
 - [x] Testing protocol run in full + docs/test-reports/phase-14.md
 - [x] README section, decisions.md (16 entries), RECENT.md rotation (Phase 12 archived),
       tracker -> 🔵
-- [ ] PR raised, CI green
+- [x] PR raised (#16), CI green
 
 ## Last test run
 - 2026-09-22: `./mvnw verify` -> BUILD SUCCESS, Surefire 229 (was 190) + Failsafe 47 (was 38),
@@ -70,9 +70,8 @@ at http://localhost:9000; stop it with `docker compose -f compose.sonar.yaml dow
 is wanted back. `.env` holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-Everything except the PR is done and committed. Next: push the branch, `gh pr create --base main`
-with the template filled in, wait for CI, then send the Phase Review Report and **STOP** at the
-mandatory post-PR stop point.
+STOPPED at the mandatory post-PR stop point. PR #16 is open, CI is green, mergeStateStatus CLEAN.
+`Publish image to GHCR` shows SKIPPED because that job only runs on `main`.
 - If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
   tag `phase-14-complete` and start Phase 15 (`docs/phases/phase-15-metrics.md`).
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
