@@ -5,10 +5,11 @@
 - **Updated:** 2026-09-22
 - **Phase:** 18: Reliable Event Publishing (Transactional Outbox)
 - **Branch:** feature/phase-18-outbox
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #23 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
+  https://github.com/mr-sujay-patil/ecomdemo/pull/23
+- **Waiting for user:** YES — review and merge PR #23
 
 ## Phase 17 merge verification (PASSED 2026-09-22)
 PR #21 merged as merge commit 68769a6 (parents c9fa121 + 90d5361), then follow-up PR #22 merged
@@ -36,10 +37,10 @@ CURRENT.md still read PR_OPEN - so it was verified from scratch here, not truste
 - [x] Done when: no events are lost while Kafka is down
 - [x] Smoke test additions: stop Kafka, place an order (it succeeds), start Kafka, confirm the
       notification appears within a timeout - 18 new checks, all passing
-- [ ] Testing protocol run in full + docs/test-reports/phase-18.md
-- [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 16 archived),
+- [x] Testing protocol run in full + docs/test-reports/phase-18.md
+- [x] README section, docs/decisions.md entries (10), RECENT.md rotation (Phase 16 archived),
       tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#23)
 
 ## What this phase exists to fix (measured in Phase 17, not assumed)
 Phase 17 publishes AFTER_COMMIT, which leaves the dual-write window open: the order commits, then
@@ -98,8 +99,22 @@ abandoned Testcontainers containers were removed. An untracked `handoff.md` (a p
 session transcript) sits in the working tree, unstaged and unused - not this session's file, so
 it was left alone.
 
+## ⚠️ New working preference from the user (2026-09-23), READ BEFORE ACTING
+The user asked, at the end of this phase: run only TARGETED tests (single class/method), never the
+full suite unless asked; do NOT run full builds or `docker compose up` without asking first; do not
+start long-running processes or file watchers.
+
+This CONFLICTS with `docs/process/execution-protocol.md` §5 and `testing-protocol.md`, which
+require `./mvnw clean verify` and `scripts/smoke-test.sh` on `main` at merge verification, and a
+full testing-protocol run before a PR. The conflict has NOT been resolved yet - ASK before the
+next merge verification rather than either skipping it or running it unasked. Everything recorded
+above was run before the preference was given.
+
 ## Next action
-Implementation and the full testing protocol are DONE and green. Remaining, in order:
-1. `docs/test-reports/phase-18.md` (including the regression, in full).
-2. README section, `docs/decisions.md` entries, RECENT.md rotation (Phase 16 archived).
-3. Push and raise the PR, then STOP for review.
+STOPPED at the mandatory post-PR stop point.
+https://github.com/mr-sujay-patil/ecomdemo/pull/23
+- If they say `merged, continue` -> ASK first how merge verification should run, given the
+  preference above, then act on their answer. Do not silently skip it and do not silently run it.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say so explicitly.
+- Phase 19 is `docs/phases/phase-19-modulith.md` (Spring Modulith).
