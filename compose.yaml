@@ -271,16 +271,14 @@ services:
       # Published so the smoke test can query the API from the host. Grafana does not use this -
       # it reaches Loki at `loki:3100` on the compose network.
       - "${LOKI_PORT:-3100}:3100"
-    healthcheck:
-      # /ready is not /metrics or a TCP check: it returns 503 until the ingester has joined its
-      # own ring and can actually accept a push. Alloy starting before that would spend its first
-      # seconds retrying, which is harmless but looks like a fault in the logs of the thing whose
-      # job is logs.
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3100/ready || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
+    # NO HEALTHCHECK, deliberately. Loki's image is DISTROLESS - `docker exec ecomdemo-loki ls`
+    # answers "executable file not found", because the whole filesystem is the loki binary and its
+    # certificates. There is no shell, no wget and no curl for a `test:` command to use, and Loki
+    # itself has no client subcommand to make a request with (unlike Prometheus, which ships
+    # promtool and is why THAT container has a health check). The readiness endpoint is real and
+    # worth calling - http://localhost:3100/ready returns 503 with a reason until the ingester has
+    # joined its own ring - but nothing inside this container can call it, so the check lives in
+    # scripts/smoke-test.sh, on the host, where curl exists.
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -291,7 +289,13 @@ services:
     container_name: ecomdemo-alloy
     depends_on:
       loki:
-        condition: service_healthy
+        # `service_started`, because Loki has no health check to wait for (see above) - and it
+        # matters less here than anywhere else in this file. `loki.write` buffers in memory and
+        # retries with backoff, so an Alloy that starts before Loki is ready loses nothing; it
+        # logs a few connection refusals and then catches up. That is the whole design: the log
+        # pipeline is allowed to be eventually consistent, which is what lets the application
+        # never wait for it.
+        condition: service_started
     command:
       - run
       # Without an explicit listen address the UI binds to 127.0.0.1 INSIDE the container, which
@@ -315,7 +319,12 @@ services:
     ports:
       - "${ALLOY_PORT:-12345}:12345"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:12345/-/ready || exit 1"]
+      # A PORT check, not an HTTP one, and the comment is here so nobody reads it as more than it
+      # is: this image has bash but neither curl nor wget, and bash's /dev/tcp pseudo-device is
+      # the only way left to ask a question over TCP. It proves the server is listening, not that
+      # the pipeline is shipping anything. What the pipeline is actually doing is on the Alloy UI
+      # at http://localhost:12345 and in the smoke test's Loki queries.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/12345 || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

@@ -79,14 +79,18 @@ discovery.relabel "infrastructure" {
     action        = "keep"
   }
 
-  // The mirror image of the rule above: everything in the project EXCEPT the application. Loki
-  // and Alloy are dropped as well — Alloy shipping its own log to Loki and Loki logging that it
-  // received it is a feedback loop that idles at a steady trickle and amplifies the moment either
-  // of them starts complaining about the other.
+  // The rest of the application stack, named explicitly rather than "everything except the app".
+  // An allow-list is the right shape here for two reasons found by running it the other way
+  // round. Alloy and Loki must not be in it — Alloy shipping its own log to Loki, and Loki
+  // logging that it received it, is a feedback loop that idles at a steady trickle and amplifies
+  // the moment either starts complaining about the other. And `compose.sonar.yaml` (Phase 12)
+  // runs in this same Compose PROJECT, so a deny-list quietly swallowed SonarQube and its
+  // database as well: a couple of hundred megabytes of Java logs from a tool that is not part of
+  // the system being observed.
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "app|loki|alloy"
-    action        = "drop"
+    regex         = "db|cache|prometheus|grafana"
+    action        = "keep"
   }
 
   rule {
