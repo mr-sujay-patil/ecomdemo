@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 9: JWT Authentication
 - **Branch:** feature/phase-09-jwt
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** no
@@ -24,31 +24,46 @@ BUILD SUCCESS, Surefire 163 + Failsafe 23, 0 failures, 0 skipped; the app on `ma
 tag `phase-08-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] `POST /api/auth/login` returns a signed JWT with role claims and a short expiry
-- [ ] Resource Server validation of the token on every request, key from an environment variable
-- [ ] Swagger UI configured for Bearer tokens
-- [ ] Expired and tampered tokens are rejected (the "Done when")
-- [ ] Smoke test additions (login returns a JWT, the full flow runs with a Bearer token,
+- [x] `POST /api/auth/login` returns a signed JWT with role claims and a short expiry
+- [x] Resource Server validation of the token on every request, key from an environment variable
+- [x] Swagger UI configured for Bearer tokens
+- [x] Expired and tampered tokens are rejected (the "Done when")
+- [x] Smoke test additions (login returns a JWT, the full flow runs with a Bearer token,
       a tampered token -> 401, an expired token -> 401 with a short test expiry)
-- [ ] Testing protocol run in full + docs/test-reports/phase-09.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 07 archived), tracker -> 🔵
+- [x] Testing protocol run in full + docs/test-reports/phase-09.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 07 archived), tracker -> 🔵
 - [ ] PR raised
 
 **Out of scope, suggest only:** the phase file lists a refresh token endpoint as *optional*.
 Per hard rule 7 it is NOT being built; it will be suggested in the PR.
 
 ## Last test run
-- none yet this phase. Baseline inherited from `main`: 163 Surefire + 23 Failsafe, smoke 110.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 190 (was 163), Failsafe 30
+  (was 23), 0 failures, 0 skipped. Run four times, all green (25.1 / 23.3 / 24.0 / 36.7 s).
+- 2026-09-22: `./mvnw clean test` -> 190 tests, 11.0 s, zero "Creating container" lines.
+- 2026-09-22: the app started BOTH ways - with JWT_SECRET set (no warning) and without it (the
+  generated-key WARN). 0 ERROR in either log; schema validated at v6, unchanged this phase.
+- 2026-09-22: `scripts/smoke-test.sh` -> 125 passed, 0 failed, 0 skipped. Run four times: twice
+  against the JWT_SECRET instance, once more for re-runnability, once against the generated-key
+  instance.
+- 2026-09-22: measured on the running app - login 106 ms/call (BCrypt), authenticated GET
+  14 ms/call. That gap is what moved from every request to once per login.
 
 ## Open issues / blockers
-- **Decide how the signing key is supplied without a manual step.** The phase says "the key from
-  an environment variable", and hard rule 9 forbids a secret in Git — but the phase also says the
-  user has NO manual steps, so the app must start with `JWT_SECRET` unset. Planned answer:
-  read `JWT_SECRET` when present; otherwise generate a random key at startup and log a loud WARN
-  saying tokens will not survive a restart. To be confirmed while implementing.
+- none. The signing-key question is settled: `JWT_SECRET` when set, otherwise a random key plus a
+  loud WARN, and under 32 bytes fails startup. Verified both ways (see "Last test run").
 
-## Decisions this phase (copied to docs/decisions.md ⬜)
-- none yet.
+## Decisions this phase (copied to docs/decisions.md ✅ — 14 entries)
+- JWT_SECRET with no default in Git; unset -> random key + WARN; under 32 bytes -> startup fails.
+- HS256, not RS256: one application issues and accepts. The trade is written down for Phase 20.
+- Claims are `sub`, `uid`, `roles` only. No `ROLE_` prefix in the claim; the converter adds it.
+- `CurrentUser` reads the Jwt principal. `uid` is read as Number and narrowed (JSON has one
+  number type, so it arrives as Integer or Long depending on size).
+- `AuthenticationManager` moved to `auth/AuthenticationManagerConfig`: the @WebMvcTest slices
+  import SecurityConfig and have no UserDetailsService.
+- 401 distinguishes "no token" from "bad token"; login failures never distinguish wrong password
+  from unknown username.
+- No refresh token (optional in the phase file, out of scope by hard rule 7).
 
 ## Environment left behind
 Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v6**.
@@ -58,7 +73,4 @@ The database holds three accounts: `admin` (seeded by V5) plus `smoke-customer` 
 `smoke-customer-b`, created by the smoke test. All passwords are BCrypt hashes.
 
 ## Next action
-Start step 5 (IMPLEMENTING) of the execution protocol on `feature/phase-09-jwt`: read
-`docs/phases/phase-09-jwt.md`, then work the checklist above top-down with small Conventional
-Commits, beginning with the `spring-boot-starter-oauth2-resource-server` dependency, the key
-configuration and `POST /api/auth/login`.
+Push the branch and raise the PR (`gh pr create --base main`), then STOP for the user's review.
