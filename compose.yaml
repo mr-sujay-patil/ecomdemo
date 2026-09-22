@@ -1,0 +1,112 @@
+# =============================================================================================
+# EcomDemo — the whole system, in two containers
+# =============================================================================================
+#   docker compose up --build       start everything (add -d to detach)
+#   docker compose down             stop and remove the containers, KEEPING the data volume
+#   docker compose down -v          ...and delete the database with it
+#   docker compose logs -f app      follow the application log
+#
+# Copy .env.example to .env first. It is gitignored, and it is where the database password and
+# the JWT signing key live.
+#
+# The file is `compose.yaml`, not `docker-compose.yml`: that is the name the Compose
+# specification settled on, and `version:` at the top is long obsolete.
+
+services:
+
+  # -------------------------------------------------------------------------------------------
+  # PostgreSQL
+  # -------------------------------------------------------------------------------------------
+  db:
+    image: postgres:18-alpine
+    container_name: ecomdemo-db
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ecomdemo}
+      POSTGRES_USER: ${POSTGRES_USER:-ecomdemo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecomdemo}
+    ports:
+      # Published so psql, DBeaver and the smoke test's schema checks can reach it from the host.
+      # The application does NOT use this: it talks to the container directly over the compose
+      # network (see the app service). Changing the left-hand side moves the host port and
+      # nothing else — that is the one to change if 5432 is already taken locally.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # A VOLUME is storage that outlives the container. A container's own writable layer is
+      # destroyed with it, so without this line `docker compose down` would delete the database
+      # and every restart would replay every migration into an empty schema. A NAMED volume
+      # (rather than a bind mount to a host path) lets Docker own the storage, which keeps file
+      # ownership and permissions out of the picture — the thing that most often breaks a
+      # database bind mount on macOS and Windows.
+      #
+      # The mount point is `/var/lib/postgresql`, NOT the `/var/lib/postgresql/data` that every
+      # older tutorial shows. The postgres:18 image changed this: it now keeps its data in a
+      # major-version subdirectory so that `pg_upgrade --link` can see both versions inside one
+      # mount. Mounting the old path makes the container refuse to start — it detects data at a
+      # path it considers an "unused mount/volume" and stops rather than risk it.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      # `pg_isready` is not "is the container running?" but "is the server accepting
+      # connections?" — the distinction the app service depends on below. The port is open for
+      # some seconds before that is true, and an application that connects in between dies at
+      # startup with a Flyway error.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ecomdemo} -d ${POSTGRES_DB:-ecomdemo}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # The application
+  # -------------------------------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ecomdemo:latest
+    container_name: ecomdemo-app
+    depends_on:
+      db:
+        # `service_healthy`, not the bare `depends_on: [db]`. The short form only waits for the
+        # container to be STARTED, which for PostgreSQL means "the process exists" — several
+        # seconds before it answers. This waits for the health check above to pass.
+        condition: service_healthy
+    environment:
+      # --- CONTAINER NETWORKING -------------------------------------------------------------
+      # `db` is a hostname here, resolved by Compose's own DNS on the network it creates for this
+      # project. Not localhost: in a container, localhost is that container. And not 5432 on the
+      # host either — this connection never leaves the Docker network, so it works whatever the
+      # published host port is, or even if none is published at all.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-ecomdemo}
+      POSTGRES_USER: ${POSTGRES_USER:-ecomdemo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecomdemo}
+
+      # The JWT signing key (Phase 9). Deliberately no default: an unset value reaches the
+      # application as empty, which makes it generate a random key and warn that tokens die with
+      # the container. Putting a real default here would be a signing key in Git.
+      JWT_SECRET: ${JWT_SECRET:-}
+
+      # `dev` is the profile that reads POSTGRES_* above. It is named for how it is run, not for
+      # what it means; a `prod` profile arrives with the deployment phases.
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+
+      # Overrides the Dockerfile's default when set in .env — useful for pinning a heap on a
+      # laptop, or adding -XX:+HeapDumpOnOutOfMemoryError while debugging.
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    # A limit matters here even locally, because it is what MaxRAMPercentage is a percentage OF.
+    # Without one the JVM sizes its heap against the whole host, and the "75% of the container"
+    # setting in the Dockerfile silently means "75% of your laptop".
+    deploy:
+      resources:
+        limits:
+          memory: ${APP_MEMORY_LIMIT:-768M}
+    restart: unless-stopped
+
+volumes:
+  # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
+  # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
+  postgres-data:

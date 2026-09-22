@@ -12,7 +12,41 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 09: JWT Authentication (tag: pending, PR: pending)
+## Phase 10: Containerization (tag: pending, PR: pending)
+**What exists now:** `cp .env.example .env && docker compose up --build` starts the whole system:
+`ecomdemo-app` and `ecomdemo-db` on a private network, the app waiting for `pg_isready` before it
+connects, the data in a named volume that survives `down`. The image is multi-stage — JDK+Maven
+build, JRE runtime — 410 MB, non-root uid 1001, layered jar, heap sized from the container limit.
+No application code changed; 190 + 30 tests unchanged, smoke test 125 checks and now runs against
+the stack. Schema still V6.
+**Key code:** `Dockerfile` (two stages; dependencies resolved before the source is copied;
+`jarmode=tools extract --layers --launcher`; `addgroup/adduser` at a pinned uid 1001;
+`JAVA_OPTS=-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError`; a `HEALTHCHECK` on
+`/api/products`; `ENTRYPOINT sh -c "exec java ..."` so the JVM is PID 1 and gets SIGTERM).
+`compose.yaml` (db + app, `depends_on: condition: service_healthy`, named volume,
+`deploy.resources.limits.memory`, every value `${VAR:-default}`). `.dockerignore`, `.env.example`.
+**Config & infrastructure:** No new Maven dependencies. New env vars via `.env`: `JWT_SECRET`,
+`POSTGRES_*`, `APP_PORT`, `APP_MEMORY_LIMIT`, `JAVA_OPTS`, `SPRING_PROFILES_ACTIVE`. The app
+reaches PostgreSQL at `db:5432` over the compose network, never the published host port. The
+pre-compose container `ecomdemo-postgres` is stopped (port clash) but not deleted.
+**Tests:** No Java tests added or changed. `scripts/smoke-test.sh` now finds `ecomdemo-db` before
+`ecomdemo-postgres`, and its persistence probe records PostgreSQL's `system_identifier` so a
+different database reads as a first run rather than as lost data; `psql_query` moved up to the
+helpers. Test report: `docs/test-reports/phase-10.md`.
+**Gotchas:** `postgres:18` changed its data directory — mount `/var/lib/postgresql`, NOT
+`/var/lib/postgresql/data`, or the container refuses to start. A bare `depends_on: [db]` waits
+only for "started", not "accepting connections". `-XX:MaxRAMPercentage` needs a memory limit on
+the service or it is a percentage of the whole host; the JVM's own default is 25%, measured here
+as 192 MB of a 768 MB container against 576 MB with the flag. `./mvnw verify` still works while
+the stack is up (Testcontainers binds random ports) but the two compete for the daemon, so it
+takes ~78 s instead of ~33 s. Buildpacks measured at 766 MB / 53 s rebuild against the
+Dockerfile's 410 MB / 5 s.
+**Follow-ups (not done, out of scope):** building and publishing the image in CI — Phase 11.
+Image vulnerability scanning — Phase 31. A production-shaped deployment (no local database, real
+secret management, more than one replica) — Phases 25-26. Pinning base images by digest and
+signing them — not planned.
+
+## Phase 09: JWT Authentication (tag: phase-09-complete, PR #9)
 **What exists now:** The password is sent once. `POST /api/auth/login` returns a signed HS256 JWT
 (15 min) carrying `sub`, `uid` and `roles`; every other call sends `Authorization: Bearer <token>`
 and the OAuth2 Resource Server filter verifies signature, expiry and issuer. No session, no
@@ -52,44 +86,3 @@ deliberately skipped — it needs storage, rotation and reuse detection). Revoca
 deny-list. RS256 and a JWKS endpoint, needed as soon as a second service accepts these tokens —
 relevant from Phase 20. TLS termination, which a Bearer token really requires — the deployment
 phases.
-
-## Phase 08: Spring Security (tag: phase-08-complete, PR #8)
-**What exists now:** The application knows who is calling. `users` (V5) holds BCrypt-hashed
-accounts with roles CUSTOMER and ADMIN; the ADMIN (`admin`/`admin123`) is seeded by the
-migration because registration always creates a CUSTOMER. HTTP Basic on a stateless chain:
-product reads public, product writes ADMIN, cart and orders CUSTOMER, everything else
-authenticated. V6 gave every account its own cart and stamped every order with its owner, so the
-shared cart is gone and a stranger's order is a 403. 186 tests (163 + 23), smoke test 110 checks.
-**Key code:** `security/SecurityConfig` (the filter chain and the ordered rules, `@EnableWebSecurity`
-+ `@EnableMethodSecurity`, `BCryptPasswordEncoder` bean, CSRF off, sessions STATELESS);
-`security/AppUserDetailsService` + `AppUserDetails` (the adapter that adds the `ROLE_` prefix and
-carries the account id); `security/CurrentUser` (a bean over `SecurityContextHolder`, injected by
-`CartService`, `OrderService`, `OrderPlacementService`, `CustomerService`);
-`security/ApiErrorWriter` + `ApiErrorAuthenticationEntryPoint` + `ApiErrorAccessDeniedHandler`
-(401/403 in the `ApiError` shape); `customer/` (User, Role, UserRepository, CustomerService,
-CustomerController, dto/). `OrderService.findAll` is `@PreAuthorize("hasRole('CUSTOMER')")` over a
-user-scoped query; `findById` adds `@PostAuthorize("returnObject.username() == authentication.name")`.
-**Config & infrastructure:** New dependencies `spring-boot-starter-security` and (test)
-`spring-boot-starter-security-test`; Spring Security 7.1.1 from the BOM. No new properties.
-Migrations V5 (`users` + seeded admin) and V6 (`cart.user_id` UNIQUE NOT NULL, `orders.user_id`
-NOT NULL + `idx_orders_user`) applied incrementally to the live Phase 7 database, now at v6.
-OpenAPI declares a `basicAuth` scheme, so Swagger UI has an Authorize button.
-**Tests:** +43 unit/slice (`CustomerServiceTest` 8, `CustomerControllerTest` 11,
-`AppUserDetailsServiceTest` 4, an `Access` nest in each controller slice, V5/V6 assertions in
-`FlywayMigrationTest`, security assertions in `OpenApiDocumentationTest`); +8 IT. New test support:
-`support/WithSecurityRules` (imports the real `SecurityConfig` into a `@WebMvcTest`) and
-`support/TestAuthentication` (signs a `@SpringBootTest` in as a persisted account). Test report:
-`docs/test-reports/phase-08.md`.
-**Gotchas:** `@WebMvcTest` auto-configures Spring Security but does NOT pick up your own
-`SecurityFilterChain` — without an explicit import the slice runs Boot's "authenticate everything"
-fallback and a 401 assertion passes while proving nothing. `@WithMockUser` cannot be used in the
-`@SpringBootTest` classes: `CurrentUser` needs an `AppUserDetails` with a real database id.
-Spring Boot 4 defines no `com.fasterxml.jackson.databind.ObjectMapper` bean (Jackson 3's
-`tools.jackson.databind.json.JsonMapper` is the one to inject) even though Jackson 2 is on the
-classpath. `SecurityContextHolder` is a ThreadLocal, so `ConcurrentCheckoutTest`'s worker threads
-must authenticate themselves. URL rules are ordered and first-match-wins: the public GET rule for
-products must precede the ADMIN rule. macOS bash 3.2 makes `"${arr[@]}"` on an empty array an
-error under `set -u`, which is why the smoke test's auth code uses no arrays.
-**Follow-ups (not done, out of scope):** JWT instead of Basic, so a BCrypt verification is not paid
-per request — Phase 9. Password change, account lockout and login rate limiting — not planned.
-An admin view over all orders — not planned; the repository deliberately has no "all orders" query.

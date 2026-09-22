@@ -4,11 +4,29 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 9: JWT Authentication** — the password is now sent **once**. `POST /api/auth/login`
+**Phase 10: Containerization** — the whole system now starts with one command:
+
+```bash
+cp .env.example .env && docker compose up --build
+```
+
+Two containers on a private network — the application and PostgreSQL — with the app waiting for
+the database to be genuinely *ready* rather than merely started, and the data in a named volume
+that outlives them both. The image is built in two stages, so the JDK, Maven and the source code
+stay in the builder and only a JRE and the application are published: **410 MB**, running as a
+non-root user, with a heap sized from the container's limit instead of a hard-coded number.
+
+Nothing about the application changed. This phase is packaging — but packaging is what makes
+"works on my machine" stop being a sentence anybody has to say.
+
+<details>
+<summary>Phase 9: JWT Authentication</summary>
+
+The password is sent **once**. `POST /api/auth/login`
 exchanges it for a signed, short-lived JSON Web Token, and every later call carries
 `Authorization: Bearer <token>` instead. The application verifies the signature, the expiry and
 the issuer on each request and reads the caller's id and roles straight out of the token — no
@@ -27,6 +45,8 @@ Swagger UI at **<http://localhost:8080/swagger-ui.html>** — whose **Authorize*
 token. 220 tests in total (190 unit and slice, 30 integration), and the smoke test has grown to
 125 checks. A token still cannot be revoked before it expires and there is no refresh endpoint;
 both are deliberate gaps, explained under "Known gaps".
+
+</details>
 
 ## Roadmap
 
@@ -56,6 +76,10 @@ ecomdemo/
 ├── src/test/resources/
 │   ├── application-test.properties  # in-memory H2, for the fast suite (Surefire)
 │   └── application-it.properties    # the container's PostgreSQL, for the *IT tests (Failsafe)
+├── Dockerfile     # multi-stage: JDK+Maven to build, JRE to run, non-root, layered jar
+├── .dockerignore  # keeps target/, .git and .env out of the build context
+├── compose.yaml   # the app + PostgreSQL: health checks, a named volume, one network
+├── .env.example   # every variable, documented; .env itself is gitignored
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
 ├── scripts/       # smoke-test.sh
 └── .github/       # Pull Request template (workflows from Phase 11)
@@ -79,44 +103,66 @@ Branches are never deleted — they are the permanent history of the learning jo
 
 ## Running it
 
-Requires **JDK 21** on the path, and **Docker** (or a native PostgreSQL) for the database.
-Docker is also what `./mvnw verify` starts the integration-test database with, so keep Docker
-Desktop running while you work; `./mvnw test` on its own needs neither.
+Two ways. **Docker Compose** is the one to use — it needs nothing on your machine but Docker, and
+it runs the same image everywhere. Running it from source still works and is the faster inner
+loop when you are editing code.
 
-### 1. Start PostgreSQL
+### The whole system, in one command
 
-One command, and it keeps its data in a Docker volume between restarts:
+```bash
+cp .env.example .env            # then put a real JWT_SECRET in it
+docker compose up --build       # add -d to detach
+```
+
+That builds the application image and starts two containers — `ecomdemo-app` and `ecomdemo-db` —
+on a private network. The application waits for PostgreSQL to be genuinely *ready*, not merely
+started, applies the migrations, and comes up on <http://localhost:8080>.
+
+```bash
+docker compose ps               # SERVICE  STATUS: both should say (healthy)
+docker compose logs -f app      # follow the application log
+docker compose down             # stop and remove the containers, KEEPING the database
+docker compose down -v          # ...and delete the database volume too
+```
+
+`docker compose down` is not destructive: the database lives in a named volume that outlives the
+containers, so `up` again finds the schema already at V6. Only `-v` throws it away.
+
+**`.env` is gitignored**; `.env.example` is the documented template. Every value has a working
+default, so an empty `.env` starts a usable stack — but set `JWT_SECRET` (at least 32 characters;
+`openssl rand -base64 48` will do), or every restart invalidates every token that was issued.
+
+### Or from source
+
+Requires **JDK 21** on the path, and Docker for the database. Docker is also what `./mvnw verify`
+starts the integration-test database with, so keep Docker Desktop running while you work;
+`./mvnw test` on its own needs neither.
+
+Start PostgreSQL on its own — stop the compose stack first if it is up, or the two will fight over
+port 5432:
 
 ```bash
 docker run --name ecomdemo-postgres \
   -e POSTGRES_DB=ecomdemo -e POSTGRES_USER=ecomdemo -e POSTGRES_PASSWORD=ecomdemo \
   -p 5432:5432 -d postgres:18-alpine
-```
 
-After the first time, start and stop the same container instead of creating a new one — `docker
-run` again would fail on the name, and `docker rm` would throw the data away:
-
-```bash
-docker start ecomdemo-postgres          # bring it back up
+docker start ecomdemo-postgres          # after the first time: bring it back up
 docker stop  ecomdemo-postgres          # shut it down, data kept
 docker rm -f ecomdemo-postgres          # delete it AND its data, to start clean
 ```
 
-Prefer a native install? Anything that gives you a `ecomdemo` database owned by a `ecomdemo` user
-on port 5432 works — or point the application somewhere else with the environment variables below.
-
-### 2. Start the application
+Then:
 
 ```bash
-./mvnw spring-boot:run          # starts on http://localhost:8080, dev profile
+JWT_SECRET='at-least-32-characters-of-random-text' ./mvnw spring-boot:run
 ```
 
-On the first start **Flyway** finds an empty database, applies V1, V2 and V3 in order and records
-them; the log says `Successfully applied 3 migrations`. On every start after that it finds the
-schema already at version 3, says `Successfully validated 3 migrations` and applies nothing.
-Hibernate then checks the schema against the entities and fails the startup if they disagree.
+On the first start **Flyway** finds an empty database, applies V1–V6 in order and records them;
+the log says `Successfully applied 6 migrations`. On every start after that it finds the schema
+already at version 6, says `Successfully validated 6 migrations` and applies nothing. Hibernate
+then checks the schema against the entities and fails the startup if they disagree.
 
-In a second terminal:
+In a second terminal, against either way of running it:
 
 ```bash
 ./mvnw clean verify             # build and run all 220 tests (needs Docker for the 30 *IT)
@@ -173,7 +219,7 @@ has not seen yet, in order, each in a transaction, and writes a row per migratio
 owns:
 
 ```bash
-docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo \
+docker exec -it ecomdemo-db psql -U ecomdemo -d ecomdemo \
   -c 'SELECT version, description, success FROM flyway_schema_history ORDER BY installed_rank;'
 ```
 
@@ -230,10 +276,11 @@ curl -X POST http://localhost:8080/api/products -u admin:admin123 -H 'Content-Ty
 
 Or look at the rows directly. The H2 console is gone; point **DBeaver** or **pgAdmin** at
 `localhost:5432`, database `ecomdemo`, user `ecomdemo`, password `ecomdemo` — or use `psql` in the
-container:
+container. The container is `ecomdemo-db` when you are running the compose stack, and
+`ecomdemo-postgres` when you started PostgreSQL by hand:
 
 ```bash
-docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo
+docker exec -it ecomdemo-db psql -U ecomdemo -d ecomdemo
 
 \dt                              -- the tables, plus flyway_schema_history
 \d product                       -- the columns V1, V3 and V4 created
@@ -331,7 +378,7 @@ Unexpected row count (expected row count 1 but was 0)
 And the audit trail shows both halves of the race:
 
 ```bash
-docker exec -it ecomdemo-postgres psql -U ecomdemo -d ecomdemo \
+docker exec -it ecomdemo-db psql -U ecomdemo -d ecomdemo \
   -c "SELECT id, order_id, outcome, detail FROM order_audit ORDER BY id DESC LIMIT 2;"
 ```
 
@@ -452,7 +499,7 @@ To change it, hash a new one and update the row:
 ```bash
 # Any BCrypt tool will do; this uses the encoder the application itself uses.
 NEW_HASH='<paste a BCrypt hash here>'
-docker exec -i ecomdemo-postgres psql -U ecomdemo -d ecomdemo \
+docker exec -i ecomdemo-db psql -U ecomdemo -d ecomdemo \
   -c "UPDATE users SET password = '$NEW_HASH' WHERE username = 'admin';"
 ```
 
@@ -575,6 +622,163 @@ curl -s "${BEN[@]}" localhost:8080/api/cart
 # 403 - the order exists, it is simply not his
 curl -s -i "${BEN[@]}" localhost:8080/api/orders/1 | head -1
 ```
+
+## How the container works
+
+### Images vs containers, and why layers matter
+
+An **image** is a stack of read-only layers plus a manifest saying how to start a process in it.
+A **container** is one running instance of an image, with a thin writable layer on top. Many
+containers share one image; nothing a container writes goes back into it — which is exactly why
+the database needs a volume, and why `docker compose down` would otherwise lose it.
+
+Each instruction in a `Dockerfile` produces a layer, and Docker reuses a cached layer while the
+instruction and its inputs are unchanged. The first change invalidates everything after it. That
+single rule drives the whole file:
+
+```dockerfile
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+RUN ./mvnw -B -q dependency:go-offline    # ~200 MB, cached until the pom changes
+COPY src/ src/                            # changes constantly
+RUN ./mvnw -B -q package -DskipTests
+```
+
+Copying the source first would re-download every dependency on every build. As written, a
+rebuild after a one-line code change takes **5 seconds**.
+
+### Multi-stage: what gets shipped
+
+```dockerfile
+FROM eclipse-temurin:21-jdk-alpine AS build     # 556 MB of JDK + Maven + the source tree
+...
+FROM eclipse-temurin:21-jre-alpine AS runtime   # 287 MB, a JRE and nothing else
+COPY --from=build ... 
+```
+
+Only the **last** stage is published. The compiler, Maven, the ~200 MB dependency cache and the
+source code all stay in the builder. A single-stage build would ship all of it to production — a
+bigger image, a longer pull, and more attack surface for no benefit. Verified: `javac` and `mvn`
+are absent from the runtime image, and it contains no `.java` file.
+
+### The layered jar
+
+A Spring Boot fat jar is one 64 MB file, so a one-character change rewrites all 64 MB and pushes a
+whole new layer. `jarmode=tools extract --layers` splits it the way the application actually
+changes:
+
+| Layer | Size | Changes when |
+|---|---:|---|
+| `dependencies` | ~64 MB | the `pom.xml` does |
+| `spring-boot-loader` | ~300 KB | the Boot version does |
+| `snapshot-dependencies` | — | (empty here) |
+| `application` | ~200 KB | **you edit code** |
+
+Copied in that order, a rebuild pushes the 200 KB layer and reuses the rest.
+
+### Running as non-root
+
+A container's root **is** the host's root — the isolation is namespaces, not a separate user
+table. So an escape, or a bind-mounted host directory, hands over root privileges for nothing:
+this application never installs a package, writes to `/etc`, or binds a port below 1024.
+
+```dockerfile
+RUN addgroup --system --gid 1001 ecomdemo \
+    && adduser --system --uid 1001 --ingroup ecomdemo --no-create-home ecomdemo
+USER ecomdemo:ecomdemo
+```
+
+The uid is **pinned**, not left to the distribution, because a bind-mounted file is owned by a
+*number*. A uid that drifts between rebuilds becomes "permission denied" on a mount that worked
+yesterday.
+
+### Sizing the JVM for a container
+
+Modern JVMs read the container's memory limit rather than the host's — but default the heap to
+**25%** of it. Asked both ways inside the running container:
+
+```
+default (25%):    192 MB
+with JAVA_OPTS:   576 MB
+container limit:  768 MB
+```
+
+Without `-XX:MaxRAMPercentage=75.0` this container would run a 192 MB heap and leave 576 MB
+unused, spending its life in GC. A percentage follows the limit wherever the image runs; an
+`-Xmx576m` would be wrong the moment `APP_MEMORY_LIMIT` changes. 75% and not more, because
+metaspace, thread stacks, the code cache and direct buffers are not heap.
+
+Note the limit has to exist for the percentage to mean anything — hence `deploy.resources.limits.memory`
+in `compose.yaml`. Without it, "75% of the container" quietly means 75% of your laptop.
+
+`-XX:+ExitOnOutOfMemoryError` is there because a JVM that has exhausted its heap will not recover,
+and a container that keeps passing health checks while failing every request is worse than one
+that dies and gets restarted.
+
+### Container networking
+
+```yaml
+environment:
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+```
+
+`db` is a **hostname**, resolved by Compose's own DNS on the network it creates for the project.
+Not `localhost` — inside a container, localhost is *that container*. And not the published host
+port either: this connection never leaves the Docker network, so it keeps working if you move the
+published port to avoid a clash, or publish none at all. The published `5432` exists only so
+`psql`, DBeaver and the smoke test's schema checks can reach the database from the host.
+
+### Waiting for the database, properly
+
+```yaml
+depends_on:
+  db:
+    condition: service_healthy
+```
+
+The short form — `depends_on: [db]` — waits only for the container to be **started**, which for
+PostgreSQL means the process exists. It accepts connections several seconds later. An application
+that connects in between dies at startup with a Flyway error, intermittently, which is a
+miserable thing to debug. `pg_isready` in the database's health check is what turns "started"
+into "ready".
+
+### Volumes
+
+```yaml
+volumes:
+  - postgres-data:/var/lib/postgresql
+```
+
+A container's writable layer dies with it; a volume does not. `docker compose down` removes the
+containers and keeps the data; `docker compose down -v` is the deliberate way to throw it away.
+
+A **named** volume rather than a bind mount to a host path: Docker owns the storage, so file
+ownership and permissions stay out of it — the single most common way a database bind mount
+breaks on macOS and Windows.
+
+One trap worth knowing: the mount point is `/var/lib/postgresql`, **not** the
+`/var/lib/postgresql/data` every older tutorial shows. `postgres:18` moved its data into a
+major-version subdirectory so `pg_upgrade --link` can work inside one mount, and mounting the old
+path makes the container refuse to start.
+
+### Why a Dockerfile and not Buildpacks
+
+`./mvnw spring-boot:build-image` produces a working image with no Dockerfile at all. Both were
+built and measured here:
+
+| | Dockerfile | Buildpacks |
+|---|---:|---:|
+| Image size | **410 MB** | 766 MB |
+| Cold build | 34 s | 160 s |
+| Rebuild after a one-line change | **5 s** | 53 s |
+| Non-root | yes (uid 1001, ours) | yes (uid 1002, automatic) |
+
+Buildpacks get the hard parts right without being asked — layering, the non-root user, the JVM
+container flags — and rebase for CVE fixes without a rebuild, which makes them the better default
+for a team that would rather not think about images. This project exists to think about them, and
+a Dockerfile is what makes the layering, the user and the flags visible and reviewable. It is also
+356 MB smaller and ten times faster to rebuild.
 
 ## How the security works
 
@@ -973,6 +1177,15 @@ cost a container start each time.
 - **Still no TLS.** A Bearer token is as sensitive as a password and travels in a header in
   clear text, so this is safe on localhost and nowhere else. Terminating TLS is the reverse
   proxy's job, and arrives with the deployment phases.
+- **The compose stack is a development stack.** One replica, the `dev` profile, the database
+  beside the application, and credentials in a local `.env`. A real deployment separates them,
+  runs a managed database, and takes its secrets from something that is not a file — Phases 25
+  and 26.
+- **The image is not scanned, signed or pinned by digest.** Base images are pinned by tag
+  (`eclipse-temurin:21-jre-alpine`), which is reproducible until the tag moves. Vulnerability
+  scanning arrives with **Phase 31**.
+- **Nothing builds the image in CI yet.** It is built locally, by hand. **Phase 11** adds GitHub
+  Actions.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the
   code it reaches. **Phase 12** adds JaCoCo and SonarQube.
 - **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without

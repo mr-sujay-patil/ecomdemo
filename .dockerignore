@@ -1,0 +1,34 @@
+# Everything here is excluded from the build context - the set of files sent to the Docker
+# daemon before the first instruction runs. Left unfiltered, this project would ship its 64 MB
+# target/ directory, the .git history and any local .env on every single build, which is slow and
+# is how secrets end up inside images.
+
+# Build output. The image builds its own from source; a host-built jar would silently win.
+target/
+
+# Version control and IDE noise
+.git/
+.gitignore
+.github/
+.idea/
+*.iml
+.vscode/
+
+# Local configuration and secrets. .env is where JWT_SECRET and the database password live.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+application-local.properties
+
+# Docs and scripts are not needed to compile or run the application
+docs/
+scripts/
+README.md
+CLAUDE.md
+.smoke-state
+
+# OS files
+.DS_Store
+Thumbs.db

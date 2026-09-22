@@ -3,84 +3,92 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 9: JWT Authentication
-- **Branch:** feature/phase-09-jwt
+- **Phase:** 10: Containerization
+- **Branch:** feature/phase-10-docker
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #9 — raised, awaiting review
-- **Waiting for user:** YES — review and merge PR #9, then say `merged, continue`
+- **PR:** #10 — raised, awaiting review
+- **Waiting for user:** YES — review and merge PR #10, then say `merged, continue`
 
-## Phase 08 merge verification (passed 2026-09-22)
-PR #8 MERGED with a merge commit (0af4342, 2 parents: fe2e02c + 4569a3e); branch is an ancestor
+## Phase 09 merge verification (passed 2026-09-22)
+PR #9 MERGED with a merge commit (d2ab0a2, 2 parents: 0af4342 + 7678106); branch is an ancestor
 of `main`; no commits and no file diffs between branch and `main`; local and remote branches
-intact; every "What you'll implement" item present in `main` (`security/` package with
-SecurityConfig + AppUserDetails(Service) + CurrentUser + the ApiError 401/403 handlers,
-`customer/` with User/Role/UserRepository/CustomerService/CustomerController/dto,
-`V5__add_users.sql`, `V6__cart_and_orders_per_user.sql`, `WithSecurityRules`,
-`TestAuthentication`, `docs/test-reports/phase-08.md`); `./mvnw clean verify` on `main` ->
-BUILD SUCCESS, Surefire 163 + Failsafe 23, 0 failures, 0 skipped; the app on `main` started with
+intact; every "What you'll implement" item present in `main` (`auth/` with AuthController,
+AuthService, TokenService, AuthenticationManagerConfig and dto; `security/JwtConfig` +
+`JwtProperties`; the three `ecomdemo.jwt.*` properties; `AuthApiIT`, `JwtConfigTest`,
+`CurrentUserTest`; `docs/test-reports/phase-09.md`); `./mvnw clean verify` on `main` -> BUILD
+SUCCESS, Surefire 190 + Failsafe 30, 0 failures, 0 skipped; the app on `main` started with
 "Successfully validated 6 migrations" / "Current version of schema public: 6";
-`scripts/smoke-test.sh` -> 110 passed, 0 failed, 0 skipped, 0 ERROR in the app log;
-tag `phase-08-complete` pushed.
+`scripts/smoke-test.sh` -> 125 passed, 0 failed, 0 skipped, 0 ERROR in the app log;
+tag `phase-09-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] `POST /api/auth/login` returns a signed JWT with role claims and a short expiry
-- [x] Resource Server validation of the token on every request, key from an environment variable
-- [x] Swagger UI configured for Bearer tokens
-- [x] Expired and tampered tokens are rejected (the "Done when")
-- [x] Smoke test additions (login returns a JWT, the full flow runs with a Bearer token,
-      a tampered token -> 401, an expired token -> 401 with a short test expiry)
-- [x] Testing protocol run in full + docs/test-reports/phase-09.md
-- [x] README section, decisions.md, RECENT.md rotation (Phase 07 archived), tracker -> 🔵
-- [x] PR raised (#9)
-
-**Out of scope, suggest only:** the phase file lists a refresh token endpoint as *optional*.
-Per hard rule 7 it is NOT being built; it will be suggested in the PR.
+- [x] A multi-stage `Dockerfile` (JRE 21 runtime, non-root user, layered JAR)
+- [x] `compose.yaml` with the app and PostgreSQL: health checks, volumes, environment variables
+- [x] `.env.example`
+- [x] JVM container settings (`-XX:MaxRAMPercentage`)
+- [x] A comparison with Buildpacks (`spring-boot:build-image`) in `docs/decisions.md`
+- [x] `docker compose up` runs the whole system and the curl flow works (the "Done when")
+- [x] Smoke test runs against the compose stack instead of `spring-boot:run`
+- [x] Testing protocol run in full + docs/test-reports/phase-10.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 08 archived), tracker -> 🔵
+- [x] PR raised (#10)
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 190 (was 163), Failsafe 30
-  (was 23), 0 failures, 0 skipped. Run four times, all green (25.1 / 23.3 / 24.0 / 36.7 s).
-- 2026-09-22: `./mvnw clean test` -> 190 tests, 11.0 s, zero "Creating container" lines.
-- 2026-09-22: the app started BOTH ways - with JWT_SECRET set (no warning) and without it (the
-  generated-key WARN). 0 ERROR in either log; schema validated at v6, unchanged this phase.
-- 2026-09-22: `scripts/smoke-test.sh` -> 125 passed, 0 failed, 0 skipped. Run four times: twice
-  against the JWT_SECRET instance, once more for re-runnability, once against the generated-key
-  instance.
-- 2026-09-22: measured on the running app - login 106 ms/call (BCrypt), authenticated GET
-  14 ms/call. That gap is what moved from every request to once per login.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 190 + Failsafe 30, 0 failures,
+  0 skipped. No Java test changed this phase. Runs in ~78 s while the compose stack is up (the
+  two compete for the Docker daemon) and ~33 s otherwise.
+- 2026-09-22: from a clean slate (`down -v`, image deleted, .smoke-state removed)
+  `docker compose up -d --build` -> 34 s, app healthy after 26 s, "Successfully applied 6
+  migrations ... now at version v6", 0 ERROR in the container log.
+- 2026-09-22: `scripts/smoke-test.sh` -> 123 passed on the fresh volume (the two persistence
+  sub-checks do not apply on a first run), then 125 passed after `compose restart app`.
+  0 failed, 0 skipped both times.
+- 2026-09-22: `docker compose down` then `up` -> "Successfully validated 6 migrations" and the
+  persistence probe was still there: the named volume outlives the containers.
+- 2026-09-22: image checks - runs as uid 1001, no javac, no mvn, no .java in the runtime image;
+  PID 1 is `java -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError ... JarLauncher`.
+  Heap inside the container: 192 MB at the JVM default vs 576 MB with the flag, limit 768 MB.
+- 2026-09-22: Buildpacks comparison actually built - 766 MB / 160 s cold / 53 s rebuild, against
+  the Dockerfile's 410 MB / 34 s / 5 s.
 
 ## Open issues / blockers
-- none. The signing-key question is settled: `JWT_SECRET` when set, otherwise a random key plus a
-  loud WARN, and under 32 bytes fails startup. Verified both ways (see "Last test run").
+- none. Both opening concerns are settled: `JWT_SECRET` has no default in compose.yaml (an unset
+  value reaches the app empty, which generates a random key and warns), and the smoke test now
+  finds `ecomdemo-db` before `ecomdemo-postgres` so nothing SKIPs.
 
-## Decisions this phase (copied to docs/decisions.md ✅ — 14 entries)
-- JWT_SECRET with no default in Git; unset -> random key + WARN; under 32 bytes -> startup fails.
-- HS256, not RS256: one application issues and accepts. The trade is written down for Phase 20.
-- Claims are `sub`, `uid`, `roles` only. No `ROLE_` prefix in the claim; the converter adds it.
-- `CurrentUser` reads the Jwt principal. `uid` is read as Number and narrowed (JSON has one
-  number type, so it arrives as Integer or Long depending on size).
-- `AuthenticationManager` moved to `auth/AuthenticationManagerConfig`: the @WebMvcTest slices
-  import SecurityConfig and have no UserDetailsService.
-- 401 distinguishes "no token" from "bad token"; login failures never distinguish wrong password
-  from unknown username.
-- No refresh token (optional in the phase file, out of scope by hard rule 7).
+## Decisions this phase (copied to docs/decisions.md ✅ — 13 entries)
+- A hand-written multi-stage Dockerfile over Buildpacks, with the comparison measured, not guessed.
+- Dependencies resolved in their own layer before the source is copied (5 s rebuilds).
+- Layered jar via `jarmode=tools`, four ordered COPYs.
+- Non-root at a PINNED uid 1001 (bind-mounted files are owned by a number).
+- `-XX:MaxRAMPercentage=75` plus a memory limit on the service, not a hard-coded -Xmx.
+- `depends_on: condition: service_healthy` with pg_isready; the bare form is not enough.
+- The app reaches PostgreSQL at `db:5432` over the compose network, never the published port.
+- The volume mounts `/var/lib/postgresql` — postgres:18 changed this and the old path refuses
+  to start.
+- `.env` gitignored, `.env.example` committed, no JWT_SECRET default in compose.yaml.
+- The HEALTHCHECK uses `/api/products` because Actuator is Phase 15.
+- The smoke test's probe records PostgreSQL's system_identifier, so a new database reads as a
+  first run rather than as lost data.
 
 ## Environment left behind
-Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v6**
-(unchanged this phase). `docker start ecomdemo-postgres` if it is down. The application is
-stopped, no stray Java processes. Docker Desktop must stay running (Testcontainers needs it for
-`./mvnw verify`). The database holds three accounts: `admin` (seeded by V5) plus `smoke-customer`
-and `smoke-customer-b`, created by the smoke test. All passwords are BCrypt hashes.
-
-To run the app the way this phase intends:
-`JWT_SECRET='at-least-32-characters-of-random-text' ./mvnw spring-boot:run`
-Without it the app still starts, on a random key, and warns that tokens die with the process.
+The **compose stack is RUNNING and healthy**: `ecomdemo-app` and `ecomdemo-db`, schema v6, data in
+the named volume `ecomdemo_postgres-data`. `docker compose up -d` / `docker compose down` to
+control it; `down -v` deletes the database.
+The pre-compose container `ecomdemo-postgres` is **stopped, not deleted** — it held port 5432.
+`docker start ecomdemo-postgres` brings the Phases 4-9 database back, but stop the compose stack
+first or they clash.
+`.env` exists locally with a real JWT_SECRET and is gitignored. `ecomdemo:latest` is built;
+`ecomdemo:buildpack` was deleted after the comparison. No stray Java processes on the host.
 
 ## Next action
 STOPPED at the mandatory post-PR stop point. Wait for the user.
 - If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
-  `./mvnw clean verify` (needs Docker running) and `scripts/smoke-test.sh` (needs the
-  `ecomdemo-postgres` container up and the app running), the git-workflow Verification Checklist,
-  then tag and push `phase-09-complete`, then start Phase 10 (`docs/phases/phase-10-docker.md`).
+  `./mvnw clean verify` and `scripts/smoke-test.sh` against the compose stack
+  (`docker compose up -d --build`), the git-workflow Verification Checklist, then tag and push
+  `phase-10-complete`, then start Phase 11 (`docs/phases/phase-11-github-actions.md`).
+  NOTE from Phase 11 onwards, execution-protocol §5 also requires confirming CI on `main` is
+  green — that does not apply to this merge, since CI does not exist yet.
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.
