@@ -46,13 +46,13 @@ class FlywayMigrationTest {
             """;
 
     @Test
-    @DisplayName("V1 to V6 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V7 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -92,7 +92,8 @@ class FlywayMigrationTest {
                 "add product category",
                 "add product version and order audit",
                 "add users",
-                "cart and orders per user");
+                "cart and orders per user",
+                "batch job repository");
     }
 
     @Test
@@ -249,6 +250,41 @@ class FlywayMigrationTest {
         assertThat(jdbc.queryForObject(
                         "SELECT count(*) FROM information_schema.indexes "
                                 + "WHERE upper(index_name) = 'IDX_ORDERS_USER'",
+                        Integer.class))
+                .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("V7 created the six Spring Batch tables and their three sequences")
+    void createsTheBatchJobRepositorySchema() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        // Spring Batch never creates these itself in Spring Boot 4 - there is no
+        // initialize-schema property any more - so if this migration were missing, the first job
+        // would fail at runtime rather than the application failing to start. That is exactly the
+        // kind of gap a test has to close.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.tables "
+                                + "WHERE upper(table_name) LIKE 'BATCH\\_%' ESCAPE '\\'",
+                        Integer.class))
+                .as("the six BATCH_ tables")
+                .isEqualTo(6);
+
+        // The ids come from these, on both engines. Without them every job would fail on its
+        // first insert into BATCH_JOB_INSTANCE.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.sequences "
+                                + "WHERE upper(sequence_name) LIKE 'BATCH\\_%' ESCAPE '\\'",
+                        Integer.class))
+                .as("the three BATCH_ sequences")
+                .isEqualTo(3);
+
+        // The unique key on (job name, parameters hash) is what makes "this work has already been
+        // done" a fact the DATABASE enforces rather than a check the application remembers to do.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.table_constraints "
+                                + "WHERE upper(table_name) = 'BATCH_JOB_INSTANCE' "
+                                + "AND constraint_type = 'UNIQUE'",
                         Integer.class))
                 .isEqualTo(1);
     }

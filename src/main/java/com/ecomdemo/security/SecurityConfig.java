@@ -122,6 +122,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**").permitAll()
                         .requestMatchers("/api/products/**").hasRole("ADMIN")
 
+                        // Batch jobs are operations, not shopping. The whole prefix is ADMIN
+                        // in one rule rather than per endpoint, so an endpoint added to
+                        // BatchController later is protected the moment it exists rather than
+                        // the moment somebody remembers to add a line here.
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+
                         // A cart and an order belong to a shopper. An ADMIN is refused here on
                         // purpose: these endpoints act on "my" cart and "my" orders, and an
                         // administrator has neither. Nothing about being an admin implies being

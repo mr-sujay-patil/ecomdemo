@@ -44,7 +44,10 @@ class OpenApiDocumentationTest {
             "/api/orders/{id}",
             "/api/customers/register",
             "/api/customers/me",
-            "/api/auth/login");
+            "/api/auth/login",
+            "/api/admin/batch/product-import",
+            "/api/admin/batch/executions/{id}",
+            "/api/admin/batch/executions/{id}/restart");
 
     @Autowired
     private MockMvcTester mvc;
