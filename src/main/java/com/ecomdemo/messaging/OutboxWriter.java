@@ -1,5 +1,7 @@
 package com.ecomdemo.messaging;
 
+import com.ecomdemo.messaging.internal.OutboxEventRepository;
+import com.ecomdemo.messaging.internal.OutboxEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -69,8 +71,14 @@ public class OutboxWriter {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxWriter.class);
 
-    /** What the event is about. One aggregate today; the column exists for the next one. */
-    static final String ORDER_AGGREGATE = "Order";
+    /**
+     * What the event is about. One aggregate today; the column exists for the next one.
+     *
+     * <p>Public since Phase 19. It is the value every outbox row carries in {@code aggregate_type},
+     * so a consumer of this module - or a test asserting on a row - needs to be able to name it
+     * without copying the string.
+     */
+    public static final String ORDER_AGGREGATE = "Order";
 
     /** The consumer's own mapper. See the class comment: this is a correctness requirement. */
     private static final ObjectMapper PAYLOAD_MAPPER = JacksonUtils.enhancedObjectMapper();

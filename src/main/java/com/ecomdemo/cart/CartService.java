@@ -1,12 +1,13 @@
 package com.ecomdemo.cart;
 
+import com.ecomdemo.cart.internal.CartRepository;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
-import com.ecomdemo.common.NotFoundException;
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductService;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.shared.NotFoundException;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.customer.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 

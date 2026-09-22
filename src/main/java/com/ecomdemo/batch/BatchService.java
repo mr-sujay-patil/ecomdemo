@@ -2,8 +2,8 @@ package com.ecomdemo.batch;
 
 import com.ecomdemo.batch.dto.JobExecutionResponse;
 import com.ecomdemo.batch.dto.ProductImportResponse;
-import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.ConflictException;
+import com.ecomdemo.shared.NotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;

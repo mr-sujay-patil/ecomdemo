@@ -7,8 +7,8 @@ import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.product.dto.ProductRequest;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.IntegrationTest;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -168,7 +168,7 @@ class SalesReportJobIT extends IntegrationTest {
         // an instance that has COMPLETED will not run again. That is the JobRepository doing the
         // job a lock file or a "have I run today?" flag would otherwise be written to do.
         assertThat(org.assertj.core.api.Assertions
-                .catchThrowableOfType(com.ecomdemo.common.ConflictException.class,
+                .catchThrowableOfType(com.ecomdemo.shared.ConflictException.class,
                         () -> batchService.runSalesReport(day)))
                 .isNotNull()
                 .hasMessageContaining("already been completed");

@@ -1,6 +1,6 @@
 package com.ecomdemo.security;
 
-import com.ecomdemo.customer.UserRepository;
+import com.ecomdemo.customer.UserDirectory;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -31,17 +31,16 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AppUserDetailsService implements UserDetailsService {
 
-    private final UserRepository userRepository;
+    private final UserDirectory users;
 
-    public AppUserDetailsService(UserRepository userRepository) {
-        this.userRepository = userRepository;
+    public AppUserDetailsService(UserDirectory users) {
+        this.users = users;
     }
 
     @Override
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String username) {
-        return userRepository
-                .findByUsername(username)
+        return users.findByUsername(username)
                 .map(AppUserDetails::new)
                 .orElseThrow(() -> new UsernameNotFoundException("No account named " + username));
     }

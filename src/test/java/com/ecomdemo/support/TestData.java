@@ -4,7 +4,7 @@ import com.ecomdemo.cart.Cart;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.order.Order;
-import com.ecomdemo.product.Product;
+import com.ecomdemo.catalog.Product;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.springframework.test.util.ReflectionTestUtils;

@@ -1,7 +1,8 @@
 package com.ecomdemo.cart;
 
+import com.ecomdemo.cart.internal.CartRepository;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.product.Product;
+import com.ecomdemo.catalog.Product;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;

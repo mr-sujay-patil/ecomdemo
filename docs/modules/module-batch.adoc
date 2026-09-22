@@ -1,0 +1,24 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.batch`
+|Spring components
+|_Controllers_
+
+* `c.e.b.BatchController`
+
+_Services_
+
+* `c.e.b.BatchService`
+
+_Configuration properties_
+
+* `c.e.b.BatchProperties`
+
+_Others_
+
+* `c.e.b.BatchConfig`
+|Bean references
+|* `c.e.c.ProductService` (in Catalog)
+* `c.e.i.InventoryService` (in Inventory)
+|===

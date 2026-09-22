@@ -1,5 +1,6 @@
 package com.ecomdemo.order;
 
+import com.ecomdemo.order.internal.OrderService;
 import com.ecomdemo.customer.User;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;

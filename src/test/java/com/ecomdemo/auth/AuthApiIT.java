@@ -1,10 +1,11 @@
 package com.ecomdemo.auth;
 
+import com.ecomdemo.shared.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.auth.dto.LoginRequest;
 import com.ecomdemo.auth.dto.TokenResponse;
-import com.ecomdemo.common.ApiError;
+import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.security.JwtConfig;
 import com.ecomdemo.support.IntegrationTest;
@@ -131,8 +132,8 @@ class AuthApiIT extends IntegrationTest {
                 .issuedAt(issuedAt)
                 .expiresAt(issuedAt.plus(Duration.ofMinutes(15)))
                 .subject(SHOPPER)
-                .claim(JwtConfig.Claims.USER_ID, 1L)
-                .claim(JwtConfig.Claims.ROLES, List.of("CUSTOMER"))
+                .claim(TokenClaims.USER_ID, 1L)
+                .claim(TokenClaims.ROLES, List.of("CUSTOMER"))
                 .build();
         String expired = jwtEncoder
                 .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))

@@ -1,5 +1,6 @@
 package com.ecomdemo.security;
 
+import com.ecomdemo.shared.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -94,8 +95,8 @@ class JwtConfigTest {
                     .issuedAt(issuedAt)
                     .expiresAt(issuedAt.plus(Duration.ofMinutes(15)))
                     .subject("customer")
-                    .claim(JwtConfig.Claims.USER_ID, 1L)
-                    .claim(JwtConfig.Claims.ROLES, List.of("CUSTOMER"))
+                    .claim(TokenClaims.USER_ID, 1L)
+                    .claim(TokenClaims.ROLES, List.of("CUSTOMER"))
                     .build();
             String token = context.getBean(JwtEncoder.class)
                     .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), expired))

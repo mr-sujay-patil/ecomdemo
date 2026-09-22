@@ -7,7 +7,7 @@ package com.ecomdemo.metrics;
  * system: there are exactly five checkout outcomes and there is no code path that can invent a
  * sixth at runtime.
  *
- * <p>Deliberately separate from {@link com.ecomdemo.order.OrderOutcome}, which has two values and
+ * <p>Deliberately separate from {@link com.ecomdemo.order.internal.OrderOutcome}, which has two values and
  * records what the audit log needs to know (was an order created, yes or no). Monitoring needs a
  * finer split, because the three ways of not creating one call for three different reactions: a
  * rise in {@code empty_cart} is a front-end bug, a rise in {@code out_of_stock} is a merchandising

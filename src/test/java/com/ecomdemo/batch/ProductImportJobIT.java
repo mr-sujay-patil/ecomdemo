@@ -3,7 +3,7 @@ package com.ecomdemo.batch;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.batch.dto.ProductImportResponse;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.IntegrationTest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

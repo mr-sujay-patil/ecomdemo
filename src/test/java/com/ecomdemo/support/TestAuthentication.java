@@ -1,8 +1,9 @@
 package com.ecomdemo.support;
 
+import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.UserRepository;
+import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;
 import java.time.Instant;
@@ -67,8 +68,8 @@ public final class TestAuthentication {
                 .issuedAt(issuedAt)
                 .expiresAt(issuedAt.plus(15, ChronoUnit.MINUTES))
                 .subject(user.getUsername())
-                .claim(JwtConfig.Claims.USER_ID, user.getId())
-                .claim(JwtConfig.Claims.ROLES, List.of(user.getRole().name()))
+                .claim(TokenClaims.USER_ID, user.getId())
+                .claim(TokenClaims.ROLES, List.of(user.getRole().name()))
                 .build();
 
         SecurityContextHolder.getContext()

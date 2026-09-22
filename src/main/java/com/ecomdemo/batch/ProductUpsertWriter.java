@@ -1,8 +1,8 @@
 package com.ecomdemo.batch;
 
 import com.ecomdemo.cache.CacheNames;
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductRepository;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.catalog.ProductService;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -53,12 +53,12 @@ class ProductUpsertWriter implements ItemWriter<Product>, StepExecutionListener 
 
     private static final Logger log = LoggerFactory.getLogger(ProductUpsertWriter.class);
 
-    private final ProductRepository productRepository;
+    private final ProductService catalogue;
     private final CacheManager cacheManager;
     private final Set<Long> updatedIds = new LinkedHashSet<>();
 
-    ProductUpsertWriter(ProductRepository productRepository, CacheManager cacheManager) {
-        this.productRepository = productRepository;
+    ProductUpsertWriter(ProductService catalogue, CacheManager cacheManager) {
+        this.catalogue = catalogue;
         this.cacheManager = cacheManager;
     }
 
@@ -69,7 +69,7 @@ class ProductUpsertWriter implements ItemWriter<Product>, StepExecutionListener 
                 updatedIds.add(product.getId());
             }
         }
-        productRepository.saveAll(chunk.getItems());
+        catalogue.saveAll(chunk.getItems());
     }
 
     @Override

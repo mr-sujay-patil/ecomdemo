@@ -16,8 +16,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import com.ecomdemo.batch.dto.JobExecutionResponse;
 import com.ecomdemo.batch.dto.ProductImportResponse;
 import com.ecomdemo.batch.dto.StepExecutionResponse;
-import com.ecomdemo.common.ConflictException;
-import com.ecomdemo.common.NotFoundException;
+import com.ecomdemo.shared.ConflictException;
+import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.support.WithSecurityRules;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;

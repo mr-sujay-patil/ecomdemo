@@ -1,0 +1,8 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.messaging`
+|Spring components
+|* `c.e.m.EventDeduplicator`
+* `c.e.m.OutboxWriter`
+|===

@@ -1,10 +1,11 @@
 package com.ecomdemo.customer;
 
-import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.customer.internal.UserRepository;
+import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
 import com.ecomdemo.customer.dto.UpdateProfileRequest;
-import com.ecomdemo.security.CurrentUser;
+import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;

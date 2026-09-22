@@ -1,6 +1,6 @@
 package com.ecomdemo.cache;
 
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;

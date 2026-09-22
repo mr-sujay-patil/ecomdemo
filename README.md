@@ -1922,6 +1922,150 @@ application change at all, which makes it the better choice at scale and the wro
 first: it moves the problem into infrastructure before the problem is understood, and it publishes
 row changes rather than domain events.
 
+## Module boundaries
+
+Fourteen modules, each declaring what it is allowed to depend on, with a test that fails the build
+when an import says otherwise.
+
+The point is not tidiness. Phase 20 splits this application into services, and the question that
+decides whether that is a week or a quarter is *how tangled is it already* — which is a question
+nobody can answer by looking, because coupling is invisible until you try to pull something out.
+
+### What the test found before anything moved
+
+The verification test was written **first**, against the Phase 18 layout. That ordering is the
+whole trick: an architecture test is most valuable the first time it runs, on code that was never
+arranged to please it.
+
+It found two problems, not the dozens a guessed module map would have assumed:
+
+```text
+- Cycle detected: Slice customer -> Slice security -> Slice customer
+- Module 'cache' depends on non-exposed type com.ecomdemo.catalog.dto.ProductResponse
+```
+
+And **the cycle was one class.** `CurrentUser` was the only `security` type that `cart`, `order`
+and `customer` imported. Moving it into `customer` broke the cycle *and* deleted `cart → security`
+and `order → security` — three edges for one file. A map drawn from memory would have proposed a
+much larger refactor to fix a much smaller problem.
+
+The move stands on its own merits, too. "Which `User` is acting?" is a question about the customer
+domain; reading the `SecurityContextHolder` is merely how it is answered. The class still uses
+Spring Security the *library* — infrastructure any module may use — but no longer this
+application's `security` *module*.
+
+### The graph, declared rather than described
+
+```text
+shared, logging, metrics, messaging  ->  (nothing)
+catalog, customer                    ->  shared
+notification                         ->  messaging
+cache                                ->  catalog, catalog::dto
+inventory                            ->  catalog, shared
+cart                                 ->  catalog, customer, shared
+security                             ->  customer, shared
+auth                                 ->  security, shared
+batch                                ->  catalog, inventory, shared
+order  -> cart, catalog, customer, inventory, messaging, metrics, shared
+```
+
+Every line of that is in a `package-info.java` as `@ApplicationModule(allowedDependencies = …)`, so
+it is a **constraint**, not a diagram. Add an undeclared import and the build fails naming both
+ends. Adding a dependency becomes an edit a reviewer sees.
+
+The two empty lists do the most work. A `shared` module that depends on other modules is not
+shared — it is a layer, and a layer everything already depends on is where changes go to ripple.
+And `messaging` depending on nothing is what would let the outbox serve a second aggregate without
+being taught about it, which is Phase 17's decision to hand-write `OrderPlacedEvent` instead of
+publishing the `Order` entity, paying off two phases later.
+
+`order` has the widest list, and that is honest rather than a smell: a checkout is by definition
+what touches the cart, catalogue, inventory and customer at once.
+
+### A package is a folder; a module is a promise
+
+Each module keeps its published API at its package root and everything else under
+`<module>.internal` — controllers, repositories, and the services nobody outside calls.
+
+Three repositories were being imported across module lines. Each got a narrow API instead of being
+exposed, because **a repository is a module's entire data surface** and it keeps growing: every
+derived query anybody adds becomes available to every importer, so the boundary widens without
+anyone deciding to widen it.
+
+| Was | Now |
+|---|---|
+| `security` → `customer.UserRepository` | `UserDirectory`, two methods |
+| `batch` → `catalog.ProductRepository` | `ProductService.findFirstByName` / `saveAll` |
+| `notification` → `messaging.ProcessedEventRepository` | `EventDeduplicator.claim()` |
+
+Each replacement is a *better* API than the thing it hides — which is the test of whether a
+boundary was worth drawing. The notification consumer no longer has to know that idempotency is an
+`existsById` followed by a `save`, that both must share a transaction, or that the marker goes in
+first.
+
+### catalog and inventory: one table, two bounded contexts
+
+A catalogue and an inventory answer different questions about the same row. The catalogue
+*describes* a product — changed rarely, deliberately, by a human. The inventory *counts* it —
+changed on every sale, concurrently, under an optimistic lock with a rollback path. Two rates of
+change and two correctness stories is what a bounded context **is**.
+
+The behaviour was split; the table was not. `stock_quantity` is still a column on `product`.
+Splitting it into `product_stock` is the textbook answer and would have touched the Phase 12
+optimistic locking, the Phase 16 cache eviction and the CSV import — in a phase whose smoke test
+gains no new checks to catch what broke.
+
+That choice has a price, and it lands one layer down. `Product.reduceStock` is a public method on
+an exposed type, so nothing in Java stops another module calling it — and Modulith cannot see it
+either, since it checks which *packages* reach into which and this is one exposed type used two
+ways. So the rule is written out in ArchUnit:
+
+```java
+noClasses().that().resideOutsideOfPackages("..inventory..", "..catalog..")
+    .should().callMethod(Product.class, "reduceStock", int.class)
+```
+
+It permits **two** modules, not one, and the test says so out loud rather than quietly:
+`ProductService.update` is the admin's full replace and cannot call into `inventory` without
+forming a cycle back through the dependency `inventory` already has on `catalog`. A rule that
+overstates itself teaches people to distrust rules.
+
+What it does buy is real: `order` and `batch` both mutated stock directly before this phase, and
+neither can now.
+
+### "Events instead of direct calls" — including where not to
+
+Most of this was already done. Phase 16 made `order → cache` an event; Phase 18 made
+`order → notification` one through the outbox. The interesting remaining case is the one left
+alone: `order → cart` calls `clearCart` **directly**, inside the checkout transaction. Turning it
+into an event would either break that atomicity or need a second outbox for no benefit.
+
+"Use events where appropriate" is only useful advice if it also tells you where they are not.
+
+### Why not microservices first
+
+This phase exists because the answer to "should this be services?" is usually "find out whether it
+is even modules yet". A monolith with clean, enforced boundaries can be split when there is a
+reason to; a distributed system built out of tangled modules is the same tangle with network calls
+between the knots, and no compiler to help.
+
+The test above is the difference between believing you have boundaries and knowing.
+
+### Try it yourself
+
+```bash
+./mvnw test -Dtest=ModularityTest      # boundaries, and regenerates docs/modules/
+./mvnw test -Dtest=StockMutationRulesTest
+
+# Break it on purpose - add this to OrderPlacementService and watch the rule fire:
+#     product.reduceStock(line.getQuantity());
+```
+
+The diagrams are committed under `docs/modules/` — a C4 component diagram per module, one overall,
+and an Asciidoc canvas per module listing its published types. They are generated by the test
+rather than a build plugin, so a pull request that moves a dependency shows the moved arrow in its
+own diff. That is the only time anybody actually looks at an architecture diagram.
+
 ## Code quality
 
 Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually
@@ -2728,6 +2872,15 @@ cost a container start each time.
 
 ## Known gaps (closed by later phases)
 
+- **Two stat panels on the overview dashboard mislead.** `Orders placed / min` and
+  `Failed checkouts` reduce an *instantaneous* rate with `lastNotNull`, while `Revenue` and
+  `Average order value` beside them aggregate over the *selected range* — so one row of four panels
+  answers questions about two different time windows. With traffic paused the first reads `0.00`
+  for an hour in which 34 orders were placed, and the failed-checkout ratio goes `NaN`, which
+  `lastNotNull` skips, leaving a stale figure displayed as if it were current. Found by looking at
+  the dashboard rather than by any test: `DashboardMetricsTest` checks that panels reference meters
+  that exist, and these do. The fix is to make all four range-scoped; it is deliberately not
+  bundled into an unrelated refactor.
 - **Two application instances would both publish every outbox row.** The relay takes no lock, so
   two instances polling the same table can read the same pending row and both send it. It is
   survivable rather than broken — the duplicate carries the same `event_id` and the consumer's
