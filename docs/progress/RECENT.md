@@ -12,6 +12,47 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 08: Spring Security (tag: pending, PR: pending)
+**What exists now:** The application knows who is calling. `users` (V5) holds BCrypt-hashed
+accounts with roles CUSTOMER and ADMIN; the ADMIN (`admin`/`admin123`) is seeded by the
+migration because registration always creates a CUSTOMER. HTTP Basic on a stateless chain:
+product reads public, product writes ADMIN, cart and orders CUSTOMER, everything else
+authenticated. V6 gave every account its own cart and stamped every order with its owner, so the
+shared cart is gone and a stranger's order is a 403. 186 tests (163 + 23), smoke test 110 checks.
+**Key code:** `security/SecurityConfig` (the filter chain and the ordered rules, `@EnableWebSecurity`
++ `@EnableMethodSecurity`, `BCryptPasswordEncoder` bean, CSRF off, sessions STATELESS);
+`security/AppUserDetailsService` + `AppUserDetails` (the adapter that adds the `ROLE_` prefix and
+carries the account id); `security/CurrentUser` (a bean over `SecurityContextHolder`, injected by
+`CartService`, `OrderService`, `OrderPlacementService`, `CustomerService`);
+`security/ApiErrorWriter` + `ApiErrorAuthenticationEntryPoint` + `ApiErrorAccessDeniedHandler`
+(401/403 in the `ApiError` shape); `customer/` (User, Role, UserRepository, CustomerService,
+CustomerController, dto/). `OrderService.findAll` is `@PreAuthorize("hasRole('CUSTOMER')")` over a
+user-scoped query; `findById` adds `@PostAuthorize("returnObject.username() == authentication.name")`.
+**Config & infrastructure:** New dependencies `spring-boot-starter-security` and (test)
+`spring-boot-starter-security-test`; Spring Security 7.1.1 from the BOM. No new properties.
+Migrations V5 (`users` + seeded admin) and V6 (`cart.user_id` UNIQUE NOT NULL, `orders.user_id`
+NOT NULL + `idx_orders_user`) applied incrementally to the live Phase 7 database, now at v6.
+OpenAPI declares a `basicAuth` scheme, so Swagger UI has an Authorize button.
+**Tests:** +43 unit/slice (`CustomerServiceTest` 8, `CustomerControllerTest` 11,
+`AppUserDetailsServiceTest` 4, an `Access` nest in each controller slice, V5/V6 assertions in
+`FlywayMigrationTest`, security assertions in `OpenApiDocumentationTest`); +8 IT. New test support:
+`support/WithSecurityRules` (imports the real `SecurityConfig` into a `@WebMvcTest`) and
+`support/TestAuthentication` (signs a `@SpringBootTest` in as a persisted account). Test report:
+`docs/test-reports/phase-08.md`.
+**Gotchas:** `@WebMvcTest` auto-configures Spring Security but does NOT pick up your own
+`SecurityFilterChain` — without an explicit import the slice runs Boot's "authenticate everything"
+fallback and a 401 assertion passes while proving nothing. `@WithMockUser` cannot be used in the
+`@SpringBootTest` classes: `CurrentUser` needs an `AppUserDetails` with a real database id.
+Spring Boot 4 defines no `com.fasterxml.jackson.databind.ObjectMapper` bean (Jackson 3's
+`tools.jackson.databind.json.JsonMapper` is the one to inject) even though Jackson 2 is on the
+classpath. `SecurityContextHolder` is a ThreadLocal, so `ConcurrentCheckoutTest`'s worker threads
+must authenticate themselves. URL rules are ordered and first-match-wins: the public GET rule for
+products must precede the ADMIN rule. macOS bash 3.2 makes `"${arr[@]}"` on an empty array an
+error under `set -u`, which is why the smoke test's auth code uses no arrays.
+**Follow-ups (not done, out of scope):** JWT instead of Basic, so a BCrypt verification is not paid
+per request — Phase 9. Password change, account lockout and login rate limiting — not planned.
+An admin view over all orders — not planned; the repository deliberately has no "all orders" query.
+
 ## Phase 07: Integration Testing (tag: phase-07-complete, PR #7)
 **What exists now:** `./mvnw verify` starts PostgreSQL 18 in a Testcontainers container, applies
 V1-V4 to it and drives the whole application over real HTTP against it. 135 tests: 120 under
@@ -47,39 +88,3 @@ do not overlap, so the file name is the whole mechanism for choosing a suite.
 Phase 11. Migrating `ConcurrentCheckoutTest`/`FlywayMigrationTest` onto Testcontainers, and
 `withReuse(true)` for the inner loop - not planned. Per-user carts would remove the shared-cart
 cleanup dance in `CartApiIT` and `OrderApiIT` - Phase 8.
-
-## Phase 06: Transactions & Concurrency (tag: phase-06-complete, PR #6)
-**What exists now:** Checkout is one database transaction, and the last unit of a product can be
-sold exactly once. A failure anywhere in a checkout leaves the catalogue, the cart and the order
-history as they were; two simultaneous checkouts for the same stock end as one 201 and one 409,
-never two orders. Every attempt, successful or refused, is recorded in `order_audit`.
-**Key code:** `OrderPlacementService.placeOnce()` (`@Transactional`, the whole unit of work) and
-`OrderService.place()` (no transaction, three attempts, then `ConcurrentUpdateException` -> 409)
-are SEPARATE beans, so the retry crosses the proxy. `OrderAuditService.record(...)` is
-`Propagation.REQUIRES_NEW`. `Product.version` is `@Version` with no getter. `ProductService` is
-class-level `readOnly = true` with four writers overriding it; `CartService` is read-write
-throughout. `ConcurrentUpdateException extends ConflictException`; `GlobalExceptionHandler` also
-maps a raw `OptimisticLockingFailureException` to 409.
-**Config & infrastructure:** No new dependencies and no new properties. Migration
-`V4__add_product_version_and_order_audit.sql` adds `product.version BIGINT NOT NULL DEFAULT 0`
-and the `order_audit` table (no foreign key, `order_id` nullable, `idx_order_audit_recorded_at`).
-It applied incrementally to the live Phase 5 database: "Successfully applied 1 migration ... now
-at version v4".
-**Tests:** 120 total, was 108. `ConcurrentCheckoutTest` (`@SpringBootTest`, real threads and a
-CountDownLatch) adds 4; `OrderPlacementServiceTest` holds the 6 place-order unit tests moved out
-of `OrderServiceTest` plus 3 on auditing; `OrderServiceTest` is rewritten around the retry budget
-(8, was 10); `FlywayMigrationTest` adds 1. The smoke test grows from 65 checks to 78.
-**Gotchas:** `@Transactional` does nothing when a method is called from its own class — that is
-why the retry and the unit of work are two beans, and why `CartService.view()` cannot be
-`readOnly` (it calls `currentCart()`, which creates the cart on first use, and manual flush mode
-would silently drop that insert). A `readOnly` transaction that JOINS a read-write one does not
-make it read-only: the outer transaction's settings win, which is what lets
-`ProductService.requireProduct` hand back a product the checkout then modifies. Every
-`@SpringBootTest` shares one H2 database, so a test that creates rows pollutes the next class —
-`FlywayMigrationTest` now counts V2's ten seeded names instead of the whole table, and
-`ConcurrentCheckoutTest` deletes its own products in `@AfterEach`. In the smoke test two
-backgrounded `curl`s do not reliably race; `curl --parallel --parallel-immediate` does.
-**Follow-ups (not done, out of scope):** running the race against real PostgreSQL in the build
-rather than by hand — Phase 7 (Testcontainers). An endpoint over `order_audit`, a
-`CHECK (stock_quantity >= 0)`, and backoff between retries — not planned. Per-user carts remove
-the "two checkouts of one shared cart" oddity — Phase 8.
