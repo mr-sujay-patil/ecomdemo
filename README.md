@@ -4,28 +4,29 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security · springdoc-openapi · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 8: Spring Security** — the application now knows who is calling. There are **accounts**:
-you register one, the password is hashed with BCrypt and never stored, and every request carries
-HTTP Basic credentials that the filter chain checks before a controller is reached. Browsing the
-catalogue is still open to anyone — it is the shop window — but **changing** it needs an ADMIN,
-and the cart and orders need a CUSTOMER.
+**Phase 9: JWT Authentication** — the password is now sent **once**. `POST /api/auth/login`
+exchanges it for a signed, short-lived JSON Web Token, and every later call carries
+`Authorization: Bearer <token>` instead. The application verifies the signature, the expiry and
+the issuer on each request and reads the caller's id and roles straight out of the token — no
+session, no database lookup, and no BCrypt verification per call. Measured on this machine:
+about **106 ms** for a login, about **14 ms** for an authenticated request that used to cost the
+same as a login.
 
-The bigger change is that data now belongs to somebody. The single shared cart is gone: every
-account has its own, and every order records who placed it, so asking for a stranger's order by
-id is a 403 rather than a browsing opportunity. 401 and 403 come back in the same
-`{"status": ..., "message": ...}` shape as every other failure.
+The rules themselves did not change. Browsing the catalogue is open to anyone, changing it needs
+an ADMIN, the cart and orders need a CUSTOMER, and every account sees only its own data — all of
+it decided from authorities, which never cared where they came from. What changed is the first
+step of the chain, and what it costs.
 
-Everything from the earlier phases still stands: a Flyway-managed schema on PostgreSQL (now at
-V6), an atomic checkout protected by optimistic locking, and an OpenAPI 3 document at
-`/v3/api-docs` with Swagger UI at **<http://localhost:8080/swagger-ui.html>** — which now has an
-**Authorize** button, so "Try it out" can log in. 186 tests in total (163 unit and slice, 23
-integration), and the smoke test has grown to 110 checks. The credentials still travel as
-Base64 in a header, which is fine on localhost and nowhere else; Phase 9 replaces Basic with
-signed JWTs.
+Everything from the earlier phases still stands: a Flyway-managed schema on PostgreSQL (V6), an
+atomic checkout protected by optimistic locking, and an OpenAPI 3 document at `/v3/api-docs` with
+Swagger UI at **<http://localhost:8080/swagger-ui.html>** — whose **Authorize** button now takes a
+token. 220 tests in total (190 unit and slice, 30 integration), and the smoke test has grown to
+125 checks. A token still cannot be revoked before it expires and there is no refresh endpoint;
+both are deliberate gaps, explained under "Known gaps".
 
 ## Roadmap
 
@@ -37,7 +38,8 @@ The full 32-phase plan, with a progress tracker, lives in **[docs/ROADMAP.md](do
 ecomdemo/
 ├── src/main/java/com/ecomdemo/
 │   ├── common/    # ApiError + @RestControllerAdvice shared by every feature
-│   ├── security/  # the filter chain, UserDetails, CurrentUser, the 401/403 handlers
+│   ├── security/  # the filter chain, the JWT key/encoder/decoder, CurrentUser, 401/403 handlers
+│   ├── auth/      # POST /api/auth/login: exchanging a password for a signed token
 │   ├── customer/  # accounts: registration, roles, the profile
 │   ├── product/   # catalogue CRUD
 │   ├── cart/      # one cart per account
@@ -117,8 +119,8 @@ Hibernate then checks the schema against the entities and fails the startup if t
 In a second terminal:
 
 ```bash
-./mvnw clean verify             # build and run all 120 tests (no database needed)
-scripts/smoke-test.sh           # 62-65 end-to-end checks against the running app
+./mvnw clean verify             # build and run all 220 tests (needs Docker for the 30 *IT)
+scripts/smoke-test.sh           # 125 end-to-end checks against the running app
 ```
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html> — every endpoint is listed with its
@@ -343,6 +345,7 @@ is the trade, and the retry budget is what makes it honest.
 
 | Method | Path | Who may call it | Purpose |
 |---|---|---|---|
+| `POST` | `/api/auth/login` | anyone | Exchange a password for a signed token |
 | `POST` | `/api/customers/register` | anyone | Create a CUSTOMER account (201 + `Location`) |
 | `GET` | `/api/customers/me` | any account | Your own profile |
 | `PUT` | `/api/customers/me` | any account | Change your own display name |
@@ -366,13 +369,14 @@ being a customer, and quietly granting both is how a role system stops meaning a
 Errors always come back as `{ "status": ..., "message": ... }`: **404** for a missing entity,
 **400** for a request that fails validation, **409** for a valid request that conflicts with the
 current state (empty cart, not enough stock, a username already taken), **401** when the request
-carries no credentials or the wrong ones, and **403** when the credentials are fine and the
-account still may not do this.
+carries no token, a token that does not verify, or wrong credentials at login, and **403** when
+the token is fine and the account still may not do this.
 
 **401 and 403 are not the same thing**, and the difference matters to a client:
 
 - **401 Unauthorized** — despite the name, this means *unauthenticated*. The server does not know
-  who you are. Sending credentials could change the answer.
+  who you are. Presenting a valid token could change the answer. A **tampered or expired token is
+  also a 401**, not a 403: it never became an identity at all, so there was nobody to forbid.
 - **403 Forbidden** — the server knows exactly who you are and the answer is still no. Sending
   the same credentials again will never help; only a change of role would.
 
@@ -405,14 +409,39 @@ migration V5 and cannot be created through the API — an anonymous endpoint tha
 would hand out administrator accounts to whoever asked for one.
 
 ```bash
-# Register. Open to anyone: requiring an account in order to create an account is a closed loop.
+# 1. Register. Open to anyone: requiring an account in order to create an account is a closed loop.
 curl -s -X POST localhost:8080/api/customers/register \
   -H 'Content-Type: application/json' \
   -d '{"username":"asha","password":"correct-horse-battery-staple","fullName":"Asha Rao"}'
 
-# From now on, every call carries the credentials. curl's -u writes the Authorization header.
-curl -s -u asha:correct-horse-battery-staple localhost:8080/api/customers/me
+# 2. Log in. This is the ONLY request that carries a password.
+TOKEN=$(curl -s -X POST localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"asha","password":"correct-horse-battery-staple"}' \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+
+# 3. From now on, every call carries the token instead.
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8080/api/customers/me
 ```
+
+Look inside the token — no key required, which is the point:
+
+```bash
+python3 -c "
+import base64, json, sys
+p = sys.argv[1].split('.')[1]; p += '=' * (-len(p) % 4)
+print(json.dumps(json.loads(base64.urlsafe_b64decode(p)), indent=1))" "$TOKEN"
+```
+
+```json
+{"iss": "ecomdemo", "sub": "asha", "uid": 4, "exp": 1790046372, "iat": 1790045472,
+ "roles": ["CUSTOMER"]}
+```
+
+That payload is **encoded, not encrypted**. Anyone holding the token can read it, so nothing
+secret may ever go into a claim — the signature is what makes the claims trustworthy, not
+secrecy. Edit a single character and the signature stops matching, which is why `"roles":
+["ADMIN"]` cannot simply be typed in.
 
 The seeded administrator is **`admin` / `admin123`**. That is a documented throwaway development
 credential, in the same spirit as the `ecomdemo/ecomdemo` database password this repository
@@ -427,72 +456,109 @@ docker exec -i ecomdemo-postgres psql -U ecomdemo -d ecomdemo \
   -c "UPDATE users SET password = '$NEW_HASH' WHERE username = 'admin';"
 ```
 
-The credentials travel as Base64 in a header. **Base64 is an encoding, not encryption**: anybody
-who can see the request can read the password, so HTTP Basic is only acceptable over TLS or, as
-here, on localhost. Phase 9 replaces it with a signed token.
+### The signing key
 
-In Swagger UI, click **Authorize** and enter a username and password; "Try it out" then attaches
-them to every call.
+Tokens are signed with HMAC-SHA256, and the key comes from the environment:
+
+```bash
+JWT_SECRET='at-least-32-characters-of-random-text' ./mvnw spring-boot:run
+```
+
+There is deliberately **no default in the repository**. A signing key committed to Git is a
+signing key everybody has, and anyone holding it can mint a token for any account with any role —
+it is a far worse thing to leak than a password, because it needs no account at all.
+
+If `JWT_SECRET` is unset the application generates a random key at startup and says so, loudly:
+
+```
+WARN JwtConfig : JWT_SECRET is not set, so a random signing key was generated for this run.
+Logins work, but EVERY TOKEN BECOMES INVALID WHEN THIS APPLICATION RESTARTS...
+```
+
+Everything works, there is no setup step, and nothing secret is in Git — but tokens do not
+survive a restart, and two instances would reject each other's. That is the right trade for a
+learning project and the wrong one for anything else, which is why it warns rather than
+proceeding quietly. A key shorter than 32 bytes is **refused at startup** rather than padded:
+HS256 needs 256 bits, and silently weakening a signature is worse than failing to start.
+
+### "Bearer" is meant literally
+
+Whoever holds the token is the account. There is nothing else to check — no password, no second
+factor — so a token is as sensitive as a password, and like HTTP Basic before it, it is only safe
+over TLS or, as here, on localhost.
+
+In Swagger UI, call `POST /api/auth/login`, copy the `accessToken`, then click **Authorize** and
+paste it in; "Try it out" attaches it to every call after that.
 
 ## Walkthrough
 
 ```bash
-ADMIN='-u admin:admin123'
-ASHA='-u asha:correct-horse-battery-staple'
+# Log in once each, and keep the tokens in a variable.
+login() { curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"$1\",\"password\":\"$2\"}" \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])'; }
 
-# 1. See what is for sale. No credentials at all: the catalogue is the shop window.
+ASHA_TOKEN="$(login asha correct-horse-battery-staple)"
+ASHA=(-H "Authorization: Bearer $ASHA_TOKEN")
+ADMIN=(-H "Authorization: Bearer $(login admin admin123)")
+
+# 1. See what is for sale. No token at all: the catalogue is the shop window.
 curl -s localhost:8080/api/products | head -c 400
 
 # 2. Put two mechanical keyboards in the cart - as Asha, into Asha's own cart
-curl -s $ASHA -X POST localhost:8080/api/cart/items \
+curl -s "${ASHA[@]}" -X POST localhost:8080/api/cart/items \
   -H 'Content-Type: application/json' \
   -d '{"productId": 1, "quantity": 2}'
 
 # 3. Look at the cart - totalAmount is computed by the server, never sent by the client
-curl -s $ASHA localhost:8080/api/cart
+curl -s "${ASHA[@]}" localhost:8080/api/cart
 
 # 4. Check out. Takes no body: it always orders the whole of YOUR cart
-curl -s $ASHA -X POST localhost:8080/api/orders
+curl -s "${ASHA[@]}" -X POST localhost:8080/api/orders
 
-# 5. Read the order back. The response now says who placed it.
-curl -s $ASHA localhost:8080/api/orders/1
+# 5. Read the order back. The response says who placed it.
+curl -s "${ASHA[@]}" localhost:8080/api/orders/1
 
 # 6. Stock went down by 2, and the cart is empty again
 curl -s localhost:8080/api/products/1
-curl -s $ASHA localhost:8080/api/cart
+curl -s "${ASHA[@]}" localhost:8080/api/cart
 ```
 
 Now try the failures:
 
 ```bash
-# 401 - no credentials. The server does not know whose cart to show.
+# 401 - no token. The server does not know whose cart to show.
 curl -s -i localhost:8080/api/cart | head -1
 
+# 401 - a token that has been edited. The signature no longer covers the payload, so it never
+# becomes an identity at all: this is 401, not 403.
+curl -s -i -H "Authorization: Bearer ${ASHA_TOKEN}tampered" localhost:8080/api/cart | head -1
+
 # 403 - Asha is authenticated, and still may not change the catalogue
-curl -s -i $ASHA -X POST localhost:8080/api/products \
+curl -s -i "${ASHA[@]}" -X POST localhost:8080/api/products \
   -H 'Content-Type: application/json' \
   -d '{"name":"Nope","price":1.00,"stockQuantity":1}' | head -1
 
 # ...but the admin may
-curl -s -i $ADMIN -X POST localhost:8080/api/products \
+curl -s -i "${ADMIN[@]}" -X POST localhost:8080/api/products \
   -H 'Content-Type: application/json' \
   -d '{"name":"Yes","price":1.00,"stockQuantity":1}' | head -1
 
 # 403 - the admin has no cart of their own, so these endpoints are not for them
-curl -s -i $ADMIN localhost:8080/api/cart | head -1
+curl -s -i "${ADMIN[@]}" localhost:8080/api/cart | head -1
 
 # 404 - no such product
 curl -s -i localhost:8080/api/products/9999 | head -1
 
 # 400 - Bean Validation rejects quantity 0 before any of our code runs
-curl -s -i $ASHA -X POST localhost:8080/api/cart/items \
+curl -s -i "${ASHA[@]}" -X POST localhost:8080/api/cart/items \
   -H 'Content-Type: application/json' \
   -d '{"productId": 1, "quantity": 0}' | head -1
 
 # 409 - the cart accepts it, checkout refuses it (product 10 has only 2 in stock)
-curl -s $ASHA -X POST localhost:8080/api/cart/items \
+curl -s "${ASHA[@]}" -X POST localhost:8080/api/cart/items \
   -H 'Content-Type: application/json' -d '{"productId": 10, "quantity": 99}'
-curl -s $ASHA -X POST localhost:8080/api/orders
+curl -s "${ASHA[@]}" -X POST localhost:8080/api/orders
 ```
 
 And the rule that matters most — one customer's data is not another's:
@@ -501,12 +567,13 @@ And the rule that matters most — one customer's data is not another's:
 curl -s -X POST localhost:8080/api/customers/register \
   -H 'Content-Type: application/json' \
   -d '{"username":"ben","password":"another-long-password","fullName":"Ben Cole"}'
+BEN=(-H "Authorization: Bearer $(login ben another-long-password)")
 
 # Ben's cart is empty, even though Asha has been shopping
-curl -s -u ben:another-long-password localhost:8080/api/cart
+curl -s "${BEN[@]}" localhost:8080/api/cart
 
 # 403 - the order exists, it is simply not his
-curl -s -i -u ben:another-long-password localhost:8080/api/orders/1 | head -1
+curl -s -i "${BEN[@]}" localhost:8080/api/orders/1 | head -1
 ```
 
 ## How the security works
@@ -516,9 +583,13 @@ curl -s -i -u ben:another-long-password localhost:8080/api/orders/1 | head -1
 Adding `spring-boot-starter-security` puts a single servlet `Filter` in front of the whole
 application before a line of our code runs, and that filter delegates to an ordered chain of
 small ones. Each does one job and hands the request on: work out who is calling
-(`BasicAuthenticationFilter`, reading the `Authorization` header), put the result in the
-`SecurityContextHolder`, and finally decide whether this caller may have this URL
-(`AuthorizationFilter`).
+(`BearerTokenAuthenticationFilter`, reading the `Authorization` header and verifying the JWT),
+put the result in the `SecurityContextHolder`, and finally decide whether this caller may have
+this URL (`AuthorizationFilter`).
+
+Phase 9 replaced only the first of those steps. `BasicAuthenticationFilter` used to read a
+username and password, look the account up and run BCrypt — on **every** request. The token
+filter replaces all three with a signature check over bytes the request already carries.
 
 The consequence worth remembering: **a request the chain rejects never reaches Spring MVC.**
 There is no controller, no handler method and no `@RestControllerAdvice` to run — which is why
@@ -531,6 +602,7 @@ The rules are in `security/SecurityConfig`, they are **ordered, and the first ma
 
 ```java
 .requestMatchers(HttpMethod.POST, "/api/customers/register").permitAll()
+.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
 .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**").permitAll()
 .requestMatchers("/api/products/**").hasRole("ADMIN")
 .requestMatchers("/api/cart/**", "/api/orders/**").hasRole("CUSTOMER")
@@ -548,10 +620,11 @@ suite notices that a URL is readable by the world.
 
 Two different questions, answered by two different beans:
 
-- **Authentication — "who are you?"** `AppUserDetailsService` looks the username up and returns a
-  `UserDetails`; the `PasswordEncoder` then decides whether the submitted password matches the
-  stored hash. Two responsibilities, two beans, so swapping the user store (LDAP, an OAuth2
-  provider in Phase 9) does not touch the hashing and vice versa.
+- **Authentication — "who are you?"** At `/api/auth/login`, `AppUserDetailsService` looks the
+  username up and the `PasswordEncoder` decides whether the password matches the stored hash.
+  On every other request, the `JwtDecoder` checks a signature instead. Two responsibilities, two
+  beans — which is exactly why this phase could replace the *how* without touching the hashing,
+  the user store or a single authorization rule.
 - **Authorization — "may you do this?"** The URL rules above, plus `@PreAuthorize` and
   `@PostAuthorize` on `OrderService`.
 
@@ -590,6 +663,84 @@ invalidating old ones. `matches()` reads the algorithm, cost and salt back out o
 re-hashes the submitted password with exactly those, and compares in constant time so the
 comparison itself leaks nothing through timing.
 
+### What a JWT actually is
+
+Three Base64url segments joined by dots:
+
+```
+eyJhbGciOiJIUzI1NiJ9 . eyJzdWIiOiJhc2hhIiwidWlkIjo0fQ . 3nK9r...
+└── header ────────┘   └── payload (claims) ────────┘   └ signature
+```
+
+The **header** names the algorithm. The **payload** is the claims — here `iss`, `sub`, `uid`,
+`roles`, `iat`, `exp`. The **signature** is an HMAC over the first two segments.
+
+Two things follow, and they are the whole model:
+
+1. **The payload is encoded, not encrypted.** Anyone holding the token can read it, exactly as
+   anyone could read a Base64 Basic header. So nothing secret goes in a claim — the token carries
+   an id, a username and a role, and that is all.
+2. **The signature covers the header as well as the payload.** Change one character of either and
+   verification fails. That is what makes it safe to authorize from claims without looking
+   anything up, and it is also why the header being signed matters: it stops an attacker
+   rewriting `alg` to `none` and presenting an unsigned token, the classic JWT vulnerability. The
+   decoder is additionally pinned to HS256, so even a validly signed token using some other
+   algorithm is refused.
+
+### Stateless vs session-based
+
+The alternative to a token is a session: the server keeps the truth in a store and hands the
+client an opaque id.
+
+|  | Session | Token |
+|---|---|---|
+| Where the truth lives | On the server | In the token, signed |
+| Scaling out | Every instance needs the shared store | Any instance can verify alone |
+| Logging someone out | Delete the row — immediate | Not possible before `exp` |
+| A role change | Takes effect on the next request | Takes effect when the token expires |
+
+Neither is better; they trade the same property in opposite directions. This application chose
+the token, so it pays the revocation cost — and the mitigation is the only one available: keep
+the expiry short. Fifteen minutes here.
+
+### HMAC vs RSA
+
+HS256 signs and verifies with the **same** secret. That is fine while one application does both
+jobs, as this one does. The moment a second service needs to accept these tokens, it becomes the
+wrong choice: handing that service the key to verify with also hands it the power to **issue**.
+
+RS256 splits the two — a private key that signs, a public key that anyone may hold and verify
+with. That is why every real identity provider publishes a JWKS endpoint of public keys and no
+secrets at all, and it is the change to make when this monolith becomes several services.
+
+### Expiry, refresh and revocation
+
+A token cannot be withdrawn. Nothing consults a database once one is issued, so:
+
+- a role taken away stays effective until the token expires;
+- a deleted account keeps working until the token expires;
+- there is no "log out everywhere".
+
+A short expiry is the only lever, and a **refresh token** is what normally makes a short expiry
+comfortable: a second, longer-lived, single-purpose credential that *is* stored server-side, so
+it can be revoked, and whose only power is to mint a new access token. This phase deliberately
+does not build one — see "Known gaps". Production systems that need instant revocation add a
+deny-list of token ids checked on each request, which trades some of the statelessness back.
+
+### What OAuth2 and OIDC would add
+
+This application issues and accepts its own tokens, which is not really OAuth2 — it is just JWTs.
+The Spring module is called `oauth2-resource-server` because "resource server" is OAuth2's name
+for an API that *accepts* tokens, and that half fits.
+
+**OAuth2** is a delegation protocol: it exists so a user can let one application act on their
+behalf at another *without handing over their password*, with an authorization server issuing
+scoped tokens in the middle. **OIDC** is a thin layer on top that adds identity — an `id_token`
+saying who the user is, and a standard `/userinfo` endpoint — which is what "Sign in with Google"
+actually is. Adopting either would mean deleting `AuthController` and `TokenService` and pointing
+the decoder at an external issuer's JWKS URL. The rest of this application would not change,
+which is the payoff of having kept authentication and authorization apart.
+
 ### Why CSRF is switched off
 
 Cross-Site Request Forgery is an attack on **ambient authority**: a browser attaches its session
@@ -597,10 +748,14 @@ cookie to any request aimed at that origin, including one triggered by a form on
 `evil.example.com`, so the server sees a perfectly authenticated request the user never meant to
 send. The defence is a token the attacker's page cannot read and therefore cannot include.
 
-None of that applies here. This API keeps no session and sets no cookie; the credentials arrive
-in an `Authorization` header that the client must attach deliberately on every call. A cross-site
-form submission simply arrives with no credentials and is answered 401. There is no ambient
-authority to forge, so the token would protect nothing and would break every non-browser client.
+None of that applies here. This API keeps no session and sets no cookie; the token arrives in an
+`Authorization` header that the client must attach deliberately on every call, and a browser will
+never do that by itself. A cross-site form submission simply arrives with no token and is answered
+401. There is no ambient authority to forge, so a CSRF token would protect nothing and would break
+every non-browser client.
+
+This is also the argument for *not* storing a JWT in a cookie, however convenient that is: the
+moment the browser sends it automatically, CSRF is back and so is the need for the protection.
 
 Note what that reasoning depends on: **statelessness**. The day this application authenticates
 with a cookie, CSRF protection has to come back on.
@@ -650,8 +805,8 @@ than an assumption the code makes.
 There are two suites now, and one command runs both.
 
 ```bash
-./mvnw test      # 163 tests, ~11 s, in-memory H2, no Docker
-./mvnw verify    # those 163 PLUS 23 integration tests against a real PostgreSQL, ~32 s
+./mvnw test      # 190 tests, ~11 s, in-memory H2, no Docker
+./mvnw verify    # those 190 PLUS 30 integration tests against a real PostgreSQL, ~24 s
 ```
 
 `./mvnw test` is the inner loop: it needs nothing installed and it is what you run constantly.
@@ -663,11 +818,11 @@ The fast suite sits at five levels, each loading only what it needs:
 
 | Level | Annotation | What it loads | Classes |
 |---|---|---|---|
-| Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest`, `OrderPlacementServiceTest`, `CustomerServiceTest`, `AppUserDetailsServiceTest` |
-| Web slice | `@WebMvcTest` | The controller, JSON conversion, validation, the error handler **and the real security rules**; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest`, `CustomerControllerTest` |
+| Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest`, `OrderPlacementServiceTest`, `CustomerServiceTest`, `AppUserDetailsServiceTest`, `AuthServiceTest`, `TokenServiceTest`, `CurrentUserTest` |
+| Web slice | `@WebMvcTest` | The controller, JSON conversion, validation, the error handler **and the real security rules**; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest`, `CustomerControllerTest`, `AuthControllerTest` |
 | Persistence slice | `@DataJpaTest` | JPA and its own throwaway H2 database; no web layer, no Flyway | `CartRepositoryTest`, `OrderRepositoryTest` |
 | Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest`, `ConcurrentCheckoutTest` |
-| Configuration | `ApplicationContextRunner` | Only the properties files, resolved as at startup | `DatasourceConfigurationTest` |
+| Configuration | `ApplicationContextRunner` | A handful of beans and the properties, resolved as at startup | `DatasourceConfigurationTest`, `JwtConfigTest` |
 
 The suite runs the **same migrations the application does**, then has Hibernate validate the
 result, so a migration that drifts from the entities fails the build rather than the next deploy.
@@ -718,11 +873,14 @@ second suite that runs the same application against **PostgreSQL itself**.
 | `ProductApiIT` | 8 | The catalogue over HTTP: the seeded rows, a create/read round trip, update, delete, 404, 400 — plus reads being public, writes needing an ADMIN, and a wrong password being indistinguishable from an unknown username |
 | `CartApiIT` | 8 | Add, merge, totals across lines, update, remove, 404, 400 — each read back with a second request, so only committed state counts — plus 401/403 on the endpoints and two shoppers having two separate carts |
 | `OrderApiIT` | 7 | Checkout end to end, a 409 that rolls back everything, an empty cart, two simultaneous checkouts for the last unit, 401/403, the order recording who placed it, and one customer being refused another's order |
+| `AuthApiIT` | 8 | Login returning a working token, the readable payload, a tampered token, a correctly-signed **expired** token, malformed rubbish, no token at all, login failures that are identical for a wrong password and an unknown username, and the roles claim deciding what the token may do |
 
-Since Phase 8 these tests send **real credentials**: an `Authorization: Basic` header verified
-against the BCrypt hash migration V5 put into the container's database, by the real filter chain.
-That is the only layer where the rules and an actual login are exercised together —
-`@WithMockUser` in the slices skips the authentication it would otherwise be testing.
+Since Phase 9 these tests do the whole round trip: they call `POST /api/auth/login` over HTTP, get
+a genuinely signed token back, and send it as `Authorization: Bearer` — so the password is checked
+against the BCrypt hash migration V5 put into the container's database, and every later request
+has its signature, expiry and issuer verified by the real decoder. That is the only layer where
+the rules, an actual login *and* a real signature are exercised together. `@WithMockUser` in the
+slices skips the authentication, and a hand-built `Jwt` would skip the signature.
 
 Three pieces make it work, and each replaces something you would otherwise write by hand.
 
@@ -780,13 +938,23 @@ cost a container start each time.
 ## Known gaps (closed by later phases)
 
 - **The fast suite is still only ever run on H2.** `./mvnw verify` runs the migrations and the
-  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 23
-  integration tests. The other 163 still run on H2, so a PostgreSQL-specific problem in a code
+  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 30
+  integration tests. The other 190 still run on H2, so a PostgreSQL-specific problem in a code
   path no `*IT` exercises would still reach production.
-- **HTTP Basic re-authenticates on every request.** That means a BCrypt verification per call —
-  deliberately expensive work, paid over and over. There is also no way to log out and no way to
-  revoke access short of changing a password. **Phase 9** replaces Basic with a signed JWT, which
-  is verified with a signature check instead.
+- **A token cannot be revoked before it expires.** A role taken away, or a deleted account, stays
+  effective for up to fifteen minutes, and there is no "log out everywhere". That is the price of
+  statelessness rather than a bug, and a short expiry is the only mitigation in place. A
+  deny-list of token ids checked per request is the usual production answer, and it trades some
+  of the statelessness back.
+- **There is no refresh token.** The phase file lists one as optional and it was deliberately not
+  built. Without it, a short expiry means users log in again every fifteen minutes — which is
+  exactly the discomfort a refresh token exists to remove: a second, longer-lived, revocable
+  credential whose only power is to mint a new access token.
+- **Signing is symmetric (HS256).** One key both signs and verifies, which is fine while a single
+  application does both. A second service that needed to accept these tokens would have to be
+  given the power to issue them, so that is the point to move to RS256 and a published public key.
+- **The application is its own authorization server.** A textbook OAuth2 deployment separates the
+  two. Nothing here implements OAuth2 flows, scopes or OIDC; it issues plain JWTs.
 - **Passwords cannot be changed through the API.** A password change needs rules of its own
   (re-authenticate, re-encode, invalidate sessions) rather than riding along with a profile edit,
   so `PUT /api/customers/me` deliberately only takes a display name. The seeded admin's password
@@ -802,8 +970,9 @@ cost a container start each time.
 - **Nothing rolls a migration back.** Flyway's community edition has no `undo`, so a bad
   migration is corrected by writing the next one. That is the normal production answer; it is
   worth knowing it is the *only* answer here.
-- **No token authentication.** Credentials are sent on every request as Base64, which is safe
-  only on localhost or behind TLS. **Phase 9** adds JWT.
+- **Still no TLS.** A Bearer token is as sensitive as a password and travels in a header in
+  clear text, so this is safe on localhost and nowhere else. Terminating TLS is the reverse
+  proxy's job, and arrives with the deployment phases.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the
   code it reaches. **Phase 12** adds JaCoCo and SonarQube.
 - **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without
