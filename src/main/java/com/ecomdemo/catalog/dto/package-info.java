@@ -22,4 +22,4 @@
  * being smuggled into this phase.
  */
 @org.springframework.modulith.NamedInterface("dto")
-package com.ecomdemo.product.dto;
+package com.ecomdemo.catalog.dto;

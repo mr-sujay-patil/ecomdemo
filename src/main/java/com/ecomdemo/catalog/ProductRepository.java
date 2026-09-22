@@ -1,4 +1,4 @@
-package com.ecomdemo.product;
+package com.ecomdemo.catalog;
 
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;

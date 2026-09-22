@@ -1,8 +1,8 @@
 package com.ecomdemo.batch;
 
 import com.ecomdemo.cache.CacheNames;
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductRepository;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.catalog.ProductRepository;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import org.slf4j.Logger;

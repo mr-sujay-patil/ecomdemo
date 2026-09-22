@@ -1,8 +1,8 @@
-package com.ecomdemo.product;
+package com.ecomdemo.catalog;
 
 import com.ecomdemo.shared.ApiError;
-import com.ecomdemo.product.dto.ProductRequest;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;

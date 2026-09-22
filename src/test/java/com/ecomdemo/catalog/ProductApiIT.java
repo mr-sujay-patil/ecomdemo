@@ -1,10 +1,10 @@
-package com.ecomdemo.product;
+package com.ecomdemo.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.shared.ApiError;
-import com.ecomdemo.product.dto.ProductRequest;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;

@@ -1,7 +1,8 @@
 package com.ecomdemo.batch;
 
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductRepository;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.inventory.InventoryService;
+import com.ecomdemo.catalog.ProductRepository;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
@@ -50,8 +51,16 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
 
     private final ProductRepository productRepository;
 
-    ProductImportProcessor(ProductRepository productRepository) {
+    /**
+     * The import sets stock, so since Phase 19 it goes through the inventory module like every
+     * other write to that number. The alternative - calling {@code setStockQuantity} directly -
+     * would be a hole in the boundary exactly wide enough to make the boundary meaningless.
+     */
+    private final InventoryService inventory;
+
+    ProductImportProcessor(ProductRepository productRepository, InventoryService inventory) {
         this.productRepository = productRepository;
+        this.inventory = inventory;
     }
 
     @Override
@@ -88,7 +97,7 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
         product.setName(name);
         product.setDescription(description);
         product.setPrice(price);
-        product.setStockQuantity(stock);
+        inventory.setStockLevel(product, stock);
         product.setCategory(category);
         return product;
     }

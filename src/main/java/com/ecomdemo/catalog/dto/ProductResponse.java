@@ -1,6 +1,6 @@
-package com.ecomdemo.product.dto;
+package com.ecomdemo.catalog.dto;
 
-import com.ecomdemo.product.Product;
+import com.ecomdemo.catalog.Product;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.math.BigDecimal;
 

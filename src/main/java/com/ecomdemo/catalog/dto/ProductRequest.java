@@ -1,4 +1,4 @@
-package com.ecomdemo.product.dto;
+package com.ecomdemo.catalog.dto;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMin;

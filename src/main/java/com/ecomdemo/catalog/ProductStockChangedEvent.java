@@ -1,4 +1,4 @@
-package com.ecomdemo.product;
+package com.ecomdemo.catalog;
 
 /**
  * Published when a product's stock is changed by something other than a catalogue edit — today,

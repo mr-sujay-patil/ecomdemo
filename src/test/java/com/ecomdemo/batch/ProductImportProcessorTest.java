@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductRepository;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.catalog.ProductRepository;
+import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.inventory.InventoryService;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,11 +35,21 @@ class ProductImportProcessorTest {
     @Mock
     private ProductRepository productRepository;
 
+    /**
+     * Only the catalogue's persistence is mocked. {@link InventoryService} itself is REAL, because
+     * the assertions below are about the stock value the processor produces — a mocked inventory
+     * would make {@code setStockLevel} a no-op and every one of those assertions would be checking
+     * that the mock was asked politely rather than that the number is right.
+     */
+    @Mock
+    private ProductService productService;
+
     private ProductImportProcessor processor;
 
     @BeforeEach
     void setUp() {
-        processor = new ProductImportProcessor(productRepository);
+        processor = new ProductImportProcessor(
+                productRepository, new InventoryService(productService));
     }
 
     private static ProductCsvRow row(String name, String price, String stock) {

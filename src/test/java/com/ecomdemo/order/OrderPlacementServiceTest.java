@@ -20,15 +20,16 @@ import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductService;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.inventory.InventoryService;
 import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.stubbing.Answer;
@@ -47,6 +48,14 @@ import org.mockito.stubbing.Answer;
  * <p>Stock is asserted on the {@link Product} entities themselves rather than through the mocks:
  * {@code reduceStock} mutates the object the cart holds, so checking the object proves the
  * arithmetic, while {@code verify(productService).save(...)} proves the change was persisted.
+ *
+ * <p><strong>{@link InventoryService} is REAL here, and that is deliberate (Phase 19).</strong>
+ * Stock moved out of this class into the inventory module, and a mocked inventory would turn every
+ * assertion below about stock arithmetic and about {@code InsufficientStockException} into an
+ * assertion that a mock was called — the tests would pass while the behaviour they describe had
+ * been deleted. Only the catalogue's persistence is mocked, which keeps
+ * {@code verify(productService).save(...)} meaning what it meant before the split: the change was
+ * handed to the catalogue to persist.
  */
 @ExtendWith(MockitoExtension.class)
 class OrderPlacementServiceTest {
@@ -80,8 +89,24 @@ class OrderPlacementServiceTest {
     @Mock
     private OutboxWriter outbox;
 
-    @InjectMocks
+    /**
+     * Built by hand rather than with {@code @InjectMocks}, because one collaborator is real. The
+     * moment a test needs a genuine object among its mocks, {@code @InjectMocks} stops being the
+     * shorter way to write it.
+     */
     private OrderPlacementService placementService;
+
+    @BeforeEach
+    void setUp() {
+        placementService =
+                new OrderPlacementService(
+                        orderRepository,
+                        cartService,
+                        new InventoryService(productService),
+                        orderAuditService,
+                        currentUser,
+                        outbox);
+    }
 
     private static final User SHOPPER = TestData.customer();
 

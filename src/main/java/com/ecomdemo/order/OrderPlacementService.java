@@ -4,12 +4,11 @@ import com.ecomdemo.cart.Cart;
 import com.ecomdemo.cart.CartItem;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.shared.ConflictException;
-import com.ecomdemo.shared.InsufficientStockException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.product.Product;
-import com.ecomdemo.product.ProductService;
+import com.ecomdemo.catalog.Product;
+import com.ecomdemo.inventory.InventoryService;
 import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
 import java.util.List;
@@ -37,7 +36,7 @@ class OrderPlacementService {
 
     private final OrderRepository orderRepository;
     private final CartService cartService;
-    private final ProductService productService;
+    private final InventoryService inventory;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
     private final OutboxWriter outbox;
@@ -45,13 +44,13 @@ class OrderPlacementService {
     OrderPlacementService(
             OrderRepository orderRepository,
             CartService cartService,
-            ProductService productService,
+            InventoryService inventory,
             OrderAuditService orderAuditService,
             CurrentUser currentUser,
             OutboxWriter outbox) {
         this.orderRepository = orderRepository;
         this.cartService = cartService;
-        this.productService = productService;
+        this.inventory = inventory;
         this.orderAuditService = orderAuditService;
         this.currentUser = currentUser;
         this.outbox = outbox;
@@ -69,6 +68,14 @@ class OrderPlacementService {
      * accurate "3 requested, 2 available" message rather than one about whichever line happened
      * to break first, and it spares the database work it would only have to throw away.
      *
+     * <p><strong>Since Phase 19 the stock itself belongs to somebody else.</strong> This method
+     * asks {@code InventoryService} to check and to reserve; it no longer calls
+     * {@code reduceStock} or saves the product, and it does not know that either happens. What it
+     * kept is the SEQUENCE — check every line, then write — because that is an ordering concern,
+     * about the message a shopper gets when a cart cannot be fulfilled. What it gave up is the
+     * mechanics of a number going down, which is an inventory concern. That division is the
+     * whole point of the module split, and it is why the rest of this method did not change.
+     *
      * <p>What the pre-check cannot do is stop a <em>concurrent</em> checkout from selling the
      * same unit between the check and the write. Nothing inside a single transaction can; that
      * is what {@code Product}'s {@code @Version} column is for, and the failure it raises
@@ -85,11 +92,7 @@ class OrderPlacementService {
 
             List<CartItem> lines = cart.getItems();
             for (CartItem line : lines) {
-                Product product = line.getProduct();
-                if (!product.hasStockFor(line.getQuantity())) {
-                    throw new InsufficientStockException(
-                            product.getName(), line.getQuantity(), product.getStockQuantity());
-                }
+                inventory.requireAvailable(line.getProduct(), line.getQuantity());
             }
 
             // The cart came from currentCart(), which found it by the authenticated user, so
@@ -101,8 +104,7 @@ class OrderPlacementService {
                 Product product = line.getProduct();
                 order.addItem(
                         product.getId(), product.getName(), product.getPrice(), line.getQuantity());
-                product.reduceStock(line.getQuantity());
-                productService.save(product);
+                inventory.reserve(product, line.getQuantity());
             }
 
             Order placed = orderRepository.save(order);

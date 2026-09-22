@@ -1,6 +1,6 @@
 package com.ecomdemo.cart;
 
-import com.ecomdemo.product.Product;
+import com.ecomdemo.catalog.Product;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;

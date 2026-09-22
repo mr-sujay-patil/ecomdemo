@@ -1,4 +1,4 @@
-package com.ecomdemo.product;
+package com.ecomdemo.catalog;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,8 +17,8 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 
 import com.ecomdemo.shared.GlobalExceptionHandler;
 import com.ecomdemo.shared.NotFoundException;
-import com.ecomdemo.product.dto.ProductRequest;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.WithSecurityRules;
 import java.math.BigDecimal;
 import java.util.List;

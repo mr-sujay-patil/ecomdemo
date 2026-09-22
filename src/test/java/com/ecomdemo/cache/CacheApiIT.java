@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
-import com.ecomdemo.product.dto.ProductRequest;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -46,7 +46,7 @@ class CacheApiIT extends IntegrationTest {
     private JdbcTemplate jdbc;
 
     @Autowired
-    private com.ecomdemo.product.ProductService productService;
+    private com.ecomdemo.catalog.ProductService productService;
 
     @Autowired
     private TransactionTemplate transactions;

@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.product.Product;
+import com.ecomdemo.catalog.Product;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;

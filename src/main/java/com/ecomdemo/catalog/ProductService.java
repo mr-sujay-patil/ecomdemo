@@ -1,9 +1,9 @@
-package com.ecomdemo.product;
+package com.ecomdemo.catalog;
 
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.shared.NotFoundException;
-import com.ecomdemo.product.dto.ProductRequest;
-import com.ecomdemo.product.dto.ProductResponse;
+import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductResponse;
 import java.util.List;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
