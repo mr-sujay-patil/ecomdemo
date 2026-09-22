@@ -118,6 +118,26 @@
 		</dependency>
 
 		<!--
+			Spring Batch. One starter brings the whole framework: Job, Step, the chunk-oriented
+			reader/processor/writer contract, the fault-tolerant skip and retry machinery, and -
+			the part that makes it more than a for-loop - the JobRepository, which records every
+			run in the database so that a failed job can be restarted from where it stopped
+			rather than from the beginning.
+
+			`spring-boot-starter-batch` pulls `spring-boot-batch`, which is Boot 4's
+			auto-configuration module for it (Boot 4 splits auto-configuration into a module per
+			technology, so `spring-batch-core` on its own would wire up nothing). That
+			auto-configuration needs a DataSource and a transaction manager, both of which this
+			application already has from spring-boot-starter-data-jpa.
+
+			Versions come from the Spring Boot BOM (Spring Batch 6.x for Boot 4.x).
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-batch</artifactId>
+		</dependency>
+
+		<!--
 			Spring Security's OAuth2 Resource Server. "Resource server" is the OAuth2 word for
 			an API that ACCEPTS tokens rather than one that issues them: it adds a filter that
 			pulls a Bearer token off the Authorization header, verifies its signature and its
