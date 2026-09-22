@@ -57,6 +57,43 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
+  # Redis — the cache
+  # -------------------------------------------------------------------------------------------
+  cache:
+    image: redis:8-alpine
+    container_name: ecomdemo-cache
+    command:
+      # `--save ""` turns OFF snapshotting to disk. This is a CACHE: everything in it can be
+      # recomputed from PostgreSQL, so persisting it buys nothing and costs fork() pauses and
+      # disk. It is also why there is no volume below - losing the whole thing is a slow minute,
+      # not an incident.
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      # A hard ceiling, plus what to do when it is reached. Without maxmemory, Redis grows until
+      # the container's limit kills it; with it, `allkeys-lru` evicts the least recently used key
+      # and carries on. LRU rather than `noeviction` because for a cache, dropping a cold entry is
+      # correct behaviour - `noeviction` would start failing writes instead, turning a full cache
+      # into an application error.
+      - --maxmemory
+      - ${REDIS_MAXMEMORY:-256mb}
+      - --maxmemory-policy
+      - allkeys-lru
+    ports:
+      # Published so `redis-cli` and the smoke test can look inside from the host. The
+      # application does not use this: it reaches Redis at `cache:6379` over the compose network.
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
   # The application
   # -------------------------------------------------------------------------------------------
   app:
@@ -70,6 +107,8 @@ services:
         # `service_healthy`, not the bare `depends_on: [db]`. The short form only waits for the
         # container to be STARTED, which for PostgreSQL means "the process exists" — several
         # seconds before it answers. This waits for the health check above to pass.
+        condition: service_healthy
+      cache:
         condition: service_healthy
     environment:
       # --- CONTAINER NETWORKING -------------------------------------------------------------
@@ -87,6 +126,10 @@ services:
       # application as empty, which makes it generate a random key and warn that tokens die with
       # the container. Putting a real default here would be a signing key in Git.
       JWT_SECRET: ${JWT_SECRET:-}
+
+      # Redis, reached by service name on the compose network — same reasoning as `db` above.
+      SPRING_DATA_REDIS_HOST: cache
+      SPRING_DATA_REDIS_PORT: 6379
 
       # `dev` is the profile that reads POSTGRES_* above. It is named for how it is run, not for
       # what it means; a `prod` profile arrives with the deployment phases.

@@ -129,6 +129,19 @@ public class SecurityConfig {
                         // meaning anything.
                         .requestMatchers("/api/cart/**", "/api/orders/**").hasRole("CUSTOMER")
 
+                        // Spring forwards an unhandled exception to /error, and that forward
+                        // goes through this filter chain like any other dispatch. Left to
+                        // `anyRequest().authenticated()` it is answered 401 — so a genuine 500 on
+                        // a PUBLIC endpoint arrives at the client as "authentication required",
+                        // which sends whoever is debugging it a long way in the wrong direction.
+                        // That is not hypothetical: a cache serialization bug in Phase 13 turned
+                        // every catalogue read into exactly that, and the 401 hid it.
+                        //
+                        // Permitting /error does not expose anything: it renders whatever the
+                        // failed request produced, and every deliberate error in this application
+                        // already goes through GlobalExceptionHandler instead.
+                        .requestMatchers("/error").permitAll()
+
                         // The API description and the UI that renders it stay open, because a
                         // closed description is of no use to a client trying to work out how to
                         // authenticate. It documents the shape of the API, not its data.

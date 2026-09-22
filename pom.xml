@@ -97,6 +97,27 @@
 		</dependency>
 
 		<!--
+			Spring Cache plus Redis.
+
+			`spring-boot-starter-cache` is the abstraction: @Cacheable and friends, and the
+			proxying that makes them work. It does nothing on its own - with no cache provider on
+			the classpath Spring falls back to a ConcurrentHashMap, which is a cache per JVM and
+			therefore no cache at all once there are two instances.
+
+			`spring-boot-starter-data-redis` supplies the provider. It brings Lettuce, the default
+			Redis client since Boot 2 (netty-based, non-blocking, and one connection is safe to
+			share across threads - Jedis needed a pool). Versions come from the Spring Boot BOM.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-cache</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
+		<!--
 			Spring Security's OAuth2 Resource Server. "Resource server" is the OAuth2 word for
 			an API that ACCEPTS tokens rather than one that issues them: it adds a filter that
 			pulls a Bearer token off the Authorization header, verifies its signature and its
