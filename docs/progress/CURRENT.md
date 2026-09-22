@@ -7,7 +7,8 @@
 - **Branch:** feature/phase-16-logging
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #18 MERGED (e407627). Follow-up PR #19 raised from the same branch - see below
+- **PR:** #18 MERGED (e407627). Follow-up PR #19 raised from the same branch:
+  https://github.com/mr-sujay-patil/ecomdemo/pull/19
   https://github.com/mr-sujay-patil/ecomdemo/pull/18
 - **Waiting for user:** YES - review and merge the FOLLOW-UP PR #19
 
@@ -106,11 +107,14 @@ stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted
 holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR raised with the known defect named in its body.
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
-  tag `phase-16-complete` and start Phase 17 (`docs/phases/phase-17-kafka.md`). NOTE: the merge
-  verification's smoke run on `main` will fail the same one check - that is expected and
-  accepted, and is NOT a reason to stop, but every other check must pass.
+STOPPED at the mandatory post-PR stop point, on the FOLLOW-UP PR #19. PR #18 is merged
+(e407627) but `phase-16-complete` is NOT tagged yet: the merge verification found two defects in
+this phase's own work (Alloy's health check never ran; the infrastructure log query used Loki's
+default label window), both fixed on this branch and awaiting review in #19.
+- If they say `merged, continue` -> merge verification of #19 on `main`, then tag
+  `phase-16-complete` and start Phase 17 (`docs/phases/phase-17-kafka.md`). NOTE: the smoke run
+  on `main` may fail the accepted Phase 13 stale-cache check depending on the cache's state -
+  that one is expected and is NOT a reason to stop; every other check must pass.
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.
 - Do NOT weaken or remove the failing smoke check; it is correct and the application is wrong.
