@@ -6,6 +6,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.AuthenticationTrustResolver;
 import org.springframework.security.authentication.AuthenticationTrustResolverImpl;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -91,6 +92,25 @@ public class GlobalExceptionHandler {
         }
         return build(
                 HttpStatus.FORBIDDEN, "Your account does not have permission to perform this action.");
+    }
+
+    /**
+     * 401: the login endpoint refused the credentials.
+     *
+     * <p>This one really does reach the advice. {@code /api/auth/login} is a permitted URL, so
+     * the filter chain lets the request through to the controller, and the failure happens
+     * inside {@code AuthService} when the {@code AuthenticationManager} rejects it — below a
+     * controller, where {@code @RestControllerAdvice} can see it. The filter chain's own 401s,
+     * by contrast, never get this far.
+     *
+     * <p>{@code ex.getMessage()} is deliberately not used. Spring Security distinguishes
+     * {@code UsernameNotFoundException} from {@code BadCredentialsException} internally for its
+     * own logs; passing either message to the client would turn this endpoint into a way of
+     * discovering which usernames exist. One sentence for every failure.
+     */
+    @ExceptionHandler(AuthenticationException.class)
+    public ResponseEntity<ApiError> handleFailedLogin(AuthenticationException ex) {
+        return build(HttpStatus.UNAUTHORIZED, "Invalid username or password");
     }
 
     /** 400: Bean Validation rejected the request body (@Valid on a @RequestBody record). */

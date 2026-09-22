@@ -30,7 +30,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cart")
-@SecurityRequirement(name = "basicAuth")
+@SecurityRequirement(name = "bearerAuth")
 @Tag(
         name = "Cart",
         description =
@@ -51,7 +51,7 @@ public class CartController {
     @ApiResponse(responseCode = "200", description = "The cart, empty if nothing has been added")
     @ApiResponse(
             responseCode = "401",
-            description = "No credentials, or the wrong ones",
+            description = "No Bearer token, or one that is invalid or expired",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "403",

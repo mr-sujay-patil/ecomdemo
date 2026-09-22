@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 /** HTTP entry point for checkout and order history. */
 @RestController
 @RequestMapping("/api/orders")
-@SecurityRequirement(name = "basicAuth")
+@SecurityRequirement(name = "bearerAuth")
 @Tag(
         name = "Orders",
         description =
@@ -55,7 +55,7 @@ public class OrderController {
             description = "The order was placed. The Location header points at it.")
     @ApiResponse(
             responseCode = "401",
-            description = "No credentials, or the wrong ones",
+            description = "No Bearer token, or one that is invalid or expired",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "403",
@@ -81,7 +81,7 @@ public class OrderController {
     @ApiResponse(responseCode = "200", description = "Your orders, possibly empty")
     @ApiResponse(
             responseCode = "401",
-            description = "No credentials, or the wrong ones",
+            description = "No Bearer token, or one that is invalid or expired",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "403",
@@ -100,7 +100,7 @@ public class OrderController {
     @ApiResponse(responseCode = "200", description = "The order")
     @ApiResponse(
             responseCode = "401",
-            description = "No credentials, or the wrong ones",
+            description = "No Bearer token, or one that is invalid or expired",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "403",
