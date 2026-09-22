@@ -75,8 +75,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 7 | [Integration Testing](phases/phase-07-testcontainers.md) | Testcontainers | `feature/phase-07-testcontainers` | ✅ |
 | 8 | [Spring Security](phases/phase-08-spring-security.md) | Spring Security | `feature/phase-08-spring-security` | ✅ |
 | 9 | [JWT Authentication](phases/phase-09-jwt.md) | JWT (OAuth2 Resource Server) | `feature/phase-09-jwt` | ✅ |
-| 10 | [Containerization](phases/phase-10-docker.md) | Docker + Docker Compose | `feature/phase-10-docker` | 🔵 |
-| 11 | [Continuous Integration](phases/phase-11-github-actions.md) | GitHub Actions | `feature/phase-11-github-actions` | ⬜ |
+| 10 | [Containerization](phases/phase-10-docker.md) | Docker + Docker Compose | `feature/phase-10-docker` | ✅ |
+| 11 | [Continuous Integration](phases/phase-11-github-actions.md) | GitHub Actions | `feature/phase-11-github-actions` | 🔵 |
 | 12 | [Code Quality](phases/phase-12-sonarqube.md) | SonarQube + JaCoCo | `feature/phase-12-sonarqube` | ⬜ |
 | 13 | [Caching](phases/phase-13-redis.md) | Redis | `feature/phase-13-redis` | ⬜ |
 | 14 | [Batch Processing](phases/phase-14-spring-batch.md) | Spring Batch | `feature/phase-14-spring-batch` | ⬜ |

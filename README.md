@@ -4,11 +4,23 @@ A learning project: an e-commerce application that evolves from a simple Spring 
 production-grade distributed system, **one technology per phase**. Each phase introduces exactly one
 new technology, on its own feature branch, merged into `main` through a reviewed Pull Request.
 
-**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · Maven Wrapper · Git + GitHub
+**Stack:** Java 21 · Spring Boot 4.1.1 · PostgreSQL 18 · Flyway · Spring Security (JWT) · springdoc-openapi · Docker + Compose · GitHub Actions · Maven Wrapper · Git + GitHub
 
 ## Current status
 
-**Phase 10: Containerization** — the whole system now starts with one command:
+**Phase 11: Continuous Integration** — every pull request is now built and tested by GitHub
+Actions before anyone can merge it, and every merge to `main` publishes a container image to
+GHCR tagged with the commit SHA.
+
+The gate is not a claim: a deliberately failing test was committed, watched turn the run red, and
+reverted — with the publish job skipped and the test reports still uploaded, which is the only
+time anybody wants them. A build takes about a minute, and the Maven cache takes ~20% off that.
+Dependabot watches Maven and the actions weekly.
+
+<details>
+<summary>Phase 10: Containerization</summary>
+
+The whole system starts with one command:
 
 ```bash
 cp .env.example .env && docker compose up --build
@@ -22,6 +34,8 @@ non-root user, with a heap sized from the container's limit instead of a hard-co
 
 Nothing about the application changed. This phase is packaging — but packaging is what makes
 "works on my machine" stop being a sentence anybody has to say.
+
+</details>
 
 <details>
 <summary>Phase 9: JWT Authentication</summary>
@@ -82,7 +96,10 @@ ecomdemo/
 ├── .env.example   # every variable, documented; .env itself is gitignored
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
 ├── scripts/       # smoke-test.sh
-└── .github/       # Pull Request template (workflows from Phase 11)
+└── .github/
+    ├── workflows/ci.yml   # build + test every PR; publish the image on merge to main
+    ├── dependabot.yml     # weekly Maven and Actions updates
+    └── pull_request_template.md
 ```
 
 Each feature package is self-contained and layered **Controller → Service → Repository**. DTOs are
@@ -621,6 +638,130 @@ curl -s "${BEN[@]}" localhost:8080/api/cart
 
 # 403 - the order exists, it is simply not his
 curl -s -i "${BEN[@]}" localhost:8080/api/orders/1 | head -1
+```
+
+## How CI works
+
+Every pull request is built and tested by [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
+before it can be merged, and every merge to `main` publishes an image. **A PR may be merged only
+when CI is green.**
+
+### CI, and the CD this project does not have
+
+**Continuous Integration** is the "build and test every change, automatically" half: catch a
+break within minutes of the commit that caused it, while the author still remembers what they
+were doing. **Continuous Delivery/Deployment** is the other half — actually shipping it.
+
+This project has CI. The publish job pushes an image to a registry and stops there: nobody pulls
+it, nothing runs it. Calling that "CI/CD" would be generous, and the distinction is worth keeping
+because "we have CI/CD" usually means exactly this.
+
+### Workflows, jobs, steps, runners
+
+```
+WORKFLOW   ci.yml — triggered by events (a pull request, a push to main)
+└── JOB    build, publish — each gets a fresh RUNNER, a clean VM
+    └── STEP   one command or action; steps share the runner's filesystem
+```
+
+Jobs are isolated and run in parallel unless `needs:` says otherwise. That matters here:
+
+```yaml
+publish:
+  needs: build
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+```
+
+`needs: build` is what makes the gate real — no image is published from a commit whose tests
+failed. Without it, the two jobs would race and a red build would still publish.
+
+### The test job runs exactly what you run
+
+```yaml
+- run: ./mvnw -B clean verify
+```
+
+Not a CI-only profile, not `-DskipITs`. The moment CI runs something different, "green on my
+machine, red in CI" becomes a category of bug that costs hours and teaches nothing. Testcontainers
+needs a Docker daemon and GitHub's `ubuntu-latest` runners have one, so the command needs no
+adaptation — the run log shows `postgres:18-alpine` starting in 1.4 s, exactly as it does locally.
+
+Reports are uploaded `if: always()`:
+
+```yaml
+- name: Upload the test reports
+  if: always()
+  uses: actions/upload-artifact@v7
+```
+
+A step is skipped by default once an earlier one has failed — so without this the reports would
+upload only when everything passed, which is precisely when nobody needs them.
+
+### Secrets, and the one you do not have to create
+
+`GITHUB_TOKEN` is minted for each run and expires with it. Pushing to GHCR needs nothing else —
+no personal access token to store, rotate, or leak. What it does need is permission, and that is
+granted as narrowly as possible:
+
+```yaml
+permissions:
+  contents: read        # workflow-wide default
+
+publish:
+  permissions:
+    packages: write     # only this job
+```
+
+A job that only compiles code has no business holding a credential that can write to the
+registry.
+
+### Caching
+
+A runner is a clean machine every time, so without a cache every run re-downloads ~200 MB from
+Maven Central. `actions/setup-java`'s `cache: maven` keys on the pom files — reused while the
+dependencies are unchanged, rebuilt when they are not. The same idea as the Dockerfile's layer
+ordering, applied to `~/.m2`.
+
+Measured on this repository: **73 s** cold, **57 s** with the cache restored.
+
+The image build caches too, through BuildKit into GitHub's cache (`cache-from: type=gha`), with
+`mode=max` so the intermediate build stage is cached as well — which a multi-stage Dockerfile
+needs.
+
+### Image tagging
+
+```
+ghcr.io/mr-sujay-patil/ecomdemo:sha-a1b2c3d     immutable
+ghcr.io/mr-sujay-patil/ecomdemo:latest          mutable
+```
+
+The SHA tag names exactly one commit for ever, so a deployment can be traced back to the code that
+produced it and a rollback is a matter of naming an older one. `latest` is a convenience for "the
+newest" — and precisely because it moves, it must never be what a deployment pins. `latest`
+deployed twice can be two different images.
+
+```bash
+docker pull ghcr.io/mr-sujay-patil/ecomdemo:latest
+```
+
+### Dependabot
+
+[`.github/dependabot.yml`](.github/dependabot.yml) opens a PR when a Maven dependency or an action
+has a newer version, weekly. Both rot silently: a dependency with a published CVE keeps building
+happily, and a pinned action keeps running the code it was pinned to.
+
+Every update arrives as a PR and goes through the same CI as any other change, so a bump that
+breaks the build is a red PR rather than a surprise later — which is why this phase comes after CI
+rather than before it. The Spring modules are grouped into a single PR, because they are released
+together and reviewing them apart makes no sense.
+
+### Watching it work
+
+```bash
+gh run list --limit 5                    # recent runs
+gh run watch                             # follow the one in flight
+gh run view <id> --log                   # the full log
+gh run download <id> -n test-reports     # the Surefire/Failsafe XML, red runs included
 ```
 
 ## How the container works
@@ -1184,8 +1325,14 @@ cost a container start each time.
 - **The image is not scanned, signed or pinned by digest.** Base images are pinned by tag
   (`eclipse-temurin:21-jre-alpine`), which is reproducible until the tag moves. Vulnerability
   scanning arrives with **Phase 31**.
-- **Nothing builds the image in CI yet.** It is built locally, by hand. **Phase 11** adds GitHub
-  Actions.
+- **CI does not run the smoke test.** `./mvnw verify` covers the Java; the compose stack and the
+  image are still only exercised on a developer's machine. The phase file offers this as an
+  optional addition and it was deliberately left out of scope — it is the most obviously worthwhile
+  next thing to add to `ci.yml`.
+- **There is no CD.** The publish job pushes an image to GHCR and stops. Nothing pulls it and
+  nothing runs it; deployment arrives with **Phases 25–26**.
+- **Nothing scans the published image.** Dependabot watches the Maven dependencies and the
+  actions, not the base image or the built artefact. **Phase 31** adds scanning.
 - **No coverage report.** The suite is broad but nothing measures or enforces how much of the
   code it reaches. **Phase 12** adds JaCoCo and SonarQube.
 - **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without

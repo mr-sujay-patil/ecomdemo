@@ -3,92 +3,90 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 10: Containerization
-- **Branch:** feature/phase-10-docker
+- **Phase:** 11: Continuous Integration
+- **Branch:** feature/phase-11-github-actions
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #10 — raised, awaiting review
-- **Waiting for user:** YES — review and merge PR #10, then say `merged, continue`
+- **PR:** #11 — raised (ready for review), CI green
+- **Waiting for user:** YES — review and merge PR #11, then say `merged, continue`
 
-## Phase 09 merge verification (passed 2026-09-22)
-PR #9 MERGED with a merge commit (d2ab0a2, 2 parents: 0af4342 + 7678106); branch is an ancestor
+## Phase 10 merge verification (passed 2026-09-22)
+PR #10 MERGED with a merge commit (35d99a5, 2 parents: d2ab0a2 + 33a5095); branch is an ancestor
 of `main`; no commits and no file diffs between branch and `main`; local and remote branches
-intact; every "What you'll implement" item present in `main` (`auth/` with AuthController,
-AuthService, TokenService, AuthenticationManagerConfig and dto; `security/JwtConfig` +
-`JwtProperties`; the three `ecomdemo.jwt.*` properties; `AuthApiIT`, `JwtConfigTest`,
-`CurrentUserTest`; `docs/test-reports/phase-09.md`); `./mvnw clean verify` on `main` -> BUILD
-SUCCESS, Surefire 190 + Failsafe 30, 0 failures, 0 skipped; the app on `main` started with
-"Successfully validated 6 migrations" / "Current version of schema public: 6";
-`scripts/smoke-test.sh` -> 125 passed, 0 failed, 0 skipped, 0 ERROR in the app log;
-tag `phase-09-complete` pushed.
+intact; every "What you'll implement" item present in `main` (`Dockerfile`, `compose.yaml`,
+`.dockerignore`, `.env.example`, the Buildpacks comparison in `docs/decisions.md`,
+`docs/test-reports/phase-10.md`); `./mvnw clean verify` on `main` -> BUILD SUCCESS, Surefire 190 +
+Failsafe 30, 0 failures, 0 skipped; `docker compose up -d --build` on `main` -> both services
+healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.sh` -> 125 passed,
+0 failed, 0 skipped, 0 ERROR in the container log; tag `phase-10-complete` pushed.
+(CI-on-main is NOT part of this verification: CI is what this phase adds.)
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] A multi-stage `Dockerfile` (JRE 21 runtime, non-root user, layered JAR)
-- [x] `compose.yaml` with the app and PostgreSQL: health checks, volumes, environment variables
-- [x] `.env.example`
-- [x] JVM container settings (`-XX:MaxRAMPercentage`)
-- [x] A comparison with Buildpacks (`spring-boot:build-image`) in `docs/decisions.md`
-- [x] `docker compose up` runs the whole system and the curl flow works (the "Done when")
-- [x] Smoke test runs against the compose stack instead of `spring-boot:run`
-- [x] Testing protocol run in full + docs/test-reports/phase-10.md
-- [x] README section, decisions.md, RECENT.md rotation (Phase 08 archived), tracker -> 🔵
-- [x] PR raised (#10)
+- [x] `ci.yml` on every PR: Java 21 with Maven cache, then `./mvnw verify`
+- [x] On merge to `main`: build the image and push it to GHCR (commit SHA and `latest`)
+- [x] Test reports uploaded as artifacts
+- [x] Dependabot for Maven and Actions
+- [~] A failing test blocks a PR ✅ (3 runs); a merge publishes an image ⚠️ NOT testable
+      before the merge — see docs/test-reports/phase-11.md §5 for the commands to confirm it
+- [x] Smoke test addition: the CI workflow for the PR is green
+      (optional, in scope: the workflow runs the smoke test against the compose stack)
+- [x] Testing protocol run in full + docs/test-reports/phase-11.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 09 archived), tracker -> 🔵
+- [x] PR raised (#11) — opened as a draft so CI would run, then marked ready
+
+**User's manual step (after the merge):** add "Require status checks to pass" (the CI job) to the
+`main` branch protection in the GitHub UI. From then on, merge only when CI is green.
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 190 + Failsafe 30, 0 failures,
-  0 skipped. No Java test changed this phase. Runs in ~78 s while the compose stack is up (the
-  two compete for the Docker daemon) and ~33 s otherwise.
-- 2026-09-22: from a clean slate (`down -v`, image deleted, .smoke-state removed)
-  `docker compose up -d --build` -> 34 s, app healthy after 26 s, "Successfully applied 6
-  migrations ... now at version v6", 0 ERROR in the container log.
-- 2026-09-22: `scripts/smoke-test.sh` -> 123 passed on the fresh volume (the two persistence
-  sub-checks do not apply on a first run), then 125 passed after `compose restart app`.
-  0 failed, 0 skipped both times.
-- 2026-09-22: `docker compose down` then `up` -> "Successfully validated 6 migrations" and the
-  persistence probe was still there: the named volume outlives the containers.
-- 2026-09-22: image checks - runs as uid 1001, no javac, no mvn, no .java in the runtime image;
-  PID 1 is `java -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError ... JarLauncher`.
-  Heap inside the container: 192 MB at the JVM default vs 576 MB with the flag, limit 768 MB.
-- 2026-09-22: Buildpacks comparison actually built - 766 MB / 160 s cold / 53 s rebuild, against
-  the Dockerfile's 410 MB / 34 s / 5 s.
+- 2026-09-22 CI, run 35684121148 (PR opened): Build and test ✅, Publish ⏭ skipped, 73 s.
+  Testcontainers started postgres:18-alpine in 1.4 s on the runner; 190 + 30 tests, BUILD SUCCESS.
+- 2026-09-22 CI, run 35684245066 (deliberately failing test): Build and test ❌, Publish ⏭
+  skipped, test-reports artifact still uploaded (126 KB). PR showed UNSTABLE, not BLOCKED,
+  because required_status_checks on main is still null — the user's manual step.
+- 2026-09-22 CI, run 35684314280 (the revert): ✅ 57 s, "Cache restored successfully" (73 -> 57 s).
+- 2026-09-22 local: `./mvnw clean verify` -> BUILD SUCCESS, 190 + 30, 0 failures, 0 skipped.
+- 2026-09-22 local: `scripts/smoke-test.sh` against the compose stack -> 125 passed, 0 failed,
+  0 skipped. The script is unchanged this phase.
 
 ## Open issues / blockers
-- none. Both opening concerns are settled: `JWT_SECRET` has no default in compose.yaml (an unset
-  value reaches the app empty, which generates a random key and warns), and the smoke test now
-  finds `ecomdemo-db` before `ecomdemo-postgres` so nothing SKIPs.
+- Both opening questions are answered: Testcontainers works on `ubuntu-latest` unchanged, and
+  `packages: write` is granted on the publish job alone.
+- **⚠️ "a merge publishes an image" is unverified**, and cannot be verified before the merge: the
+  publish job is gated on a push to `main`. Confirm it during Phase 11's merge verification —
+  `docs/test-reports/phase-11.md` §5 has the exact commands.
+- **⚠️ The gate is not enforced yet.** `required_status_checks` on `main` is `null`, so a red
+  check shows as UNSTABLE rather than blocking the merge. That is the user's manual step, after
+  the merge, in the GitHub UI.
 
-## Decisions this phase (copied to docs/decisions.md ✅ — 13 entries)
-- A hand-written multi-stage Dockerfile over Buildpacks, with the comparison measured, not guessed.
-- Dependencies resolved in their own layer before the source is copied (5 s rebuilds).
-- Layered jar via `jarmode=tools`, four ordered COPYs.
-- Non-root at a PINNED uid 1001 (bind-mounted files are owned by a number).
-- `-XX:MaxRAMPercentage=75` plus a memory limit on the service, not a hard-coded -Xmx.
-- `depends_on: condition: service_healthy` with pg_isready; the bare form is not enough.
-- The app reaches PostgreSQL at `db:5432` over the compose network, never the published port.
-- The volume mounts `/var/lib/postgresql` — postgres:18 changed this and the old path refuses
-  to start.
-- `.env` gitignored, `.env.example` committed, no JWT_SECRET default in compose.yaml.
-- The HEALTHCHECK uses `/api/products` because Actuator is Phase 15.
-- The smoke test's probe records PostgreSQL's system_identifier, so a new database reads as a
-  first run rather than as lost data.
+## Decisions this phase (copied to docs/decisions.md ✅ — 11 entries)
+- One workflow, two jobs, `publish` with `needs: build` — that is what makes the gate real.
+- `contents: read` workflow-wide; `packages: write` on the publish job alone.
+- CI runs the identical `./mvnw clean verify`, no CI-only profile or flags.
+- `if: always()` on the report upload — otherwise reports appear only when nobody needs them.
+- A deliberately failing test was committed and reverted, because an untested claim is not a
+  result (testing protocol's honesty rule).
+- Two tags: `sha-<short>` immutable for deployments, `latest` mutable for convenience.
+- `cancel-in-progress` on PRs but never on main (a cancelled main run means a missing image).
+- The optional "smoke test in CI" was NOT built (hard rule 7) and is suggested instead.
+- The branch protection change is left to the user, as the phase file assigns it.
 
 ## Environment left behind
-The **compose stack is RUNNING and healthy**: `ecomdemo-app` and `ecomdemo-db`, schema v6, data in
-the named volume `ecomdemo_postgres-data`. `docker compose up -d` / `docker compose down` to
-control it; `down -v` deletes the database.
-The pre-compose container `ecomdemo-postgres` is **stopped, not deleted** — it held port 5432.
-`docker start ecomdemo-postgres` brings the Phases 4-9 database back, but stop the compose stack
-first or they clash.
-`.env` exists locally with a real JWT_SECRET and is gitignored. `ecomdemo:latest` is built;
-`ecomdemo:buildpack` was deleted after the comparison. No stray Java processes on the host.
+The compose stack is RUNNING and healthy (`ecomdemo-app`, `ecomdemo-db`), schema v6, data in the
+named volume `ecomdemo_postgres-data`. The pre-compose container `ecomdemo-postgres` is stopped,
+not deleted. `.env` exists locally with a real JWT_SECRET and is gitignored. No stray Java
+processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. Wait for the user.
-- If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
-  `./mvnw clean verify` and `scripts/smoke-test.sh` against the compose stack
-  (`docker compose up -d --build`), the git-workflow Verification Checklist, then tag and push
-  `phase-10-complete`, then start Phase 11 (`docs/phases/phase-11-github-actions.md`).
-  NOTE from Phase 11 onwards, execution-protocol §5 also requires confirming CI on `main` is
-  green — that does not apply to this merge, since CI does not exist yet.
+STOPPED at the mandatory post-PR stop point. PR #11 is ready for review and CI is green
+(mergeStateStatus CLEAN, run 35684569454).
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`. From
+  THIS phase onwards that also means confirming CI on `main` is green — and here it is doubly
+  important, because the merge run is the first and only chance to verify the ⚠️ item above:
+  that a merge publishes an image. Commands in docs/test-reports/phase-11.md §5. Then the usual
+  `./mvnw clean verify` + `scripts/smoke-test.sh` against the compose stack, the git-workflow
+  Verification Checklist, tag and push `phase-11-complete`, then start Phase 12
+  (`docs/phases/phase-12-sonarqube.md`).
+- Remind the user of their manual step: add "Require status checks to pass" to the `main` branch
+  protection. Until then CI reports but does not enforce.
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.
