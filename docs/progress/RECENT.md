@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 12: Code Quality (tag: pending, PR: pending)
+## Phase 12: Code Quality (tag: phase-12-complete, PR #14)
 **What exists now:** Coverage is measured across BOTH suites and the project passes a quality
 gate. JaCoCo runs two agents (Surefire and Failsafe fork separate JVMs) and merges the exec files
 at `verify`: 96.1% overall, 97.4% line, 81.0% branch. SonarQube Community runs in its own compose
