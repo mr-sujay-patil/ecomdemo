@@ -16,6 +16,18 @@ public final class CacheNames {
     /** The whole catalogue, under a single key. Holds {@code List<ProductResponse>}. */
     public static final String PRODUCT_LIST = "productList";
 
+    /**
+     * The single key the whole catalogue listing is cached under.
+     *
+     * <p>A constant because it is now named from two places that the compiler cannot connect: the
+     * SpEL string {@code key = "'all'"} on {@code ProductService.findAll}, and
+     * {@code ProductCacheEvictor}, which evicts it as an ordinary Java value. A SpEL expression is
+     * a string literal to the compiler, so the two can only be kept in step by convention — and
+     * the failure if they drift is silent, which is the kind this project keeps trying to turn
+     * into something a test can see.
+     */
+    public static final String PRODUCT_LIST_KEY = "all";
+
     private CacheNames() {
     }
 }

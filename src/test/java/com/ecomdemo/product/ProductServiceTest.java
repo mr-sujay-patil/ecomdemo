@@ -44,6 +44,9 @@ class ProductServiceTest {
     @Mock
     private ProductRepository productRepository;
 
+    @Mock
+    private org.springframework.context.ApplicationEventPublisher events;
+
     @InjectMocks
     private ProductService productService;
 
@@ -258,6 +261,25 @@ class ProductServiceTest {
             verify(productRepository).save(product);
             verifyNoMoreInteractions(productRepository);
         }
+
+        @Test
+        void save_whenCalled_announcesThatTheStockChanged() {
+            // The checkout write path is the only caller, and this event is what lets the cache
+            // be evicted AFTER the transaction commits rather than during it. Published here
+            // rather than from OrderPlacementService so that ordering carries no knowledge of
+            // caching; asserted here because nothing else in the unit suite can see it.
+            Product product = TestData.product(3L, "Keyboard", "8999.00", 20);
+
+            productService.save(product);
+
+            verify(events).publishEvent(new ProductStockChangedEvent(3L));
+            // ...and nothing else. Announcing is all save() is allowed to do about the cache: it
+            // runs once per line inside a transaction that may still roll back, so the eviction
+            // itself has to wait for the commit. That timing is proven in CacheApiIT, where it is
+            // observable; here the point is only that this method does not try to do it.
+            verifyNoMoreInteractions(events);
+        }
+
     }
 
     /** {@code save()} normally returns the managed entity; for most tests the argument will do. */

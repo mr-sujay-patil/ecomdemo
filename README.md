@@ -764,9 +764,29 @@ threads would simply agree on the same wrong number.
 
 **Cache what is read often and changes rarely; never cache what a decision is made against.**
 
-The accepted cost, stated plainly: after a sale the catalogue shows the old stock figure for up to
-the TTL. Browsing is a view; checkout reads live, so the number that decides whether a sale happens
-is never stale.
+That rule leaves one loose end, and Phase 13 accepted it: after a sale the catalogue showed the
+old stock figure for up to the TTL, on the grounds that browsing is a view and checkout reads live.
+It was a defensible trade and it was still wrong in practice — a shopper could read "5 in stock",
+add five to a cart and be refused at checkout, with the database correct and unhelpful throughout.
+
+**It is closed now, and the fix is entirely about timing.** `ProductService.save` publishes a
+`ProductStockChangedEvent`; `ProductCacheEvictor` listens with
+`@TransactionalEventListener(AFTER_COMMIT)` and drops both the product's entry and the listing. The
+reason it is not simply `@CacheEvict` on the write is the reason Phase 13 deferred it: that write
+runs once per line inside a transaction that may still roll back, so evicting there discards good
+entries on every failed checkout — and evicts before the new row is visible, opening a window for a
+concurrent reader to repopulate the cache from the pre-commit state and be wrong until the TTL.
+Moving the same eviction to just after the commit answers both.
+
+```bash
+# stock 9, buy 2 — and read it straight back, with no TTL to wait for
+curl -s localhost:8080/api/products/3 | jq .stockQuantity     # 9
+# ...place the order...
+curl -s localhost:8080/api/products/3 | jq .stockQuantity     # 7, immediately
+```
+
+Checkout still reads live through `requireProduct`, so the rule above is unchanged: the number a
+sale is decided against never comes from a cache.
 
 ### Invalidation
 
@@ -2315,7 +2335,7 @@ second suite that runs the same application against **PostgreSQL itself**.
 | `CartApiIT` | 8 | Add, merge, totals across lines, update, remove, 404, 400 — each read back with a second request, so only committed state counts — plus 401/403 on the endpoints and two shoppers having two separate carts |
 | `OrderApiIT` | 7 | Checkout end to end, a 409 that rolls back everything, an empty cart, two simultaneous checkouts for the last unit, 401/403, the order recording who placed it, and one customer being refused another's order |
 | `AuthApiIT` | 8 | Login returning a working token, the readable payload, a tampered token, a correctly-signed **expired** token, malformed rubbish, no token at all, login failures that are identical for a wrong password and an unknown username, and the roles claim deciding what the token may do |
-| `CacheApiIT` | 8 | The cache proven by changing the database behind its back with direct SQL: a repeated read never reaches PostgreSQL, an update refreshes, a delete evicts, a BigDecimal survives the JSON round trip, and checkout ignores the cache |
+| `CacheApiIT` | 11 | The cache proven by changing the database behind its back with direct SQL: a repeated read never reaches PostgreSQL, an update refreshes, a delete evicts, a BigDecimal survives the JSON round trip, checkout ignores the cache, and a committed sale evicts both catalogue caches while a rolled-back one evicts neither |
 | `ProductImportJobIT` | 6 | A 10,000-row import over real HTTP with the invalid rows skipped and listed, the upsert making a re-import idempotent, and the restart of a run that died on the skip limit |
 | `SalesReportJobIT` | 3 | The report's contents against orders placed through the real checkout, a quiet day, and a second run for the same day being refused |
 
@@ -2471,10 +2491,11 @@ cost a container start each time.
 - **Branch coverage sits at 81% against 97% line coverage.** Several `else` paths are defensive
   and only reachable through states the API does not permit. That gap is the honest one to look
   at; the line figure flatters.
-- **The catalogue shows stale stock for up to 10 minutes after a sale.** A deliberate trade, not
-  an oversight — checkout reads live, so nothing decides on the stale number. Making the browsing
-  view accurate would mean evicting on every checkout, which has its own race (see
-  `docs/decisions.md` [Phase 13]).
+- ~~**The catalogue shows stale stock for up to 10 minutes after a sale.**~~ **Closed after
+  Phase 16** by an `AFTER_COMMIT` transactional listener that evicts both catalogue caches — see
+  "Invalidation" above and `docs/decisions.md` [Phase 16 follow-up]. The Phase 13 reasoning for
+  deferring it was sound about the hazard and wrong about the cost: the stale figure was visible to
+  shoppers, who could be refused at checkout over stock the page had just advertised.
 - **Nothing measures the cache hit rate.** Hit and miss are logged at DEBUG, which answers "is it
   working?" and not "is it worth it?". Hit ratios belong in metrics — **Phase 15**.
 - **Redis is a single node with no password.** Fine on a compose network that publishes it only
