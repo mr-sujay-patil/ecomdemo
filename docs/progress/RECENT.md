@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 17: Messaging (tag: pending, PR: pending)
+## Phase 17: Messaging (tag: phase-17-complete, PR #21 + follow-up #22)
 **What exists now:** A checkout publishes an `OrderPlacedEvent` to `orders.placed` (3 partitions,
 keyed by order id) after its transaction commits, on a small async pool so the customer never waits
 for the broker. A notification consumer writes one row per order, idempotently. Retries happen on
