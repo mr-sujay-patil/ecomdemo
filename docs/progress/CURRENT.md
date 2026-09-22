@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 13: Caching
 - **Branch:** feature/phase-13-redis
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #15 — raised, CI green, mergeStateStatus CLEAN
+- **Waiting for user:** YES — review and merge PR #15, then say `merged, continue`
 
 ## Phase 12 merge verification (passed 2026-09-22)
 PR #14 MERGED with a merge commit (1b03f5f, 2 parents: 5b50c6b + 62744b0); branch is an ancestor
@@ -30,7 +30,7 @@ image published as `latest` + `sha-1b03f5f`. `./mvnw clean verify` -> 190 + 30, 
       product evicts or refreshes it)
 - [x] Testing protocol run in full + docs/test-reports/phase-13.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 11 archived), tracker -> 🔵
-- [ ] PR raised, CI green
+- [x] PR raised (#15), CI green
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 190 (unchanged) + Failsafe 38
@@ -69,11 +69,14 @@ stop it with `docker compose -f compose.sonar.yaml down` if the memory is wanted
 pre-compose container `ecomdemo-postgres` is stopped, not deleted. `.env` holds a real JWT_SECRET
 and is gitignored. No stray Java processes.
 
-## Still outstanding (user, not blocking)
-- **`required_status_checks` on `main` is `null`.** CI reports but does not block. Phase 11's
-  stated manual step, still undone.
-
 ## Next action
-Raise the PR (`gh pr create --base main`), wait for CI to go green, then STOP for the user's
-review. NOTE: `required_status_checks` is now ENFORCED on `main` with `strict: true`, so the PR
-may also need `gh pr update-branch` before it can merge — confirm rather than assume.
+STOPPED at the mandatory post-PR stop point. PR #15 is open, CI is green, mergeStateStatus CLEAN.
+Branch protection now REQUIRES the `Build and test` check and has `strict: true` (branch must be
+up to date with `main`); no `gh pr update-branch` was needed because nothing landed on `main`
+after this branch was cut. If a Dependabot PR merges first, it will be.
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`: the
+  git-workflow Verification Checklist, CI on `main` green, `./mvnw clean verify`, and
+  `scripts/smoke-test.sh` against `docker compose up -d` (which now includes Redis). Then tag and
+  push `phase-13-complete` and start Phase 14 (`docs/phases/phase-14-spring-batch.md`).
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
