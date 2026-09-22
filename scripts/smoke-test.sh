@@ -708,8 +708,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V8, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V9, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -750,6 +750,18 @@ if HISTORY="$(psql_query \
 
     ORPHAN_ORDERS="$(psql_query "SELECT count(*) FROM orders WHERE user_id IS NULL;" | tr -d '\r ')"
     check "no order belongs to nobody" "0" "$ORPHAN_ORDERS"
+
+    # V9 (Phase 17). The unique constraint is the database saying independently what the
+    # consumer's idempotency check says: one notification per order. If the consumer's logic were
+    # ever wrong, this is what would turn a silent second notification into a visible error.
+    check "V9's notification table is unique per order" "1" \
+        "$(psql_query "SELECT count(*) FROM information_schema.table_constraints \
+            WHERE table_name = 'notification' AND constraint_type = 'UNIQUE';" | tr -d '\r ')"
+
+    check "and processed_event is keyed by the event id itself" "event_id" \
+        "$(psql_query "SELECT c.column_name FROM information_schema.table_constraints t \
+            JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
+            WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
     skip "flyway_schema_history shows V1-V8, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
@@ -1675,6 +1687,189 @@ print(sum(len(s.get('values', [])) for s in d.get('data', {}).get('result', []))
     fi
 else
     skip "Loki checks" "no Loki at $LOKI_URL (set LOKI_URL to override)"
+fi
+
+as_customer
+
+# --------------------------------------------------------------------------------------------
+# 13. Messaging (Phase 17)
+# --------------------------------------------------------------------------------------------
+# Everything here needs the broker, and the broker is only reachable through the compose stack, so
+# the whole section SKIPS rather than passes when it is not there.
+section "Messaging"
+
+KAFKA_CONTAINER="${KAFKA_CONTAINER:-ecomdemo-kafka}"
+
+# kafka <script> <args...> -> runs one of the broker's own CLI tools inside its container.
+# The image ships them, which is why - unlike Loki in Phase 16 - there is something here to ask
+# with. Always against localhost:9092, the INTERNAL listener, because this runs inside the broker.
+kafka() {
+    local script="$1"; shift
+    docker exec "$KAFKA_CONTAINER" "/opt/kafka/bin/$script" --bootstrap-server localhost:9092 "$@" 2>/dev/null
+}
+
+# topic_message_count <topic> -> total messages across every partition, from the END offsets.
+# A topic's size is not a thing Kafka reports directly: this sums the offset each partition has
+# reached, which for a topic nothing has compacted or expired is the number of messages ever
+# written to it.
+topic_message_count() {
+    docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-get-offsets.sh \
+        --bootstrap-server localhost:9092 --topic "$1" 2>/dev/null \
+        | awk -F: '{total += $3} END {print (total == "" ? 0 : total)}'
+}
+
+if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/dev/null 2>&1; then
+    TOPICS="$(kafka kafka-topics.sh --list)"
+
+    check "the orders.placed topic exists" "True" \
+        "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed' && echo True || echo False)"
+
+    # Created by the application's NewTopic beans, not by a producer's first send: the broker runs
+    # with auto.create.topics.enable=false, so a typo in a topic name is an error rather than a new
+    # topic nobody is reading.
+    check "and it has 3 partitions, the ceiling on consumer parallelism" "3" \
+        "$(kafka kafka-topics.sh --describe --topic orders.placed \
+            | awk '/PartitionCount/ {for (i = 1; i < NF; i++) if ($i == "PartitionCount:") print $(i+1)}')"
+
+    # The retry topics are named by INDEX, not by delay. That matters: the default names them after
+    # the backoff, and with jitter that is a different number every restart - a new pair of orphan
+    # topics for ever. See OrderPlacedListener.
+    check "the retry topics exist, named by index" "True" \
+        "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed-retry-0' \
+            && printf '%s\n' "$TOPICS" | grep -qx 'orders.placed-retry-1' && echo True || echo False)"
+
+    check "and so does the dead-letter topic" "True" \
+        "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed-dlt' && echo True || echo False)"
+
+    # --- An order becomes a message, and the message becomes exactly one notification ----------
+    as_customer
+    request GET /api/cart >/dev/null
+    for product_id in $(jget "' '.join(str(i['productId']) for i in d['items'])"); do
+        request DELETE "/api/cart/items/$product_id" >/dev/null
+    done
+
+    request GET /api/products >/dev/null
+    KAFKA_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
+    OFFSETS_BEFORE="$(topic_message_count orders.placed)"
+
+    request POST /api/cart/items "{\"productId\":$KAFKA_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    check "an order is placed for the messaging check" "201" "$(request POST /api/orders)"
+    KAFKA_ORDER_ID="$(jget "d['id']")"
+
+    check "the topic grew by exactly one message" "1" \
+        "$(( $(topic_message_count orders.placed) - OFFSETS_BEFORE ))"
+
+    # The consumer runs on its own thread, after the HTTP response has already been returned -
+    # that is the whole point of publishing asynchronously - so this polls instead of asserting
+    # immediately. A check that needed no wait would mean the work had happened synchronously.
+    NOTIFICATION_COUNT=0
+    for _ in $(seq 1 20); do
+        NOTIFICATION_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $KAFKA_ORDER_ID;" || echo 0)"
+        [ "${NOTIFICATION_COUNT:-0}" -ge 1 ] && break
+        sleep 1
+    done
+
+    check "exactly one notification row exists for the order" "1" "${NOTIFICATION_COUNT:-0}"
+
+    check "and it is addressed to the customer who placed it" "$CUSTOMER_USER" \
+        "$(psql_query "SELECT recipient FROM notification WHERE order_id = $KAFKA_ORDER_ID;")"
+
+    check "the event was recorded as processed, which is what makes a redelivery a no-op" "1" \
+        "$(psql_query "SELECT count(*) FROM processed_event WHERE event_type = 'OrderPlacedEvent';" \
+            | awk '{print ($1 >= 1 ? 1 : 0)}')"
+
+    # The MESSAGE itself, read back off the topic. `--from-beginning` with a timeout rather than a
+    # message count, because the interesting assertion is about a specific order somewhere in the
+    # topic rather than about whichever message happens to be last.
+    TOPIC_DUMP="$(docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-consumer.sh \
+        --bootstrap-server localhost:9092 --topic orders.placed --from-beginning \
+        --property print.key=true --timeout-ms 8000 2>/dev/null)"
+
+    check "the order's event is on the topic" "True" \
+        "$(printf '%s' "$TOPIC_DUMP" | grep -q "\"orderId\":$KAFKA_ORDER_ID" && echo True || echo False)"
+
+    # The key is what routes a message to a partition, and Kafka guarantees order only WITHIN a
+    # partition - so keying by order id is what keeps one order's events together and in sequence.
+    check "and it is keyed by the order id, which is what fixes its partition" "True" \
+        "$(printf '%s' "$TOPIC_DUMP" | grep -q "^$KAFKA_ORDER_ID	" && echo True || echo False)"
+
+    # --- A poison message must land on the DLT and must not block the partition -----------------
+    DLT_BEFORE="$(topic_message_count orders.placed-dlt)"
+
+    # Bytes that are not an OrderPlacedEvent at all. This fails in the DESERIALIZER, before any
+    # application code runs - the case that would otherwise be unrecoverable, because there is
+    # nothing to catch it and the offset is never committed.
+    printf 'poison:{"not":"an OrderPlacedEvent"}\n' \
+        | docker exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 --topic orders.placed \
+            --property parse.key=true --property key.separator=: >/dev/null 2>&1
+
+    DLT_AFTER="$DLT_BEFORE"
+    for _ in $(seq 1 30); do
+        DLT_AFTER="$(topic_message_count orders.placed-dlt)"
+        [ "$DLT_AFTER" -gt "$DLT_BEFORE" ] && break
+        sleep 1
+    done
+
+    check "a poison message ends on the dead-letter topic" "True" \
+        "$([ "$DLT_AFTER" -gt "$DLT_BEFORE" ] && echo True || echo False)"
+
+    # The stronger claim, and the one a user would notice: the partition kept moving. A consumer
+    # that retried the bad record in place would have stopped everything behind it.
+    request GET /api/products >/dev/null
+    POISON_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
+    request POST /api/cart/items "{\"productId\":$POISON_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    check "an order placed AFTER the poison message still succeeds" "201" "$(request POST /api/orders)"
+    AFTER_POISON_ORDER_ID="$(jget "d['id']")"
+
+    AFTER_POISON_COUNT=0
+    for _ in $(seq 1 20); do
+        AFTER_POISON_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $AFTER_POISON_ORDER_ID;" || echo 0)"
+        [ "${AFTER_POISON_COUNT:-0}" -ge 1 ] && break
+        sleep 1
+    done
+    check "and it is still notified, so the poison never blocked the partition" "1" \
+        "${AFTER_POISON_COUNT:-0}"
+
+    # --- Redelivery must not write a second notification ---------------------------------------
+    # The same event id twice is what a redelivery IS: the same bytes, handed over again. Sent
+    # straight to the topic rather than through the API, because the API cannot place the same
+    # order twice - which is exactly why idempotency has to be the consumer's job.
+    DUPLICATE_ORDER_ID=999000$$
+    DUPLICATE_EVENT="{\"eventId\":\"$(python3 -c 'import uuid;print(uuid.uuid4())')\",\"orderId\":$DUPLICATE_ORDER_ID,\"username\":\"$CUSTOMER_USER\",\"totalAmount\":12.34,\"itemCount\":1,\"placedAt\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}"
+
+    for _ in 1 2; do
+        printf '%s:%s\n' "$DUPLICATE_ORDER_ID" "$DUPLICATE_EVENT" \
+            | docker exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
+                --bootstrap-server localhost:9092 --topic orders.placed \
+                --property parse.key=true --property key.separator=: >/dev/null 2>&1
+    done
+
+    DUPLICATE_COUNT=0
+    for _ in $(seq 1 20); do
+        DUPLICATE_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
+        [ "${DUPLICATE_COUNT:-0}" -ge 1 ] && break
+        sleep 1
+    done
+    # Give the second copy time to be wrong in. A "still one" assertion made immediately proves
+    # nothing, because the duplicate may simply not have been consumed yet.
+    sleep 3
+    DUPLICATE_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
+
+    check "the same event delivered twice writes ONE notification" "1" "${DUPLICATE_COUNT:-0}"
+
+    psql_query "DELETE FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" >/dev/null 2>&1
+
+    # --- The consumer group is keeping up --------------------------------------------------------
+    # Lag is the distance between what has been written and what this group has committed. A lag
+    # that is zero here says the notification consumer drained everything this run produced; a lag
+    # that grew would mean messages are arriving faster than they are handled, which is invisible
+    # from the application side.
+    check "the notification consumer group has caught up (lag 0)" "0" \
+        "$(kafka kafka-consumer-groups.sh --describe --group ecomdemo-notification \
+            | awk '$1 == "ecomdemo-notification" && $6 ~ /^[0-9]+$/ {lag += $6} END {print (lag == "" ? 0 : lag)}')"
+else
+    skip "Kafka checks" "no Kafka container ($KAFKA_CONTAINER); set KAFKA_CONTAINER to override"
 fi
 
 as_customer
