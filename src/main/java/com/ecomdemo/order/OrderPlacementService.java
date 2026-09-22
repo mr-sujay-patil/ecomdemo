@@ -6,13 +6,13 @@ import com.ecomdemo.cart.CartService;
 import com.ecomdemo.common.ConflictException;
 import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.product.Product;
 import com.ecomdemo.product.ProductService;
 import com.ecomdemo.security.CurrentUser;
 import java.time.Instant;
 import java.util.List;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,7 +40,7 @@ class OrderPlacementService {
     private final ProductService productService;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
-    private final ApplicationEventPublisher events;
+    private final OutboxWriter outbox;
 
     OrderPlacementService(
             OrderRepository orderRepository,
@@ -48,13 +48,13 @@ class OrderPlacementService {
             ProductService productService,
             OrderAuditService orderAuditService,
             CurrentUser currentUser,
-            ApplicationEventPublisher events) {
+            OutboxWriter outbox) {
         this.orderRepository = orderRepository;
         this.cartService = cartService;
         this.productService = productService;
         this.orderAuditService = orderAuditService;
         this.currentUser = currentUser;
-        this.events = events;
+        this.outbox = outbox;
     }
 
     /**
@@ -108,12 +108,21 @@ class OrderPlacementService {
             Order placed = orderRepository.save(order);
             cartService.clearCart(cart);
 
-            // Announced INSIDE the transaction and delivered after it commits — the same shape
-            // the cache evictor uses, and for the same reason: a message cannot be un-sent, so
-            // an order that might still roll back must not be announced. What listens is
-            // OrderEventPublisher, which puts it on Kafka; this method neither knows nor cares
-            // that Kafka exists, which is what keeps a broker outage out of the checkout path.
-            events.publishEvent(
+            // The event is written to the OUTBOX, in this transaction, as one more insert
+            // alongside the order and the stock reduction. That single line is the whole of
+            // Phase 18.
+            //
+            // Phase 17 published a Spring application event here and let an AFTER_COMMIT listener
+            // put it on Kafka. The shape was right — nothing announced until the order was real —
+            // but it left the dual-write window: commit, then a separate send that a dead broker
+            // or a dying process could swallow. It was measured, not feared: four orders lost
+            // their notification permanently in that phase's failure test.
+            //
+            // Now the event commits or rolls back WITH the order, because it is the same
+            // transaction and the same database. OutboxRelay does the sending afterwards, from
+            // the table. This method still neither knows nor cares that Kafka exists — the
+            // difference is that now, neither does the guarantee.
+            outbox.append(
                     OrderPlacedEvent.of(
                             placed.getId(),
                             placed.getUsername(),
