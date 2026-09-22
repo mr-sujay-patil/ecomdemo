@@ -2872,6 +2872,15 @@ cost a container start each time.
 
 ## Known gaps (closed by later phases)
 
+- **Two stat panels on the overview dashboard mislead.** `Orders placed / min` and
+  `Failed checkouts` reduce an *instantaneous* rate with `lastNotNull`, while `Revenue` and
+  `Average order value` beside them aggregate over the *selected range* — so one row of four panels
+  answers questions about two different time windows. With traffic paused the first reads `0.00`
+  for an hour in which 34 orders were placed, and the failed-checkout ratio goes `NaN`, which
+  `lastNotNull` skips, leaving a stale figure displayed as if it were current. Found by looking at
+  the dashboard rather than by any test: `DashboardMetricsTest` checks that panels reference meters
+  that exist, and these do. The fix is to make all four range-scoped; it is deliberately not
+  bundled into an unrelated refactor.
 - **Two application instances would both publish every outbox row.** The relay takes no lock, so
   two instances polling the same table can read the same pending row and both send it. It is
   survivable rather than broken — the duplicate carries the same `event_id` and the consumer's

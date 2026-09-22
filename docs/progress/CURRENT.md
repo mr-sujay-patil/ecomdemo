@@ -57,9 +57,20 @@ decision of this phase.
   ~90 files. Not one changed.
 
 ## Open issues / blockers
-- Carried from Phases 15-17 and still unseen by human eyes: the Grafana dashboards' RENDER, and
-  Kafka UI at http://localhost:8090. Both need the stack up (`docker compose up -d`), which is
-  currently DOWN. Steps: `docs/test-reports/phase-15.md` §8.
+- ✅ CLOSED 2026-09-23: the Grafana dashboards' RENDER and Kafka UI, carried since Phase 15, have
+  now been looked at by the user. Both render correctly. Do NOT re-raise this.
+  - Verified: checkout latency draws three quantile lines (the histogram buckets work), checkout
+    rate by outcome is stacked and shows both `placed` and `empty_cart`, database `pending` is flat
+    at zero, the Logs dashboard returns both lines for one correlation ID, and Kafka UI shows 25
+    messages across 3 partitions keyed by order id with an empty DLT.
+  - NOTE: the Phase 15 report's manual steps name a login `asha` that does not exist. The working
+    credentials are `smoke-customer` / `smoke-test-password` (API) and `admin` / `admin` (Grafana).
+- ❗ NEW KNOWN DEFECT, found by that verification, NOT fixed in this phase: two of the four stat
+  panels on `EcomDemo Overview` mislead. `Orders placed / min` showed 0.00 for an hour in which
+  Prometheus confirms 34.26 orders occurred, and `Failed checkouts` showed a STALE 11.82% because
+  its ratio goes NaN and `lastNotNull` skips nulls but not zeros. Full entry in `docs/decisions.md`.
+  Agreed plan: fix on its own `fix/dashboard-stat-reducers` branch AFTER PR #24 merges, following
+  the Phase 13 cache-defect precedent. Not a blocker for Phase 19.
 
 ## Decisions this phase (copied to docs/decisions.md ✅ — 8 entries)
 - Modulith as `-api` (compile, annotations go on main source) + `-core`/`-docs` (test). Boot 4.1.1
