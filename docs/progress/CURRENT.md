@@ -2,119 +2,76 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-22
-- **Phase:** 18: Reliable Event Publishing (Transactional Outbox)
-- **Branch:** feature/phase-18-outbox
-- **Step:** PR_OPEN
+- **Updated:** 2026-09-23
+- **Phase:** 19: Modular Monolith (Spring Modulith)
+- **Branch:** feature/phase-19-modulith
+- **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #23 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
-  https://github.com/mr-sujay-patil/ecomdemo/pull/23
-- **Waiting for user:** YES — review and merge PR #23
+- **PR:** none yet
+- **Waiting for user:** NO
 
-## Phase 17 merge verification (PASSED 2026-09-22)
-PR #21 merged as merge commit 68769a6 (parents c9fa121 + 90d5361), then follow-up PR #22 merged
-as a70537f (parents 68769a6 + c7450e3) for the defect the verification itself found: the Loki
-wait loop in the smoke test broke at `-gt 0` lines while the next check asserts `-ge 2`, so a cold
-stack whose two requests land in separate Alloy batches failed it. Branch is an ancestor of
-`main`, no missing commits, no file diff, all 19 remote branches intact. CI on `main` green at
-a70537f. `./mvnw clean verify` on `main` -> **278 + 77**, 0 failures, 0 skipped.
-`scripts/smoke-test.sh` on `main` -> **252 passed, 0 failed** warm, and **252 passed, 0 failed**
-again after `docker compose restart loki alloy`, which is the cold path that caught the defect.
+## Phase 18 merge verification (PASSED 2026-09-23)
+PR #23 merged as merge commit 90d5d68 (parents a70537f + 3ea4c1d). Branch is an ancestor of
+`main`, no missing commits, no file diff, all 20 remote branches intact, V10 present, and both
+classes the phase deleted (`OrderEventPublisher`, `MessagingAsyncConfig`) are gone from `main`.
+CI on `main` green at 90d5d68. `./mvnw clean verify` on `main` -> **310 + 82**, 0 failures,
+0 skipped. `scripts/smoke-test.sh` on `main` -> **270 passed, 0 failed, 0 skipped**.
+Tag `phase-18-complete` pushed, pointing at 90d5d68.
 
-⚠️ TAG INCONSISTENCY, left for the user to decide. `phase-17-complete` points at 68769a6, the
-phase PR's merge, NOT at a70537f, the follow-up's. `phase-16-complete` points at ITS follow-up
-(dc35a85, PR #19), so the two phases are tagged by different rules. Moving a pushed tag needs a
-force-push, which hard rule 6 forbids, so it was left alone and reported instead. The tag was also
-already on origin when the previous session ended, created 22:09 against a 21:40 merge while
-CURRENT.md still read PR_OPEN - so it was verified from scratch here, not trusted.
+## A process question that was raised and CLOSED (2026-09-23)
+Mid-phase the user asked for targeted tests only, and no full builds or `docker compose up`
+without asking. That contradicts execution-protocol §5 and testing-protocol, so it was raised
+rather than resolved unilaterally. The user's answer: **"Skip my recent instruction and follow the
+same instructions that we have decided on earlier."** So the protocol stands unchanged - full
+`./mvnw clean verify` and `scripts/smoke-test.sh` at merge verification and before every PR. The
+memory written for the interim preference has been deleted. Do not re-raise this.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] An `outbox_events` table
-- [x] Checkout saves the order and the outbox row in ONE transaction
-- [x] A scheduled relay publishes pending rows and marks them as sent
-- [x] A demo with Kafka down
-- [x] A cleanup job for old rows
-- [x] Done when: no events are lost while Kafka is down
-- [x] Smoke test additions: stop Kafka, place an order (it succeeds), start Kafka, confirm the
-      notification appears within a timeout - 18 new checks, all passing
-- [x] Testing protocol run in full + docs/test-reports/phase-18.md
-- [x] README section, docs/decisions.md entries (10), RECENT.md rotation (Phase 16 archived),
+- [ ] Modules: `catalog`, `inventory`, `customer`, `cart`, `order`, `notification`, `shared`,
+      each with a public API and an `internal` package
+- [ ] Events replace direct cross-module calls where appropriate
+- [ ] An `ApplicationModules.verify()` test and generated documentation
+- [ ] Done when: the verification test passes and the diagrams show clean dependencies
+- [ ] Smoke test: NO new checks - the existing script must still pass UNCHANGED (270 checks)
+- [ ] Testing protocol run in full + docs/test-reports/phase-19.md
+- [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 17 archived),
       tracker -> 🔵
-- [x] PR raised (#23)
+- [ ] PR raised
 
-## What this phase exists to fix (measured in Phase 17, not assumed)
-Phase 17 publishes AFTER_COMMIT, which leaves the dual-write window open: the order commits, then
-the send happens separately. With Kafka stopped, Phase 17's failure test lost **4 orders their
-notification, permanently**. That number is the baseline this phase has to drive to zero.
+## Where the code is today (surveyed, not yet moved)
+Domain-ish: `product` (6), `customer` (6), `cart` (6), `order` (12), `notification` (4).
+Infrastructure/cross-cutting: `batch` (17), `messaging` (14), `security` (9), `common` (7),
+`auth` (5), `metrics` (4), `cache` (4), `logging` (3).
+The phase names modules `catalog` and `inventory` that do NOT exist as packages yet - `catalog` is
+today's `product`, and `inventory` is the stock behaviour currently inside `Product`/`ProductService`
+and exercised by `OrderPlacementService`. Deciding how far to split those is the first real
+decision of this phase.
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire **310** (was 278) + Failsafe **82**
-  (was 77), 0 failures, 0 skipped, 8m24s.
-- 2026-09-22: `scripts/smoke-test.sh` -> **270 passed** (was 252), 0 failed, 0 skipped.
-- 2026-09-22: THE OUTAGE, for real, in the smoke test: Kafka stopped -> checkout returned 201,
-  the event sat in the outbox, the relay recorded its failed attempts on the row; Kafka started
-  -> the order was notified with nobody replaying anything. Phase 17 lost 4 orders under this
-  same test. This phase loses **zero**.
-- 2026-09-22: A REGRESSION the smoke test caught and the other two suites did not - see the
-  decisions below. Both were green while the consumer's whole partition was stopped.
+- 2026-09-23 (on `main`, merge verification): `./mvnw clean verify` -> 310 + 82, 0 failures,
+  0 skipped, 1m39s. `scripts/smoke-test.sh` -> 270 passed, 0 failed, 0 skipped.
 
 ## Open issues / blockers
-- Carried from Phases 15-16: the Grafana dashboards' RENDER has still never been looked at by
-  human eyes (all data behind them is verified). Chrome's site permissions block localhost:3000
-  for browser automation here. Steps: `docs/test-reports/phase-15.md` §8 and the "EcomDemo Logs"
-  dashboard with a correlation ID pasted into its textbox.
-- Kafka UI at http://localhost:8090 is also still unseen by the user (Phase 17).
+- Carried from Phases 15-17 and still unseen by human eyes: the Grafana dashboards' RENDER, and
+  Kafka UI at http://localhost:8090. Both need the stack up (`docker compose up -d`), which is
+  currently DOWN. Steps: `docs/test-reports/phase-15.md` §8.
 
-## Decisions this phase (to be copied into docs/decisions.md)
-- The event is written to `outbox_event` in the ORDER's transaction; `OutboxWriter` is
-  `Propagation.MANDATORY` so it cannot accidentally open one of its own and re-create the dual
-  write behind code that looks correct.
-- Two identifiers per row: a BIGINT sequence for publication ORDER, a UUID for the idempotency
-  key the consumer matches. Neither can do the other's job.
-- `published_at IS NULL` is the entire state machine - a nullable timestamp cannot contradict
-  itself the way a `status` column can.
-- The payload is serialised at WRITE time, with the CONSUMER's mapper
-  (`JacksonUtils.enhancedObjectMapper()`, Jackson 2), not Boot 4's Jackson 3 - the two disagree
-  about how an Instant is written and nothing in the build would catch it.
-- The relay waits for the broker's ACK before marking a row published, and stops the batch at the
-  first failure (ordering, and not spending max.block.ms on every remaining row).
-- No maximum attempt count: the failure this is built for is "the broker is unreachable", and
-  giving up after N would lose the events the phase exists to keep.
-- The cleanup sweeps only PUBLISHED rows. A sweep by age alone would delete pending events
-  precisely because an outage made them old.
-- The relay's producer is NOT a KafkaTemplate bean - see the regression above.
-- SELECT ... FOR UPDATE SKIP LOCKED is DEFERRED, not solved: two instances would both publish,
-  and the consumer's idempotency absorbs it. Recorded as a known limitation.
+## Decisions this phase
+- (none yet)
 
 ## Environment left behind
-Docker Desktop RUNNING. NINE containers up (`ecomdemo-app`, `-db`, `-cache`, `-prometheus`,
-`-grafana`, `-loki`, `-alloy`, `-kafka`, `-kafka-ui`), schema **v9**. The SonarQube stack is
-STOPPED; `docker compose -f compose.sonar.yaml up -d` brings it back. `.env` holds a real
-JWT_SECRET and is gitignored.
-
-A stray `ecomdemo-postgres` container from 2026-09-21, outside `compose.yaml`, was holding port
-5432 and blocking `docker compose up`. It was STOPPED, not removed: its data is intact and
-`docker start ecomdemo-postgres` restores it, though nothing in this project wants it. Three
-abandoned Testcontainers containers were removed. An untracked `handoff.md` (a pasted Phase 15
-session transcript) sits in the working tree, unstaged and unused - not this session's file, so
-it was left alone.
-
-## ⚠️ New working preference from the user (2026-09-23), READ BEFORE ACTING
-The user asked, at the end of this phase: run only TARGETED tests (single class/method), never the
-full suite unless asked; do NOT run full builds or `docker compose up` without asking first; do not
-start long-running processes or file watchers.
-
-This CONFLICTS with `docs/process/execution-protocol.md` §5 and `testing-protocol.md`, which
-require `./mvnw clean verify` and `scripts/smoke-test.sh` on `main` at merge verification, and a
-full testing-protocol run before a PR. The conflict has NOT been resolved yet - ASK before the
-next merge verification rather than either skipping it or running it unasked. Everything recorded
-above was run before the preference was given.
+Docker Desktop running but the compose stack is **DOWN** - `docker compose down` was run at the
+user's request after Phase 18's verification. Named volumes were kept, so `docker compose up -d`
+restores the data. Schema on that volume is **V10**. The SonarQube stack is also stopped;
+`docker compose -f compose.sonar.yaml up -d` brings it back. `.env` holds a real JWT_SECRET and is
+gitignored. An untracked `handoff.md` (a pasted Phase 15 session transcript) sits in the working
+tree, unstaged and unused - not this session's file, so it has been left alone.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point.
-https://github.com/mr-sujay-patil/ecomdemo/pull/23
-- If they say `merged, continue` -> ASK first how merge verification should run, given the
-  preference above, then act on their answer. Do not silently skip it and do not silently run it.
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
-- Do NOT merge unless they say so explicitly.
-- Phase 19 is `docs/phases/phase-19-modulith.md` (Spring Modulith).
+Start step 5 (IMPLEMENTING). Order that keeps the build green throughout:
+1. Add `spring-modulith` (BOM + starter + the test artifact), and write the
+   `ApplicationModules.verify()` test FIRST so the current violations are visible before anything
+   moves.
+2. Decide the module map (see "Where the code is today"), record it in `docs/decisions.md`.
+3. Move packages one module at a time, `./mvnw test` after each.
+4. Generate the documentation (C4/PlantUML) into `docs/modules/`.

@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 18: Reliable Event Publishing (tag: pending, PR: pending)
+## Phase 18: Reliable Event Publishing (tag: phase-18-complete, PR #23)
 **What exists now:** A checkout writes its `OrderPlacedEvent` into `outbox_event` in the ORDER's
 own transaction, and a scheduled relay publishes pending rows to `orders.placed` and marks them
 sent. The dual-write gap Phase 17 measured is closed: with the broker stopped, the checkout still
