@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 10: Containerization
 - **Branch:** feature/phase-10-docker
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #10 — raised, awaiting review
+- **Waiting for user:** YES — review and merge PR #10, then say `merged, continue`
 
 ## Phase 09 merge verification (passed 2026-09-22)
 PR #9 MERGED with a merge commit (d2ab0a2, 2 parents: 0af4342 + 7678106); branch is an ancestor
@@ -32,7 +32,7 @@ tag `phase-09-complete` pushed.
 - [x] Smoke test runs against the compose stack instead of `spring-boot:run`
 - [x] Testing protocol run in full + docs/test-reports/phase-10.md
 - [x] README section, decisions.md, RECENT.md rotation (Phase 08 archived), tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#10)
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 190 + Failsafe 30, 0 failures,
@@ -83,4 +83,12 @@ first or they clash.
 `ecomdemo:buildpack` was deleted after the comparison. No stray Java processes on the host.
 
 ## Next action
-Push the branch and raise the PR (`gh pr create --base main`), then STOP for the user's review.
+STOPPED at the mandatory post-PR stop point. Wait for the user.
+- If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
+  `./mvnw clean verify` and `scripts/smoke-test.sh` against the compose stack
+  (`docker compose up -d --build`), the git-workflow Verification Checklist, then tag and push
+  `phase-10-complete`, then start Phase 11 (`docs/phases/phase-11-github-actions.md`).
+  NOTE from Phase 11 onwards, execution-protocol §5 also requires confirming CI on `main` is
+  green — that does not apply to this merge, since CI does not exist yet.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
