@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-22
 - **Phase:** 11: Continuous Integration
 - **Branch:** feature/phase-11-github-actions
-- **Step:** PR_OPEN
+- **Step:** VERIFYING — **BLOCKED**
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #11 — raised (ready for review), CI green
-- **Waiting for user:** YES — review and merge PR #11, then say `merged, continue`
+- **PR:** #11 — MERGED (95fd430). Merge verification is INCOMPLETE: see below.
+- **Waiting for user:** YES — a GitHub settings change is needed before Phase 11 can be tagged. See "Open issues / blockers".
 
 ## Phase 10 merge verification (passed 2026-09-22)
 PR #10 MERGED with a merge commit (35d99a5, 2 parents: d2ab0a2 + 33a5095); branch is an ancestor
@@ -48,15 +48,27 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
 - 2026-09-22 local: `scripts/smoke-test.sh` against the compose stack -> 125 passed, 0 failed,
   0 skipped. The script is unchanged this phase.
 
-## Open issues / blockers
-- Both opening questions are answered: Testcontainers works on `ubuntu-latest` unchanged, and
-  `packages: write` is granted on the publish job alone.
-- **⚠️ "a merge publishes an image" is unverified**, and cannot be verified before the merge: the
-  publish job is gated on a push to `main`. Confirm it during Phase 11's merge verification —
-  `docs/test-reports/phase-11.md` §5 has the exact commands.
-- **⚠️ The gate is not enforced yet.** `required_status_checks` on `main` is `null`, so a red
-  check shows as UNSTABLE rather than blocking the merge. That is the user's manual step, after
-  the merge, in the GitHub UI.
+## Open issues / blockers — PHASE 11 IS NOT COMPLETE
+1. **🔴 The CI run on `main` for the merge FAILED.** Run 35684930913, one attempt, no re-run.
+   `Build and test` ✅; `Publish image to GHCR` ❌ at the "Build and push" step:
+   `denied: permission_denied: write_package` pushing `ghcr.io/mr-sujay-patil/ecomdemo:latest`.
+   The workflow itself is correct — the job log's "Set up job" shows the token really did get
+   `Packages: write`, and `Login Succeeded!`. The denial is GHCR-side.
+   **Root cause:** `repos/.../actions/permissions/workflow` -> `default_workflow_permissions:
+   "read"`, and the new user-owned package has no Actions write access for this repository.
+   **Fix (USER, in GitHub settings — not a code change, and not mine to make):** either
+   Settings -> Actions -> General -> Workflow permissions -> "Read and write permissions";
+   or the package page -> Package settings -> Manage Actions access -> add `ecomdemo` with the
+   **Write** role. Then re-run the failed job (`gh run rerun 35684930913 --failed`).
+2. **🟠 A half-published image is in GHCR.** `:latest` EXISTS (a real OCI index, publicly
+   pullable) but `:sha-95fd430` does NOT — the push was denied partway through. So `latest`
+   currently points at an image no successful run produced, which is a neat illustration of why
+   a deployment should never pin `latest`. A successful re-run overwrites it and adds the SHA tag.
+3. **⚠️ `required_status_checks` on `main` is still `null`.** A red check shows as UNSTABLE
+   rather than blocking the merge — which is exactly what happened here: PR #11 was mergeable
+   while this was unenforced. Still the user's manual step.
+4. **⚠️ Docker Desktop is not running**, so `./mvnw clean verify` and `scripts/smoke-test.sh`
+   on `main` could NOT be run as part of this verification. They must be run before tagging.
 
 ## Decisions this phase (copied to docs/decisions.md ✅ — 11 entries)
 - One workflow, two jobs, `publish` with `needs: build` — that is what makes the gate real.
@@ -71,22 +83,22 @@ healthy, "Successfully validated 6 migrations" / schema v6; `scripts/smoke-test.
 - The branch protection change is left to the user, as the phase file assigns it.
 
 ## Environment left behind
-The compose stack is RUNNING and healthy (`ecomdemo-app`, `ecomdemo-db`), schema v6, data in the
-named volume `ecomdemo_postgres-data`. The pre-compose container `ecomdemo-postgres` is stopped,
-not deleted. `.env` exists locally with a real JWT_SECRET and is gitignored. No stray Java
-processes.
+**Docker Desktop is STOPPED**, so the compose stack is down. Start Docker Desktop, then
+`docker compose up -d` to bring `ecomdemo-app` and `ecomdemo-db` back; the named volume
+`ecomdemo_postgres-data` still holds the v6 database. The pre-compose container
+`ecomdemo-postgres` is stopped, not deleted. `.env` exists locally with a real JWT_SECRET and is
+gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR #11 is ready for review and CI is green
-(mergeStateStatus CLEAN, run 35684569454).
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`. From
-  THIS phase onwards that also means confirming CI on `main` is green — and here it is doubly
-  important, because the merge run is the first and only chance to verify the ⚠️ item above:
-  that a merge publishes an image. Commands in docs/test-reports/phase-11.md §5. Then the usual
-  `./mvnw clean verify` + `scripts/smoke-test.sh` against the compose stack, the git-workflow
-  Verification Checklist, tag and push `phase-11-complete`, then start Phase 12
-  (`docs/phases/phase-12-sonarqube.md`).
-- Remind the user of their manual step: add "Require status checks to pass" to the `main` branch
-  protection. Until then CI reports but does not enforce.
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
-- Do NOT merge unless they say exactly `approved, merge it`.
+**STOPPED. Phase 11 is NOT tagged and Phase 12 has NOT been started** — merge verification failed
+(blockers 1 and 4 above), and execution-protocol §5 says to stop and report rather than proceed.
+
+When the user has done the GitHub settings change in blocker 1, and Docker Desktop is running:
+1. `gh run rerun 35684930913 --failed` and watch it go green.
+2. Confirm the image: `docker manifest inspect ghcr.io/mr-sujay-patil/ecomdemo:sha-95fd430`
+   and `:latest` — both must exist.
+3. `./mvnw clean verify` on `main`, and `scripts/smoke-test.sh` against `docker compose up -d`.
+4. Then the git-workflow Verification Checklist (already passed: merge commit with 2 parents,
+   ancestor, no diffs, branch intact, artifacts present), tag and push `phase-11-complete`,
+   update `docs/test-reports/phase-11.md` §5 with the real result, and start Phase 12
+   (`docs/phases/phase-12-sonarqube.md`).
