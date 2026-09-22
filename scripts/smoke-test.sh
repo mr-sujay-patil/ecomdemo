@@ -1373,6 +1373,230 @@ fi
 as_customer
 
 # --------------------------------------------------------------------------------------------
+# 12. Centralized logging (Phase 16)
+# --------------------------------------------------------------------------------------------
+# Two halves, and they fail for different reasons. The correlation ID half talks only to the
+# application and works wherever the script does, including `./mvnw spring-boot:run`. The Loki
+# half needs the compose stack and is SKIPPED, never passed, when Loki is not reachable.
+section "Centralized logging"
+
+# header <METHOD> <PATH> <HEADER> [INBOUND-CORRELATION-ID] -> prints that response header's value
+# Headers rather than the body, so `request` above is no use here: -D writes the response headers
+# to a file, and the value is pulled out case-insensitively because HTTP/2 lowercases them.
+header() {
+    local method="$1" path="$2" want="$3" inbound="${4:-}" headers
+    headers="$(mktemp)"
+    if [ -n "$inbound" ]; then
+        curl -sS -o /dev/null -D "$headers" -X "$method" "$BASE_URL$path" \
+            -H "X-Correlation-Id: $inbound" ${AUTH:+-H "Authorization: Bearer $AUTH"}
+    else
+        curl -sS -o /dev/null -D "$headers" -X "$method" "$BASE_URL$path" \
+            ${AUTH:+-H "Authorization: Bearer $AUTH"}
+    fi
+    tr -d '\r' < "$headers" | awk -v want="$want" 'BEGIN{IGNORECASE=1} $1 == want":" {print $2}' | tail -1
+    rm -f "$headers"
+}
+
+CORRELATION_HEADER="X-Correlation-Id"
+
+as_anonymous
+FIRST_ID="$(header GET /api/products "$CORRELATION_HEADER")"
+SECOND_ID="$(header GET /api/products "$CORRELATION_HEADER")"
+
+check "every response carries an $CORRELATION_HEADER header" "True" \
+    "$([ -n "$FIRST_ID" ] && echo True || echo False)"
+
+# The same pattern the application accepts on the way in: letters, digits, hyphen, underscore,
+# 8 to 64 characters. A generated one is a 32-character UUID with the hyphens removed.
+check "and the generated ID is safe to write into a log line" "True" \
+    "$(printf '%s' "$FIRST_ID" | grep -Eq '^[A-Za-z0-9_-]{8,64}$' && echo True || echo False)"
+
+check "two requests get two different IDs" "True" \
+    "$([ "$FIRST_ID" != "$SECOND_ID" ] && echo True || echo False)"
+
+# The ID this run will look for in Loki. Unique per run, so a query for it cannot be satisfied by
+# a line an earlier run left behind - which is exactly the false pass this check exists to avoid.
+SMOKE_CORRELATION_ID="smoke-$(date +%s)-$$"
+
+check "an ID supplied by the caller is reused, not replaced" "$SMOKE_CORRELATION_ID" \
+    "$(header GET /api/products "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID")"
+
+# Log injection: the newline would end the real log entry and everything after it would be a log
+# entry of the caller's own writing, in the store an incident review trusts.
+INJECTED="$(header GET /api/products "$CORRELATION_HEADER" "abc12345 spaces and symbols!")"
+check "an unsafe ID is replaced rather than echoed" "True" \
+    "$([ "$INJECTED" != "abc12345 spaces and symbols!" ] && \
+        printf '%s' "$INJECTED" | grep -Eq '^[A-Za-z0-9_-]{8,64}$' && echo True || echo False)"
+
+# The ordering proof: a 401 is answered inside the Spring Security chain and never reaches a
+# controller, so a header on it means the filter really does run ahead of security.
+check "a request refused with 401 still carries one" "True" \
+    "$([ -n "$(header GET /api/cart "$CORRELATION_HEADER")" ] && echo True || echo False)"
+
+check "a 404 carries one" "True" \
+    "$([ -n "$(header GET /api/products/99999999 "$CORRELATION_HEADER")" ] && echo True || echo False)"
+
+check "Actuator's endpoints carry one too" "True" \
+    "$([ -n "$(header GET /actuator/health "$CORRELATION_HEADER")" ] && echo True || echo False)"
+
+as_customer
+
+# --- Loki ------------------------------------------------------------------------------------
+LOKI_URL="${LOKI_URL:-http://localhost:3100}"
+ALLOY_URL="${ALLOY_URL:-http://localhost:12345}"
+
+# loki_count <logql> -> prints how many log lines the query matched in the last 15 minutes
+loki_count() {
+    curl -sSG "$LOKI_URL/loki/api/v1/query_range" \
+        --data-urlencode "query=$1" \
+        --data-urlencode "since=15m" \
+        --data-urlencode "limit=1000" 2>/dev/null \
+        | python3 -c "
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(0); raise SystemExit
+print(sum(len(s.get('values', [])) for s in d.get('data', {}).get('result', [])))
+" 2>/dev/null || echo 0
+}
+
+# Loki answers /ready with 503 and a reason until its ingester has joined its own ring and sat
+# there for fifteen seconds, and after a container recreate that can take a while. A single
+# request would therefore SKIP this whole section on a stack that is merely still starting, which
+# reads exactly like a stack that is broken - so ask for up to thirty seconds before giving up.
+LOKI_READY=false
+for _ in $(seq 1 15); do
+    if curl -fsS "$LOKI_URL/ready" >/dev/null 2>&1; then LOKI_READY=true; break; fi
+    sleep 2
+done
+
+if [ "$LOKI_READY" = true ]; then
+    # Generate traffic under the known ID, then wait for it to arrive. The pipeline is
+    # deliberately asynchronous - the application writes to stdout and is done; Docker buffers,
+    # Alloy tails and batches, Loki flushes - so a query immediately after the request is a race
+    # this loop exists to lose safely. Ten seconds is generous for a local stack.
+    as_anonymous
+    header GET /api/products "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
+    header GET /api/products/99999999 "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
+    as_customer
+
+    LINES_FOR_ID=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        LINES_FOR_ID="$(loki_count "{service_name=\"app\"} | correlation_id = \`$SMOKE_CORRELATION_ID\`")"
+        [ "$LINES_FOR_ID" -gt 0 ] && break
+        sleep 1
+    done
+
+    # THE PHASE'S "DONE WHEN", as a scripted check: all the logs for one request, found by its
+    # correlation ID alone.
+    check "querying Loki by correlation ID returns this request's log lines" "True" \
+        "$([ "$LINES_FOR_ID" -gt 0 ] && echo True || echo False)"
+
+    check "and it finds both requests made under that ID" "True" \
+        "$([ "$LINES_FOR_ID" -ge 2 ] && echo True || echo False)"
+
+    # The filter is `| correlation_id = ...`, which is a STRUCTURED METADATA match: the ID is
+    # stored with the line and searched, never indexed as a label. A label per request would be a
+    # Loki stream per request, which is the documented way to bring the thing down.
+    check "the ID is structured metadata, so it is not a label" "False" \
+        "$(curl -sS "$LOKI_URL/loki/api/v1/labels" \
+            | python3 -c "
+import json, sys
+print('correlation_id' in json.load(sys.stdin).get('data', []))" 2>/dev/null)"
+
+    # What IS a label: the level, which has five values, and the service.
+    check "the log level is a Loki label" "True" \
+        "$(curl -sS "$LOKI_URL/loki/api/v1/label/level/values" \
+            | python3 -c "
+import json, sys
+print('INFO' in json.load(sys.stdin).get('data', []))" 2>/dev/null)"
+
+    check "the application's stream is labelled service_name=app" "True" \
+        "$(curl -sS "$LOKI_URL/loki/api/v1/label/service_name/values" \
+            | python3 -c "
+import json, sys
+print('app' in json.load(sys.stdin).get('data', []))" 2>/dev/null)"
+
+    # `@timestamp` is the ECS spelling and appears in no plain-text log line, so finding it is
+    # proof that what reached Loki is the JSON document and not the pattern layout - the exact
+    # failure that happens when LOG_FORMAT is unset and which every check above survives.
+    check "the lines are the ECS JSON the application wrote, not text" "True" \
+        "$([ "$(loki_count "{service_name=\"app\"} |= \`@timestamp\`")" -gt 0 ] \
+            && echo True || echo False)"
+
+    check "PostgreSQL and Redis are shipped as well, for the context an app log lacks" "True" \
+        "$(curl -sS "$LOKI_URL/loki/api/v1/label/service_name/values" \
+            | python3 -c "
+import json, sys
+v = json.load(sys.stdin).get('data', [])
+print('db' in v and 'cache' in v)" 2>/dev/null)"
+
+    # --- No sensitive data in logs -----------------------------------------------------------
+    # The phase's fourth deliverable, asserted the only way that means anything: by searching the
+    # log store for the secrets this very script has been sending all along. The customer's
+    # password went to POST /api/auth/login in this run, and its token has been on the
+    # Authorization header of most requests since.
+    check "the customer's password appears nowhere in the logs" 0 \
+        "$(loki_count "{service_name=\"app\"} |= \`$CUSTOMER_PASSWORD\`")"
+
+    check "the admin's password appears nowhere in the logs" 0 \
+        "$(loki_count "{service_name=\"app\"} |= \`$ADMIN_PASSWORD\`")"
+
+    # A JWT signature is unique to one token, so finding it anywhere in the logs would mean a
+    # bearer credential had been written to a store that is replicated and long-lived.
+    TOKEN_SIGNATURE="$(printf '%s' "$AUTH" | cut -d. -f3 | cut -c1-24)"
+    check "no bearer token is written to the logs" 0 \
+        "$(loki_count "{service_name=\"app\"} |= \`$TOKEN_SIGNATURE\`")"
+
+    check "and no Authorization header is logged either" 0 \
+        "$(loki_count "{service_name=\"app\"} |= \`Bearer \`")"
+
+    # --- Alloy ---------------------------------------------------------------------------------
+    if curl -fsS "$ALLOY_URL/-/ready" >/dev/null 2>&1; then
+        check "Alloy is running the pipeline and has shipped entries to Loki" "True" \
+            "$(curl -sS "$ALLOY_URL/metrics" \
+                | awk '/^loki_write_sent_entries_total/ {total += $2} END {print (total > 0)}' \
+                | sed 's/^1$/True/; s/^0$/False/')"
+    else
+        skip "Alloy checks" "no Alloy at $ALLOY_URL (set ALLOY_URL to override)"
+    fi
+
+    # --- Grafana's side of it --------------------------------------------------------------------
+    if curl -fsS "$GRAFANA_URL/api/health" >/dev/null 2>&1; then
+        check "Grafana provisioned the Loki datasource" "ecomdemo-loki" \
+            "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/datasources" | python3 -c "
+import json, sys
+print(next((d['uid'] for d in json.load(sys.stdin) if d['type'] == 'loki'), 'MISSING'))")"
+
+        check "the logs dashboard is provisioned from the repository" "EcomDemo Logs" \
+            "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/dashboards/uid/ecomdemo-logs" \
+                | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('dashboard', {}).get('title', 'MISSING'))")"
+
+        # Grafana proxying a query is the last link in the chain: it is what the dashboard
+        # actually does, and it can fail on its own (a wrong URL, a datasource the browser can
+        # reach but the server cannot) while every check above still passes.
+        check "and Grafana itself can query Loki for that correlation ID" "True" \
+            "$(curl -sSG -u "$GRAFANA_AUTH" \
+                "$GRAFANA_URL/api/datasources/proxy/uid/ecomdemo-loki/loki/api/v1/query_range" \
+                --data-urlencode "query={service_name=\"app\"} | correlation_id = \`$SMOKE_CORRELATION_ID\`" \
+                --data-urlencode "since=15m" \
+                | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(sum(len(s.get('values', [])) for s in d.get('data', {}).get('result', [])) > 0)" 2>/dev/null)"
+    else
+        skip "Grafana logging checks" "no Grafana at $GRAFANA_URL (set GRAFANA_URL to override)"
+    fi
+else
+    skip "Loki checks" "no Loki at $LOKI_URL (set LOKI_URL to override)"
+fi
+
+as_customer
+
+# --------------------------------------------------------------------------------------------
 # Summary
 # --------------------------------------------------------------------------------------------
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed, %d skipped\n' \
