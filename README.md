@@ -8,7 +8,22 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 13: Caching** — the catalogue is now served from Redis. A repeated read of a product
+**Phase 14: Batch Processing** — the application can now do work that is not a request. Spring
+Batch adds two jobs: an ADMIN uploads a product CSV and it is imported in chunks, with invalid
+rows skipped up to a limit and written to an error file; and every night at 02:00 a job writes a
+sales report for the previous day.
+
+What makes this more than a loop is that **every run is written down**. A failed import can be
+restarted and resumes from the last committed chunk rather than from row one; a job that has
+already completed for a given input will not run again. Both facts live in six `BATCH_*` tables,
+which is also where the phase's real lesson came from: Spring Batch 6 defaults to an *in-memory*
+JobRepository, under which all of that appears to work and none of it survives a restart. See
+[Batch processing](#batch-processing).
+
+<details>
+<summary>Phase 13: Caching</summary>
+
+The catalogue is served from Redis. A repeated read of a product
 never reaches PostgreSQL; an edit refreshes the entry in place; a delete removes it. Everything
 has a TTL, because explicit eviction handles the changes this application makes and the TTL
 handles the ones it does not.
@@ -21,6 +36,8 @@ checkout use — is deliberately left alone, because it returns the live entity.
 
 Stopping Redis does not stop the shop — a cache error logs a warning and falls through to the
 database, which is verified by actually stopping it.
+
+</details>
 
 <details>
 <summary>Phase 12: Code Quality</summary>
@@ -112,6 +129,7 @@ ecomdemo/
 ├── src/main/java/com/ecomdemo/
 │   ├── common/    # ApiError + @RestControllerAdvice shared by every feature
 │   ├── cache/     # cache names, per-cache TTL and serializers, hit/miss logging
+│   ├── batch/     # the two Spring Batch jobs, the admin endpoints, the JDBC JobRepository
 │   ├── security/  # the filter chain, the JWT key/encoder/decoder, CurrentUser, 401/403 handlers
 │   ├── auth/      # POST /api/auth/login: exchanging a password for a signed token
 │   ├── customer/  # accounts: registration, roles, the profile
@@ -122,7 +140,8 @@ ecomdemo/
 │   ├── application.properties       # shared by every profile
 │   ├── application-dev.properties   # PostgreSQL + Hikari (the default profile)
 │   └── db/migration/                # V1 schema, V2 seed, V3 category, V4 version + audit,
-│                                     # V5 users + seeded admin, V6 cart/orders per user
+│                                     # V5 users + seeded admin, V6 cart/orders per user,
+│                                     # V7 the Spring Batch tables, V8 index on product.name
 ├── src/test/java/com/ecomdemo/
 │   ├── support/   # TestData builders, PostgresContainerConfig, the IntegrationTest base class,
 │   │               # WithSecurityRules (imports the real rules into a slice), TestAuthentication
@@ -132,7 +151,7 @@ ecomdemo/
 │   └── application-it.properties    # the container's PostgreSQL, for the *IT tests (Failsafe)
 ├── Dockerfile     # multi-stage: JDK+Maven to build, JRE to run, non-root, layered jar
 ├── .dockerignore  # keeps target/, .git and .env out of the build context
-├── compose.yaml   # the app + PostgreSQL + Redis: health checks, a named volume, one network
+├── compose.yaml   # the app + PostgreSQL + Redis: health checks, named volumes, one network
 ├── compose.sonar.yaml  # SonarQube + its own PostgreSQL, started only for an analysis
 ├── .env.example   # every variable, documented; .env itself is gitignored
 ├── docs/          # roadmap, phase specs, process docs, decisions, progress
@@ -223,8 +242,8 @@ then checks the schema against the entities and fails the startup if they disagr
 In a second terminal, against either way of running it:
 
 ```bash
-./mvnw clean verify             # build and run all 220 tests (needs Docker for the 30 *IT)
-scripts/smoke-test.sh           # 125 end-to-end checks against the running app
+./mvnw clean verify             # build and run all 276 tests (needs Docker for the 47 *IT)
+scripts/smoke-test.sh           # 156 end-to-end checks against the running app
 ```
 
 Swagger UI is at <http://localhost:8080/swagger-ui.html> — every endpoint is listed with its
@@ -466,6 +485,13 @@ is the trade, and the retry budget is what makes it honest.
 | `POST` | `/api/orders` | **CUSTOMER** | Check out your cart (201 + `Location`) |
 | `GET` | `/api/orders` | **CUSTOMER** | Your own order history |
 | `GET` | `/api/orders/{id}` | **CUSTOMER** | One of your own orders |
+| `POST` | `/api/admin/batch/product-import` | **ADMIN** | Import a product CSV (`multipart/form-data`, part `file`) |
+| `GET` | `/api/admin/batch/executions/{id}` | **ADMIN** | Look one job run up in the JobRepository |
+| `POST` | `/api/admin/batch/executions/{id}/restart` | **ADMIN** | Restart a failed import from where it stopped |
+
+A `200` from the two `POST`s means the **job ran**, not that it succeeded — the body's `status`
+is the outcome, and a `FAILED` job comes back as a 200 with a failure message. Collapsing the two
+would leave nowhere to report the common case: a run that completed with rows skipped.
 
 An ADMIN is refused on the cart and orders, and that is deliberate: those endpoints act on "my"
 cart and "my" orders, and an administrator has neither. Nothing about being an admin implies
@@ -840,6 +866,242 @@ Redis offers a good deal more — hashes for storing an object field by field, s
 leaderboards and rate limiting, streams for event logs, sets for membership. None of it is reachable
 through `@Cacheable`; using it means a `RedisTemplate` and writing the access code yourself. Worth
 knowing the map is not the territory.
+
+## Batch processing
+
+Everything before this phase happened inside an HTTP request. Batch work does not: it processes a
+volume of data on a schedule or on demand, and the interesting questions are what happens when it
+is half done.
+
+Two jobs:
+
+| Job | Trigger | What it does |
+|---|---|---|
+| `productImportJob` | `POST /api/admin/batch/product-import` | Reads a product CSV, validates each row, and upserts the catalogue from it |
+| `salesReportJob` | `@Scheduled` cron, 02:00 daily | Writes a CSV of yesterday's order count, revenue and best sellers |
+
+### Try it
+
+```bash
+docker compose up -d --build
+TOKEN=$(curl -s -X POST localhost:8080/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"admin123"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["accessToken"])')
+
+# A file with one bad row in it.
+cat > /tmp/products.csv <<'CSV'
+name,description,price,stock_quantity,category
+Standing Desk,Electric, sit-stand,449.00,7,FURNITURE
+Monitor Arm,Single, gas-spring,79.50,25,ACCESSORY
+Broken Row,no price at all,,3,ACCESSORY
+CSV
+
+curl -s -X POST localhost:8080/api/admin/batch/product-import \
+  -H "Authorization: Bearer $TOKEN" -F "file=@/tmp/products.csv" | python3 -m json.tool
+```
+
+```json
+{
+  "execution": { "id": 1, "instanceId": 1, "jobName": "productImportJob",
+                 "status": "COMPLETED", "readCount": 3, "writeCount": 2, "skipCount": 1,
+                 "steps": [ { "name": "importProducts", "commitCount": 1, ... } ] },
+  "inputFile": "/var/lib/ecomdemo/batch/uploads/1591342e-...-products.csv",
+  "errorFile": "/var/lib/ecomdemo/batch/uploads/1591342e-...-products.csv.errors.csv"
+}
+```
+
+Two rows in, one rejected — and the rejection is not just a number:
+
+```bash
+docker exec ecomdemo-app sh -c 'cat /var/lib/ecomdemo/batch/uploads/*.errors.csv'
+```
+
+```
+line,reason,original_line
+4,"line 4: price is required","Broken Row,no price at all,,3,ACCESSORY"
+```
+
+Note the second and third rows of that file: the descriptions contain commas, so the tokenizer
+sees the wrong number of columns. That is *also* a skip, recorded the same way — the import does
+not silently import a shifted row.
+
+### Job, JobInstance, JobExecution
+
+Three words that look like synonyms and are not, and almost everything else follows from the
+difference:
+
+- A **Job** is the definition — `productImportJob`, a name and a list of steps.
+- A **JobInstance** is a unit of *work*: the job's name plus its **identifying parameters**. For
+  the import that is the path of the file being imported; for the report, the date. "Import
+  *this* file" is one instance for ever.
+- A **JobExecution** is one *attempt* at an instance. A restart is a second execution against the
+  same instance, which is why the response carries both ids.
+
+An instance that has COMPLETED will not run again — the JobRepository refuses it. That is the
+guarantee behind a nightly job: two application instances both firing the 02:00 cron produce one
+report, not two, because the second is turned away rather than because the scheduler was clever.
+
+### Chunks, and the transaction boundary
+
+The import is a **chunk-oriented** step, which is one sentence worth memorising: *read n items
+one at a time, process each one, hand the whole batch to the writer, commit, repeat.* The
+transaction spans **process and write**; the reader sits outside it, which is how a file reader
+keeps its place across a rollback.
+
+Everything else follows from that sentence:
+
+- The writer is handed a list, not an item, so it can issue one batched statement.
+- The **chunk size is the knob that matters**. One transaction for a 10,000-row file holds locks
+  for its duration and loses everything on the last row; one transaction per row pays a commit
+  ten thousand times. This project uses 100 (`ecomdemo.batch.chunk-size`).
+- A restart resumes at a **chunk boundary**, not at an exact row.
+
+The other kind of step is a **tasklet**: one method, called once, in one transaction. The sales
+report uses both — a tasklet for the summary (two aggregate queries and a few lines of file, no
+stream to iterate) and a chunk step over a database cursor for the best-seller table. Using the
+chunk machinery for the summary would be ceremony; using a tasklet for the table would not scale
+past what fits in memory.
+
+### Skips, and the limit
+
+```
+ecomdemo.batch.skip-limit=50
+```
+
+A skip limit is a statement about data quality: *a few malformed rows in a supplier's file are
+normal; a file that is mostly malformed is a different file.* Cross the limit and the job fails
+rather than reporting a tidy COMPLETED over three rows out of ten thousand.
+
+Only two exception types are skippable — a line that will not parse, and a row the catalogue
+refuses. That narrowness is the point. `.skip(Exception.class)` would also skip a
+`NullPointerException` in the processor and a connection failure in the writer, and "skip bad
+data" and "swallow bugs" look identical from a distance.
+
+### Restart
+
+Restart is the reason all of this is written to a database. Try it:
+
+```bash
+# 120 good rows, then 60 with an unparseable price - past the skip limit of 50.
+{ echo "name,description,price,stock_quantity,category"
+  for i in $(seq 1 120);  do echo "Restart Demo $i,x,9.99,5,DEMO"; done
+  for i in $(seq 1 60);   do echo "Restart Demo bad $i,x,NOPE,5,DEMO"; done
+} > /tmp/restart-demo.csv
+
+curl -s -X POST localhost:8080/api/admin/batch/product-import \
+  -H "Authorization: Bearer $TOKEN" -F "file=@/tmp/restart-demo.csv" | python3 -m json.tool
+```
+
+```
+status  FAILED     writeCount 100     skipCount 50
+failureMessage  FatalStepExecutionException: Unable to process chunk; caused by
+                SkipLimitExceededException: Skip limit of '50' exceeded; caused by
+                InvalidProductRowException: line 172: price 'NOPE' is not a number
+inputFile       /var/lib/ecomdemo/batch/uploads/<uuid>-restart-demo.csv
+```
+
+A hundred rows are already in the catalogue: the chunks that committed before the limit was hit
+survive the failure. Now fix the file **in place** and restart:
+
+```bash
+IN=<the inputFile from above>
+docker exec ecomdemo-app sh -c "sed -i 's/,NOPE,/,19.99,/' '$IN'"
+
+curl -s -X POST localhost:8080/api/admin/batch/executions/5/restart \
+  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool
+```
+
+```
+status COMPLETED    id 6    instanceId 5    readCount 80    writeCount 80
+```
+
+Execution **6** against instance **5** — a second attempt at the same work. It read 80 rows, not
+180: the reader's saved position was restored from `BATCH_STEP_EXECUTION_CONTEXT` and it carried
+on from the last commit. The 100 rows already imported were not touched.
+
+Three things about that are worth keeping:
+
+- **In place matters.** A restart trusts the saved LINE NUMBER. Correcting bad lines without
+  changing the line count is safe; swapping in a different file that happens to share the path
+  would have the reader resume at line 100 of a file it has never seen. (This is also why each
+  upload is staged under a name of its own — so a *new* upload is new work, not a restart.)
+- **The upsert is what makes it safe.** The rows of the chunk that was rolled back are read
+  again, and processing them twice changes nothing.
+- **A restart does not reconsider SKIPPED rows.** It resumes from the last *commit*, and rows
+  that were read, rejected and committed past are behind that point. What a restart recovers is
+  work that was never done, not work that was refused. Those rows are in the error file; the way
+  to get them in is to fix the file and import it again as a new upload.
+
+### The bug this phase nearly shipped
+
+Spring Batch 6's default `JobRepository` is `ResourcelessJobRepository` — **in memory**. Under it
+everything above appears to work: jobs run, counters are right, a completed instance is refused a
+second time, a restart works within one process. And the six `BATCH_*` tables that Flyway created
+stay completely empty, so none of it survives the JVM.
+
+That removes the entire reason to use the framework rather than a loop, silently. It was caught
+by an assertion about **rows in a table** rather than about behaviour, because the behaviour was
+indistinguishable:
+
+```java
+assertThat(jdbc.queryForList(
+    "SELECT ... FROM batch_job_execution WHERE job_execution_id = ?", execution.id()))
+        .singleElement()...
+```
+
+The fix is `BatchConfig`, which extends `DefaultBatchConfiguration` — extending it is what makes
+Boot's auto-configuration back off — and supplies a `JdbcJobRepositoryFactoryBean`.
+`BatchJobRepositoryTest` now guards it.
+
+### The schema
+
+The six tables and three sequences arrive as Flyway `V7`, copied verbatim from Spring Batch's own
+`schema-postgresql.sql`. They are production schema — they are where "has this already run?" is
+answered — so they belong under review like any other table. Spring Boot 4 agrees by omission:
+unlike Boot 3 it ships no `spring.batch.jdbc.initialize-schema` property at all, and nothing
+creates them for you.
+
+| Table | Holds |
+|---|---|
+| `BATCH_JOB_INSTANCE` | one row per unit of work (job name + identifying parameters) |
+| `BATCH_JOB_EXECUTION` | one row per attempt; a restart adds a second against the same instance |
+| `BATCH_JOB_EXECUTION_PARAMS` | each attempt's parameters, and whether each identifies the instance |
+| `BATCH_STEP_EXECUTION` | per step, per attempt: read, write, skip, commit and rollback counters |
+| `BATCH_*_EXECUTION_CONTEXT` | the serialized ExecutionContext — **the reader's saved position** |
+
+`V8` adds an index on `product.name`, because the import looks every row up by name before
+deciding insert-or-update and a 10,000-row file would otherwise be 10,000 sequential scans. It is
+deliberately **not** unique: this API has allowed two products to share a name since Phase 1.
+
+### Configuration
+
+```properties
+spring.batch.job.enabled=false            # do NOT run every job bean at startup
+ecomdemo.batch.directory=${BATCH_DIR:./batch}
+ecomdemo.batch.chunk-size=100
+ecomdemo.batch.skip-limit=50
+ecomdemo.batch.sales-report-cron=0 0 2 * * *
+```
+
+Two of those are worth a sentence each:
+
+- **`spring.batch.job.enabled=false`.** Boot's `JobLauncherApplicationRunner` runs every `Job`
+  bean once the context is up. Right for a batch application launched from the command line;
+  wrong for a web application that happens to contain jobs, where a restart would re-import
+  whatever file the last upload left on disk.
+- **The cron has six fields, not five.** Spring's cron starts at SECONDS, so the familiar Unix
+  `0 2 * * *` means "the 2nd minute of every hour" here. Set the property to `-` to turn the
+  schedule off entirely. To watch the report job without waiting until 02:00:
+
+  ```bash
+  ECOMDEMO_BATCH_SALESREPORTCRON='0 * * * * *' docker compose up -d
+  docker exec ecomdemo-app sh -c 'ls /var/lib/ecomdemo/batch/reports'
+  ```
+
+The batch directory is a named Docker volume mounted at `/var/lib/ecomdemo/batch` and created in
+the Dockerfile as the runtime user. Both halves matter: `/app` is owned by root and the
+application is not, and an import that failed before a container was replaced could not be
+resumed if its staged input had gone with the container.
 
 ## Code quality
 
@@ -1496,8 +1758,8 @@ than an assumption the code makes.
 There are two suites now, and one command runs both.
 
 ```bash
-./mvnw test      # 190 tests, ~11 s, in-memory H2, no Docker
-./mvnw verify    # those 190 PLUS 30 integration tests against a real PostgreSQL, ~24 s
+./mvnw test      # 229 tests, ~15 s, in-memory H2, no Docker
+./mvnw verify    # those 229 PLUS 47 integration tests against a real PostgreSQL and Redis
 ```
 
 `./mvnw test` is the inner loop: it needs nothing installed and it is what you run constantly.
@@ -1512,7 +1774,7 @@ The fast suite sits at five levels, each loading only what it needs:
 | Unit | `@ExtendWith(MockitoExtension.class)` | Nothing — plain objects with mocked collaborators | `ProductServiceTest`, `CartServiceTest`, `OrderServiceTest`, `OrderPlacementServiceTest`, `CustomerServiceTest`, `AppUserDetailsServiceTest`, `AuthServiceTest`, `TokenServiceTest`, `CurrentUserTest` |
 | Web slice | `@WebMvcTest` | The controller, JSON conversion, validation, the error handler **and the real security rules**; services are `@MockitoBean` | `ProductControllerTest`, `CartControllerTest`, `OrderControllerTest`, `CustomerControllerTest`, `AuthControllerTest` |
 | Persistence slice | `@DataJpaTest` | JPA and its own throwaway H2 database; no web layer, no Flyway | `CartRepositoryTest`, `OrderRepositoryTest` |
-| Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest`, `ConcurrentCheckoutTest` |
+| Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest`, `ConcurrentCheckoutTest`, `BatchJobRepositoryTest`, `SalesReportScheduleTest` |
 | Configuration | `ApplicationContextRunner` | A handful of beans and the properties, resolved as at startup | `DatasourceConfigurationTest`, `JwtConfigTest` |
 
 The suite runs the **same migrations the application does**, then has Hibernate validate the
@@ -1565,6 +1827,9 @@ second suite that runs the same application against **PostgreSQL itself**.
 | `CartApiIT` | 8 | Add, merge, totals across lines, update, remove, 404, 400 — each read back with a second request, so only committed state counts — plus 401/403 on the endpoints and two shoppers having two separate carts |
 | `OrderApiIT` | 7 | Checkout end to end, a 409 that rolls back everything, an empty cart, two simultaneous checkouts for the last unit, 401/403, the order recording who placed it, and one customer being refused another's order |
 | `AuthApiIT` | 8 | Login returning a working token, the readable payload, a tampered token, a correctly-signed **expired** token, malformed rubbish, no token at all, login failures that are identical for a wrong password and an unknown username, and the roles claim deciding what the token may do |
+| `CacheApiIT` | 8 | The cache proven by changing the database behind its back with direct SQL: a repeated read never reaches PostgreSQL, an update refreshes, a delete evicts, a BigDecimal survives the JSON round trip, and checkout ignores the cache |
+| `ProductImportJobIT` | 6 | A 10,000-row import over real HTTP with the invalid rows skipped and listed, the upsert making a re-import idempotent, and the restart of a run that died on the skip limit |
+| `SalesReportJobIT` | 3 | The report's contents against orders placed through the real checkout, a quiet day, and a second run for the same day being refused |
 
 Since Phase 9 these tests do the whole round trip: they call `POST /api/auth/login` over HTTP, get
 a genuinely signed token back, and send it as `Authorization: Bearer` — so the password is checked
@@ -1572,6 +1837,12 @@ against the BCrypt hash migration V5 put into the container's database, and ever
 has its signature, expiry and issuer verified by the real decoder. That is the only layer where
 the rules, an actual login *and* a real signature are exercised together. `@WithMockUser` in the
 slices skips the authentication, and a hand-built `Jwt` would skip the signature.
+
+Two of those classes are worth singling out. `BatchJobRepositoryTest` asserts on **rows in the
+`BATCH_*` tables** rather than on behaviour, because Spring Batch 6's in-memory default repository
+makes the behaviour identical while persisting nothing — every other batch test passed against it.
+`SalesReportScheduleTest` sets the cron to every second and waits for the report file to appear,
+which is the only way to show that `@Scheduled` is actually wired rather than merely written.
 
 Three pieces make it work, and each replaces something you would otherwise write by hand.
 
@@ -1598,11 +1869,11 @@ container, most likely your own.
 
 **Spring owns the lifecycle, which is also what makes it fast.** Spring starts the container with
 the context and stops it when the context closes, and it caches a context by the annotations that
-define it. Every `*IT` extends one base class, `IntegrationTest`, so all three ask for the same
-context: **one** container for the whole run. The first class pays about twelve seconds for the
-context and the database; the other two take a tenth of a second each. (Add a `@MockitoBean` or a
-stray `@TestPropertySource` to one subclass and it quietly gets a context — and a container — of
-its own.)
+define it. Every `*IT` extends one base class, `IntegrationTest`, so they all ask for the same
+context: **one** PostgreSQL and **one** Redis for the whole run, counted from the log. The first
+class pays about twelve seconds for the context and the containers; the rest take a fraction of a
+second each. (Add a `@MockitoBean` or a stray `@TestPropertySource` to one subclass and it quietly
+gets a context — and both containers — of its own.)
 
 The suites are split by **file name**. Maven's Surefire plugin runs `*Test.java` at the `test`
 phase; its sibling Failsafe runs `*IT.java` after packaging. Failsafe deliberately does not fail
@@ -1611,9 +1882,10 @@ the build when a test fails — it records the result, lets the build reach
 fails the build. Renaming a class from `FooTest` to `FooIT` is the whole mechanism for moving it
 between suites.
 
-What the integration tests buy, concretely: the migrations V1–V6 are applied to an empty
-**PostgreSQL 18** on every build, `NUMERIC(10,2)` rounds the way the real column rounds, and the
-oversell race is settled by PostgreSQL's own row locking rather than H2's. That last one used to
+What the integration tests buy, concretely: the migrations V1–V8 are applied to an empty
+**PostgreSQL 18** on every build, `NUMERIC(10,2)` rounds the way the real column rounds, the
+oversell race is settled by PostgreSQL's own row locking rather than H2's, and a ten-thousand-row
+import runs against a database that really commits a hundred transactions. That third one used to
 be provable only by running the smoke test by hand.
 
 ```bash
@@ -1629,9 +1901,16 @@ cost a container start each time.
 ## Known gaps (closed by later phases)
 
 - **The fast suite is still only ever run on H2.** `./mvnw verify` runs the migrations and the
-  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 30
-  integration tests. The other 190 still run on H2, so a PostgreSQL-specific problem in a code
+  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 47
+  integration tests. The other 229 still run on H2, so a PostgreSQL-specific problem in a code
   path no `*IT` exercises would still reach production.
+- **Restart across a process restart is inferred, not tested.** The JobRepository is on disk and
+  staged uploads are on a named volume, so an import that failed before a container was replaced
+  should be restartable afterwards. Nothing in the suite kills a container and checks.
+- **`@Scheduled` fires in every instance.** Two copies of the application both start the nightly
+  report; the second is refused because the day's JobInstance is already COMPLETE. That refusal
+  is tested, two instances actually racing are not, and a real deployment wants a leader election
+  or an external scheduler rather than a JobRepository collision.
 - **A token cannot be revoked before it expires.** A role taken away, or a deleted account, stays
   effective for up to fifteen minutes, and there is no "log out everywhere". That is the price of
   statelessness rather than a bug, and a short expiry is the only mitigation in place. A

@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 14: Batch Processing
 - **Branch:** feature/phase-14-spring-batch
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -28,10 +28,11 @@ Tag `phase-13-complete` pushed.
 - [x] A restartability demo (ProductImportJobIT + README "try it yourself")
 - [x] Done when: a 10,000-row import works with invalid rows skipped, and the report is
       generated on schedule
-- [ ] Smoke test additions (upload a CSV with invalid rows: job COMPLETED, product count up,
-      skip count matches the invalid rows)
-- [ ] Testing protocol run in full + docs/test-reports/phase-14.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 12 archived), tracker -> 🔵
+- [x] Smoke test additions (upload a CSV with invalid rows: job COMPLETED, product count up,
+      skip count matches the invalid rows) — 20 new checks
+- [x] Testing protocol run in full + docs/test-reports/phase-14.md
+- [x] README section, decisions.md (16 entries), RECENT.md rotation (Phase 12 archived),
+      tracker -> 🔵
 - [ ] PR raised, CI green
 
 ## Last test run
@@ -39,6 +40,11 @@ Tag `phase-13-complete` pushed.
   0 failures, 0 skipped. One postgres and one redis container for the whole Failsafe run.
 - 2026-09-22: `./mvnw clean test` -> 0 "Creating container" lines; the Docker-free fast suite
   still holds.
+- 2026-09-22: `scripts/smoke-test.sh` against the compose stack -> 156 passed (was 136), 0 failed,
+  **0 skipped**.
+- 2026-09-22: restart demo run by hand against the compose stack: execution 5 FAILED (100 written,
+  50 skipped, cause chain naming the skip limit), the staged file fixed in place with `sed`,
+  execution 6 of instance 5 COMPLETED reading only 80 of 180 rows. Demo products cleaned up.
 
 ## Open issues / blockers
 - none. The big one is fixed: Spring Batch 6 defaults to `ResourcelessJobRepository` (in memory),
@@ -64,7 +70,10 @@ at http://localhost:9000; stop it with `docker compose -f compose.sonar.yaml dow
 is wanted back. `.env` holds a real JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-Code and tests are done and green. Next: the smoke test additions (upload a CSV with invalid
-rows: job COMPLETED, product count up, skip count matches), then the full testing protocol and
-`docs/test-reports/phase-14.md`, then README + decisions.md + RECENT rotation (Phase 12
-archived) + tracker -> 🔵, then push and raise the PR and STOP.
+Everything except the PR is done and committed. Next: push the branch, `gh pr create --base main`
+with the template filled in, wait for CI, then send the Phase Review Report and **STOP** at the
+mandatory post-PR stop point.
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
+  tag `phase-14-complete` and start Phase 15 (`docs/phases/phase-15-metrics.md`).
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say exactly `approved, merge it`.
