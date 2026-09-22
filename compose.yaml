@@ -138,6 +138,12 @@ services:
       # Overrides the Dockerfile's default when set in .env — useful for pinning a heap on a
       # laptop, or adding -XX:+HeapDumpOnOutOfMemoryError while debugging.
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError}
+
+      # Structured logging (Phase 16). Empty everywhere else, so `./mvnw spring-boot:run` on a
+      # laptop keeps the readable pattern layout; `ecs` here because this container's stdout is
+      # read by Alloy and parsed as JSON, never by a person scrolling. See the logging section of
+      # application.properties.
+      LOG_FORMAT: ${LOG_FORMAT:-ecs}
     volumes:
       # The batch working directory (Phase 14). A named volume rather than container-local space,
       # because a restart of a failed import re-reads the file it was given BY PATH: if the
@@ -248,6 +254,83 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # -------------------------------------------------------------------------------------------
+  # Loki (Phase 16) - stores the logs
+  # -------------------------------------------------------------------------------------------
+  loki:
+    image: grafana/loki:3.7.8
+    container_name: ecomdemo-loki
+    command:
+      - -config.file=/etc/loki/loki.yaml
+    volumes:
+      - ./docker/loki/loki.yaml:/etc/loki/loki.yaml:ro
+      # The chunks and the index. Named, and worth keeping across a restart for the same reason
+      # Prometheus' data is: the logs anyone wants are the ones from before the restart.
+      - loki-data:/loki
+    ports:
+      # Published so the smoke test can query the API from the host. Grafana does not use this -
+      # it reaches Loki at `loki:3100` on the compose network.
+      - "${LOKI_PORT:-3100}:3100"
+    # NO HEALTHCHECK, deliberately. Loki's image is DISTROLESS - `docker exec ecomdemo-loki ls`
+    # answers "executable file not found", because the whole filesystem is the loki binary and its
+    # certificates. There is no shell, no wget and no curl for a `test:` command to use, and Loki
+    # itself has no client subcommand to make a request with (unlike Prometheus, which ships
+    # promtool and is why THAT container has a health check). The readiness endpoint is real and
+    # worth calling - http://localhost:3100/ready returns 503 with a reason until the ingester has
+    # joined its own ring - but nothing inside this container can call it, so the check lives in
+    # scripts/smoke-test.sh, on the host, where curl exists.
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # Grafana Alloy (Phase 16) - reads the containers' logs and pushes them to Loki
+  # -------------------------------------------------------------------------------------------
+  alloy:
+    image: grafana/alloy:v1.19.2
+    container_name: ecomdemo-alloy
+    depends_on:
+      loki:
+        # `service_started`, because Loki has no health check to wait for (see above) - and it
+        # matters less here than anywhere else in this file. `loki.write` buffers in memory and
+        # retries with backoff, so an Alloy that starts before Loki is ready loses nothing; it
+        # logs a few connection refusals and then catches up. That is the whole design: the log
+        # pipeline is allowed to be eventually consistent, which is what lets the application
+        # never wait for it.
+        condition: service_started
+    command:
+      - run
+      # Without an explicit listen address the UI binds to 127.0.0.1 INSIDE the container, which
+      # is unreachable from the host however the port is published.
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./docker/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # THE DOCKER SOCKET. This is how Alloy discovers containers and reads their log streams -
+      # and it is worth being clear-eyed about: the socket is the daemon's full API, so a
+      # container that can write to it can start a privileged container and own the host. It is
+      # mounted READ-ONLY here, which prevents nothing at the API level (the socket is
+      # bidirectional) but does state the intent, and it is the reason a real deployment collects
+      # logs with a node agent under its own service account rather than handing the daemon to a
+      # workload. On a laptop, with this project's own containers, it is an acceptable trade.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Alloy's own state: the positions file that remembers how far it has read in each
+      # container's log, so a restart resumes instead of re-shipping everything.
+      - alloy-data:/var/lib/alloy/data
+    ports:
+      - "${ALLOY_PORT:-12345}:12345"
+    healthcheck:
+      # A PORT check, not an HTTP one, and the comment is here so nobody reads it as more than it
+      # is: this image has bash but neither curl nor wget, and bash's /dev/tcp pseudo-device is
+      # the only way left to ask a question over TCP. It proves the server is listening, not that
+      # the pipeline is shipping anything. What the pipeline is actually doing is on the Alloy UI
+      # at http://localhost:12345 and in the smoke test's Loki queries.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/12345 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
 volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
@@ -262,3 +345,9 @@ volumes:
 
   # Grafana's SQLite state. Deliberately NOT where the dashboards live.
   grafana-data:
+
+  # Loki's chunks and index.
+  loki-data:
+
+  # Alloy's read positions, so a restart does not re-ship every container's whole log.
+  alloy-data:

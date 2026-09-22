@@ -80,8 +80,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 12 | [Code Quality](phases/phase-12-sonarqube.md) | SonarQube + JaCoCo | `feature/phase-12-sonarqube` | ✅ |
 | 13 | [Caching](phases/phase-13-redis.md) | Redis | `feature/phase-13-redis` | ✅ |
 | 14 | [Batch Processing](phases/phase-14-spring-batch.md) | Spring Batch | `feature/phase-14-spring-batch` | ✅ |
-| 15 | [Metrics & Monitoring](phases/phase-15-metrics.md) | Actuator + Prometheus + Grafana | `feature/phase-15-metrics` | 🔵 |
-| 16 | [Centralized Logging](phases/phase-16-logging.md) | Grafana Loki | `feature/phase-16-logging` | ⬜ |
+| 15 | [Metrics & Monitoring](phases/phase-15-metrics.md) | Actuator + Prometheus + Grafana | `feature/phase-15-metrics` | ✅ |
+| 16 | [Centralized Logging](phases/phase-16-logging.md) | Grafana Loki | `feature/phase-16-logging` | 🔵 |
 | 17 | [Messaging](phases/phase-17-kafka.md) | Apache Kafka | `feature/phase-17-kafka` | ⬜ |
 | 18 | [Reliable Event Publishing](phases/phase-18-outbox.md) | Transactional Outbox | `feature/phase-18-outbox` | ⬜ |
 | 19 | [Modular Monolith](phases/phase-19-modulith.md) | Spring Modulith | `feature/phase-19-modulith` | ⬜ |

@@ -1,0 +1,189 @@
+// =============================================================================================
+// Grafana Alloy (Phase 16) — the log shipper
+// =============================================================================================
+// Alloy is the collector: it finds the logs, reads them, reshapes them and pushes them to Loki.
+// The application does none of that and knows nothing about Loki — it writes JSON to stdout and
+// stops there, which is the whole point. An application that ships its own logs over the network
+// has to hold a buffer, retry, and decide what to do when the log store is down; if it blocks, a
+// logging outage becomes an application outage, and if it drops, the lines lost are the ones
+// written while something was already wrong. Writing to stdout is a file write that cannot fail
+// interestingly, and the shipping problem moves to a process whose only job it is.
+//
+// The syntax is Alloy's own configuration language: named COMPONENTS that export values, wired
+// together by referring to each other. `forward_to` is the wiring — the pipeline below reads
+// bottom-up as: discover containers, tail them, parse the JSON, push to Loki.
+
+// ---------------------------------------------------------------------------------------------
+// Discovery: which containers exist
+// ---------------------------------------------------------------------------------------------
+// Asks the Docker daemon, over the socket mounted into this container, what is running. This is
+// a live query repeated every refresh_interval, not a list — a container started after Alloy is
+// picked up on the next pass, which is what makes `docker compose up` in any order work.
+discovery.docker "compose" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+// ---------------------------------------------------------------------------------------------
+// Relabelling: turn Docker's metadata into Loki labels
+// ---------------------------------------------------------------------------------------------
+// A LOKI LABEL IS NOT A LOG FIELD, and this is the most important thing to understand about
+// running Loki. Labels are the index: every distinct combination of label values becomes its own
+// stream with its own chunks. A handful of low-cardinality labels (which container, which level)
+// makes queries fast. A label with an unbounded set of values — a user ID, a URL, a correlation
+// ID — creates a stream per value, and millions of tiny streams is the documented way to bring
+// Loki to its knees. High-cardinality identifiers belong in the LINE, or in structured metadata
+// (below), where they are searched rather than indexed.
+discovery.relabel "app" {
+  targets = discovery.docker.compose.targets
+
+  // Only this project's containers. Alloy can see everything on the Docker daemon, including
+  // whatever else the laptop happens to be running, and shipping a colleague's unrelated database
+  // into this Loki is both noise and, depending on that database, a data question.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "ecomdemo"
+    action        = "keep"
+  }
+
+  // Only the application. Its logs are JSON and go through the parsing pipeline; everything else
+  // in the stack writes plain text and is handled by the second source below.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "app"
+    action        = "keep"
+  }
+
+  // Compose's service name becomes the `service_name` label, which is the name Grafana's log
+  // views look for first when deciding what to call a stream.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service_name"
+  }
+
+  // Docker reports the container name with a leading slash ("/ecomdemo-app"); the capture group
+  // drops it.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+discovery.relabel "infrastructure" {
+  targets = discovery.docker.compose.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    regex         = "ecomdemo"
+    action        = "keep"
+  }
+
+  // The rest of the application stack, named explicitly rather than "everything except the app".
+  // An allow-list is the right shape here for two reasons found by running it the other way
+  // round. Alloy and Loki must not be in it — Alloy shipping its own log to Loki, and Loki
+  // logging that it received it, is a feedback loop that idles at a steady trickle and amplifies
+  // the moment either starts complaining about the other. And `compose.sonar.yaml` (Phase 12)
+  // runs in this same Compose PROJECT, so a deny-list quietly swallowed SonarQube and its
+  // database as well: a couple of hundred megabytes of Java logs from a tool that is not part of
+  // the system being observed.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    regex         = "db|cache|prometheus|grafana"
+    action        = "keep"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service_name"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sources: tail the containers
+// ---------------------------------------------------------------------------------------------
+// Reads the Docker log stream for each discovered container — the same bytes `docker logs` shows,
+// which is exactly why the application writing to stdout is enough.
+loki.source.docker "app" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.app.output
+  forward_to       = [loki.process.ecs.receiver]
+  refresh_interval = "15s"
+}
+
+loki.source.docker "infrastructure" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.infrastructure.output
+  // Straight to Loki with no parsing: PostgreSQL and Redis write their own plain-text formats,
+  // and a JSON parser pointed at them would fail on every line.
+  forward_to       = [loki.write.loki.receiver]
+  refresh_interval = "15s"
+}
+
+// ---------------------------------------------------------------------------------------------
+// Processing: read the JSON the application wrote
+// ---------------------------------------------------------------------------------------------
+loki.process "ecs" {
+  // Pulls fields out of the ECS JSON document. The expressions are JMESPath, so a dotted path
+  // reaches into a nested object: `log.level` is the ECS spelling of the log level. The line
+  // itself is untouched and still arrives in Loki in full — this stage only makes values
+  // available to the stages below.
+  stage.json {
+    expressions = {
+      // ECS names the timestamp field `@timestamp`, and an `@` is not a bare JMESPath
+      // identifier — hence the quoted path inside the string.
+      timestamp      = "\"@timestamp\"",
+      level          = "log.level",
+      logger         = "log.logger",
+      correlation_id = "correlation_id",
+    }
+  }
+
+  // Level becomes a LABEL: it has five possible values, so it adds five streams at most, and
+  // "show me the errors" is the query everyone types first.
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  // The correlation ID becomes STRUCTURED METADATA instead — key/value attached to each line,
+  // stored with the chunk, searchable, but NOT part of the index. That is precisely the right
+  // home for a high-cardinality identifier: one value per request would be one stream per request
+  // as a label, while as metadata it costs nothing to write and is found with
+  // `| correlation_id = "..."` at query time.
+  stage.structured_metadata {
+    values = {
+      correlation_id = "",
+      logger         = "",
+    }
+  }
+
+  // Use the application's own timestamp rather than the moment Alloy read the line. Without this,
+  // a shipper that falls behind — or is restarted and catches up — files old lines under the
+  // present, which reorders the story and hides the pause that caused it.
+  stage.timestamp {
+    source = "timestamp"
+    format = "RFC3339Nano"
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// ---------------------------------------------------------------------------------------------
+// Sink: push to Loki
+// ---------------------------------------------------------------------------------------------
+loki.write "loki" {
+  endpoint {
+    // The compose service name, not localhost: this runs in its own container.
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+  // If Loki is unreachable, Alloy buffers in memory and retries with backoff. Nothing blocks and
+  // nothing reaches the application, which is the reason the shipper is a separate process.
+}

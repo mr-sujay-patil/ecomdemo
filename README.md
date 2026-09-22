@@ -1401,6 +1401,187 @@ that cannot answer within its budget is not ready — but a timeout cannot tell 
 the argument for keeping a probe's own timeout above its slowest indicator once there is more than
 one thing in the group.
 
+## Centralized logging
+
+Phase 15 made the system measurable. This phase makes it **explicable**. A metric says seventeen
+requests returned 409 in the last five minutes; it cannot say which seventeen, or what each of
+them was trying to do. A log line can — but only if you can find the lines that belong together,
+and that is the problem this phase solves.
+
+Three pieces, and the order matters:
+
+| | |
+|---|---|
+| **Structured JSON** | Spring Boot writes the console log as Elastic Common Schema JSON, so every line is named fields rather than a sentence to regex |
+| **A correlation ID** | One ID per request, in the MDC for every line the request produces, and returned in `X-Correlation-Id` |
+| **Loki + Alloy** | Alloy reads the containers' stdout and pushes to Loki; Grafana queries it next to the metrics |
+
+### The log line
+
+Set `LOG_FORMAT=ecs` (compose does) and the same event changes shape:
+
+```text
+# without it — for a human, on a laptop
+2026-09-22 16:07:30.240 INFO 1 --- [http-nio-8080-exec-2] c.e.l.RequestLogFilter : POST /api/orders -> 201 in 43ms
+```
+
+```json
+{"@timestamp":"2026-09-22T10:48:36.025754428Z",
+ "log":{"level":"INFO","logger":"com.ecomdemo.logging.RequestLogFilter"},
+ "process":{"pid":1,"thread":{"name":"http-nio-8080-exec-5"}},
+ "service":{"name":"ecomdemo","version":"0.0.1-SNAPSHOT","environment":"dev",
+            "node":{"name":"971fb414b70a"}},
+ "message":"POST /api/orders -> 201 in 43ms",
+ "correlation_id":"smoketest-abc123",
+ "ecs":{"version":"8.11"}}
+```
+
+Nothing was added to the application to produce this beyond two properties. Spring Boot has
+emitted structured logs natively since 3.4 — the `logback-spring.xml` and logstash encoder that
+older tutorials start with are no longer needed. **ECS** is a published field vocabulary, so
+`log.level` and `error.stack_trace` mean the same thing here as in any other system that speaks
+it; the alternative is inventing a private schema that every query then has to learn.
+
+`LOG_FORMAT` is an environment variable rather than a fixed property because the format is a
+deployment decision: in the container the log is parsed by a machine, on a laptop it is read by a
+person. Unset means the readable pattern layout, which is what `./mvnw spring-boot:run` gets.
+
+### The correlation ID
+
+`CorrelationIdFilter` reads `X-Correlation-Id`, or generates one, and puts it in the **MDC** — a
+`ThreadLocal` map that SLF4J attaches to every line that thread writes afterwards. That is what
+makes the ID appear on lines written by Hibernate and Spring Security, classes that have never
+heard of this application. The alternative is passing an ID through every method signature in the
+codebase, which is why almost nobody correlates logs by hand.
+
+Three details in that filter are each worth more than they look:
+
+- **It runs before Spring Security** (`HIGHEST_PRECEDENCE`, ahead of the chain at `-100`). A 401
+  is answered inside the security chain and never reaches a controller — so a filter ordered after
+  it would leave exactly the requests you are most likely to be investigating with no ID at all.
+- **It clears the MDC in a `finally`.** The thread goes straight back to Tomcat's pool. An ID left
+  behind files the *next* request's lines under the previous request's story — wrong rather than
+  missing, and invisible in the output.
+- **It validates an inbound ID** against `[A-Za-z0-9_-]{8,64}` and replaces it when it fails. A
+  header is attacker-controlled text on its way into the record of what happened; a newline in it
+  forges an entire extra log entry. A bad ID is replaced rather than rejected — refusing the
+  request would turn a diagnostics feature into an availability problem.
+
+```bash
+# Every response carries one, including the ones that failed
+curl -i -s http://localhost:8080/api/products | grep -i correlation
+# X-Correlation-Id: afc2c26644484e95807abd442d7524b1
+
+curl -i -s http://localhost:8080/api/cart | grep -iE '^HTTP|correlation'
+# HTTP/1.1 401
+# X-Correlation-Id: a245f68b48f54e28b14fbace43d33971
+
+# Send your own and it is reused — this is what makes an ID work across a boundary
+curl -i -s -H 'X-Correlation-Id: my-investigation-001' \
+     http://localhost:8080/api/products | grep -i correlation
+# X-Correlation-Id: my-investigation-001
+```
+
+### What is deliberately NOT logged
+
+`RequestLogFilter` writes one line per request — method, path, status, duration — and quotes
+nothing from it. No headers, no body, no query string. The `Authorization` header carries a token
+that is as good as a password until it expires; a login body carries the password itself; a query
+string is where an API key ends up when a client takes a shortcut. Logs are replicated, retained
+after the data they describe is deleted, and readable by people who have no business reading
+customer data.
+
+This is asserted rather than asserted-about: unit tests send a token, a password and an `api_key`
+and require them absent, and the smoke test searches the **live Loki** for the very credentials it
+has been using during the run.
+
+```bash
+# Nothing, and it should be nothing
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={service_name="app"} |= `smoke-test-password`' \
+  --data-urlencode 'since=15m' | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["result"])'
+# []
+```
+
+### Loki, and why it is not Elasticsearch
+
+Elasticsearch indexes the content of every line: fast full-text search, and an index that costs
+more to store and run than the logs. **Loki indexes only labels** and stores the line as a
+compressed chunk, then brute-forces the content at query time over just the chunks the labels
+selected. Cheaper by an order of magnitude; a query that names no labels is a slow scan. Same
+shape as Prometheus, by the same authors, on purpose — which is why one Grafana queries both.
+
+The consequence you have to design around is **cardinality**:
+
+| | Where it goes | Why |
+|---|---|---|
+| `service_name`, `container` | Label | A handful of values; every query starts by narrowing to them |
+| `level` | Label | Five values, and "show me the errors" is what everyone types first |
+| `correlation_id` | **Structured metadata** | One value per request. As a label it would be one Loki *stream* per request — the documented way to bring Loki down |
+
+Structured metadata is attached to the line, stored with the chunk and searchable with
+`| correlation_id = "..."`, but it is not part of the index. High-cardinality identifiers belong
+there, and this is the single most important thing to get right when running Loki.
+
+### The pipeline
+
+```text
+app container ──stdout──> Docker ──> Alloy ──parse JSON──> Loki <──query── Grafana
+   (ECS JSON)                        (ships)               (stores)
+```
+
+The application knows nothing about Loki, and that is the design rather than an omission. An
+application that ships its own logs has to buffer, retry, and decide what to do when the log store
+is down — if it blocks, a logging outage becomes an application outage; if it drops, the lines lost
+are the ones written while something was already wrong. Writing to stdout is a file write that
+cannot fail interestingly.
+
+That claim is tested. With Loki stopped, the application answered `200` with no added latency, and
+the line written during the outage arrived in Loki after it came back:
+
+```bash
+docker stop ecomdemo-loki
+curl -s -o /dev/null -w '%{http_code}\n' -H 'X-Correlation-Id: outage-1790074614' \
+     http://localhost:8080/api/products
+# 200
+
+docker start ecomdemo-loki
+# ...and the line is there once Loki is ready: Alloy buffered it and retried.
+```
+
+### Finding one request's logs
+
+The phase's acceptance criterion, three ways:
+
+```bash
+# 1. The API
+curl -sG http://localhost:3100/loki/api/v1/query_range \
+  --data-urlencode 'query={service_name="app"} | correlation_id = `my-investigation-001`' \
+  --data-urlencode 'since=15m'
+
+# 2. Grafana -> the "EcomDemo Logs" dashboard (http://localhost:3000, admin/admin)
+#    Paste the ID into the "Correlation ID" textbox at the top.
+
+# 3. Grafana -> Explore -> Loki. Expand any log line and click
+#    "All logs for this request" — a DERIVED FIELD in the datasource turns the ID
+#    inside the JSON into a link to every other line that shares it.
+```
+
+The logs dashboard also carries lines per second by level, an error count, and a second panel for
+PostgreSQL and Redis — because the explanation for an application error is sometimes a line the
+database wrote a second earlier, and having to go and find that in `docker logs` is exactly the
+friction centralized logging removes.
+
+### Where to look when a line does not arrive
+
+| Symptom | Look at |
+|---|---|
+| No `X-Correlation-Id` on a response | The application. `CorrelationIdFilter` is a `@Component`; nothing else is involved |
+| Lines in Loki, but as text with no `level` label | `LOG_FORMAT` is not `ecs`, so Alloy's JSON stage has nothing to parse |
+| No lines at all | Alloy's UI at <http://localhost:12345> — which containers it discovered and what it is failing to send |
+| `Datasource not found` in Grafana | The datasource UID. Provisioning is read at **startup**: `docker compose restart grafana` after adding one |
+| Loki answers 503 | `/ready` is 503 until the ingester has joined its ring. It resolves itself; the smoke test polls for 30s |
+
 ## Code quality
 
 Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually

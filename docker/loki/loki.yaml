@@ -1,0 +1,82 @@
+# =============================================================================================
+# Loki (Phase 16) — the log store
+# =============================================================================================
+# Loki is deliberately not Elasticsearch. Elasticsearch indexes the CONTENT of every log line,
+# which is what makes a full-text search over terabytes fast and what makes the index cost more
+# to store and run than the logs themselves. Loki indexes only a small set of LABELS and stores
+# the line itself as a compressed chunk, then brute-forces the content at query time over just the
+# chunks the labels selected. The trade is explicit: much cheaper to run, and a query that names
+# no labels is a slow scan rather than an instant answer. That is the same shape as Prometheus,
+# by the same authors, on purpose — which is why one Grafana queries both and why a spike on a
+# metrics panel can drop straight into the logs behind it.
+#
+# This file is a SINGLE-BINARY, filesystem-backed Loki: every component in one process, chunks on
+# a local disk. It is the right size for a laptop and the wrong size for anything else — a real
+# deployment separates read, write and backend and puts the chunks in object storage.
+
+# No multi-tenancy. With auth enabled every request must carry an X-Scope-OrgID header naming a
+# tenant, and everything written under one tenant is invisible to the others. There is one tenant
+# here, so the header would be ceremony — but note what it means for the smoke test: queries go to
+# the API with no header at all and read the implicit `fake` tenant.
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+  # Loki's own log, not the logs it stores. At `info` it narrates every flush and compaction,
+  # which on an idle laptop is the majority of what ends up in Loki — Alloy ships Loki's stdout
+  # back into Loki, so a chatty log level is self-inflicted volume.
+  log_level: warn
+
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  # One copy of each chunk, because there is one instance to put it on. The default of 3 makes
+  # the ingester refuse to start here: it cannot find two peers that do not exist.
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    # TSDB and schema v13 are the current generation. The `from` date is not decoration: schema
+    # changes are applied FORWARD from a date, and data written under an older schema keeps being
+    # read with it, so a new entry is appended here rather than this one being edited.
+    - from: 2024-04-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  # Seven days. Logs are the most voluminous and least re-readable telemetry there is: the line
+  # that explains an incident is read within hours of it, and almost nothing reads a log line from
+  # last month that is not an audit question — and an audit trail belongs in a database, which is
+  # why this application has an order_audit table and does not rely on its logs.
+  retention_period: 168h
+  reject_old_samples: true
+  reject_old_samples_max_age: 168h
+  # Lets the Logs Volume panel in Grafana's explore view work, which is the histogram above the
+  # log lines that makes "when did this start" a glance rather than a scroll.
+  volume_enabled: true
+
+compactor:
+  working_directory: /loki/compactor
+  delete_request_store: filesystem
+  # WITHOUT THIS, `retention_period` ABOVE IS A LIE. The limit is enforced by the compactor, and
+  # the compactor does not enforce retention unless it is told to — so a Loki that looks
+  # configured for seven days quietly keeps everything until the disk is full. It is the single
+  # most common surprise in a first Loki deployment.
+  retention_enabled: true
+  retention_delete_delay: 1h
+
+analytics:
+  # No phone-home, same reasoning as Grafana's in compose.yaml.
+  reporting_enabled: false

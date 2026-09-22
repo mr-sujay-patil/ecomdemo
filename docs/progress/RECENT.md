@@ -12,7 +12,51 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 15: Metrics & Monitoring (tag: pending, PR: pending)
+## Phase 16: Centralized Logging (tag: pending, PR: pending)
+**What exists now:** The application's console log is ECS JSON when `LOG_FORMAT=ecs` (compose sets
+it; a laptop leaves it unset and keeps the pattern layout). Every request carries a correlation ID
+in the MDC and in the `X-Correlation-Id` response header, including 401s. Alloy tails the
+containers over the Docker socket and pushes to Loki; Grafana has a provisioned Loki datasource
+with a derived field and an "EcomDemo Logs" dashboard. 338 tests (268 + 70), smoke test 227
+checks. Schema still V8 - this phase adds no migration and no new Java dependency.
+**Key code:** `logging/CorrelationId` (header/MDC spellings and the `[A-Za-z0-9_-]{8,64}` rule),
+`logging/CorrelationIdFilter` (`@Order(HIGHEST_PRECEDENCE)`, MDC cleared in a `finally`,
+`shouldNotFilterErrorDispatch()` false), `logging/RequestLogFilter`
+(`HIGHEST_PRECEDENCE + 10`, one line per request, skips `/actuator`, quotes nothing).
+**Config & infrastructure:** No new Maven dependency - structured logging is native to Boot since
+3.4. Four `logging.structured.*` properties in `application.properties`; `service.version` is
+`@project.version@` (Maven resource filtering) and `node-name` is `${HOSTNAME:}`. `compose.yaml`
+gains `loki` (3.7.8, :3100) and `alloy` (v1.19.2, :12345, Docker socket mounted `:ro`), plus
+`LOG_FORMAT: ${LOG_FORMAT:-ecs}` on the app. Config in `docker/loki/loki.yaml` and
+`docker/alloy/config.alloy`; Grafana gains `datasources/loki.yml` and
+`dashboards/ecomdemo-logs.json`.
+**Tests:** `CorrelationIdFilterTest` (7, MDC lifecycle + log injection), `RequestLogFilterTest`
+(6, what must NOT appear), `StructuredLoggingTest` (6, a real ECS document + an Alloy drift
+guard), `LoggingStackConfigTest` (8, the four config files against each other),
+`CorrelationIdApiIT` (8). Smoke test +23. Test report: `docs/test-reports/phase-16.md`.
+**Gotchas:** (1) Neither image can health-check itself - Loki 3.7 is DISTROLESS (no shell, no
+wget, and no client subcommand like Prometheus' promtool) and Alloy has bash but no curl/wget; the
+readiness check lives in the smoke test instead, and Loki answers 503 for a while after a
+recreate. (2) Grafana reads DATASOURCE provisioning only at startup - dashboards reload every 30s,
+datasources do not, so a new one needs `docker compose restart grafana`. (3) A dotted MDC key
+becomes a NESTED JSON object in ECS output, hence `correlation_id` not `correlation.id`.
+(4) `compose.sonar.yaml` shares the Compose PROJECT name, so an Alloy deny-list silently shipped
+SonarQube's logs; the pipeline uses an allow-list. (5) Bind-mounted config that did not exist in
+the branch you came from gets a NEW inode on checkout, and a running container keeps the old one -
+`docker compose up -d --force-recreate <service>` after switching branches.
+**KNOWN FAILURE, pre-existing and out of scope:** the smoke check "failed checkout did not touch
+stock" fails. Placing an order decrements `product.stock_quantity` in the database but evicts
+NEITHER Phase 13 cache, so `GET /api/products/{id}` serves the pre-order stock for up to the 300s
+TTL. Reproduced directly: DB 2, API 4. The `order` package contains no cache eviction at all; the
+Phase 16 diff touches no product, order or cache class. Awaiting the user's decision on where to
+fix it.
+**Follow-ups (not done, out of scope):** the stale-cache bug above. Trace IDs and logs-to-traces
+(Phase 23 - the derived field already has the shape). Alertmanager still delivers nothing.
+Log-based alerting in Loki's ruler. A `prod` profile that raises framework log levels. Multi-line
+stack traces are one ECS field already, so nothing to stitch - but that only holds while the log
+is JSON.
+
+## Phase 15: Metrics & Monitoring (tag: phase-15-complete, PR #17)
 **What exists now:** The application is observable. Actuator publishes health (with separate
 liveness and readiness groups), info, metrics and a Prometheus scrape endpoint; three business
 meters describe checkout; Prometheus scrapes every 15s and Grafana draws an 11-panel dashboard,
@@ -47,48 +91,4 @@ right verdict, different route. `EndpointRequest` moved package in Boot 4
 scrape endpoint. Cache hit-rate panels (the Phase 13 follow-up; `cache_gets_total` is published but
 not graphed). Batch job metrics on the dashboard. A cardinality budget asserted in a test.
 
-## Phase 14: Batch Processing (tag: phase-14-complete, PR #16)
-**What exists now:** Two Spring Batch jobs. `productImportJob` reads a product CSV uploaded by an
-ADMIN, validates each row, upserts by product name, skips bad rows up to a limit and writes them
-to an error file beside the upload; it is restartable. `salesReportJob` writes a CSV of one day's
-order count, revenue and best sellers, every night at 02:00. 276 tests (229 + 47), smoke test 156
-checks. Schema V8.
-**Key code:** `batch/BatchConfig` — **the critical one**: Spring Batch 6 defaults to
-`ResourcelessJobRepository` (in memory), so this extends `DefaultBatchConfiguration` (which is
-what makes Boot's auto-config back off) and supplies a `JdbcJobRepositoryFactoryBean`.
-`batch/ProductImportJobConfig` (chunk step, `chunk(size).transactionManager(...)` — the 6.0 API,
-not the deprecated two-arg form; `@StepScope` reader/writer/skip-listener reading
-`#{jobParameters['inputFile']}`), `ProductImportProcessor` (validation + upsert via
-`findFirstByNameOrderByIdAsc`), `ProductUpsertWriter` (saves the chunk; evicts the Phase 13 caches
-in `afterStep`, never inside the transaction), `RejectedRowRecorder` (SkipListener -> error file),
-`SalesReportJobConfig` (a TASKLET step for the summary, a CHUNK step over a `JdbcCursorItemReader`
-for the table), `SalesReportScheduler` (`@EnableScheduling` lives here), `BatchService`,
-`BatchController` (`/api/admin/batch/**`).
-**Config & infrastructure:** New dep `spring-boot-starter-batch` (Spring Batch 6.0.5).
-`spring.batch.job.enabled=false`. `ecomdemo.batch.{directory,chunk-size,skip-limit,sales-report-cron}`.
-Flyway **V7** = Spring Batch's own `schema-postgresql.sql` verbatim (Boot 4 has no
-`initialize-schema` property at all); **V8** = a non-unique index on `product.name`.
-`/api/admin/**` is ADMIN-only by prefix in `SecurityConfig`. Dockerfile creates
-`/var/lib/ecomdemo/batch` owned by the runtime user and sets `BATCH_DIR`; compose mounts the
-`batch-data` named volume there. `spring.servlet.multipart.max-file-size=16MB`. Tests point
-`ecomdemo.batch.directory` at `./target/...`.
-**Tests:** `ProductImportProcessorTest`, `RejectedRowRecorderTest`, `BatchControllerTest`,
-`BatchJobRepositoryTest` (asserts ROWS in the BATCH_ tables), `SalesReportScheduleTest` (cron set
-to every second; costs a context of its own), `ProductImportJobIT` (10,000 rows + restart),
-`SalesReportJobIT`. `FlywayMigrationTest` and `OpenApiDocumentationTest` extended.
-Test report: `docs/test-reports/phase-14.md`.
-**Gotchas:** (1) The in-memory JobRepository above — every behavioural test passed against it
-while the BATCH_ tables stayed empty; only an assertion about rows caught it, and the tell was
-every execution reporting `id=1`. (2) A restart resumes from the last COMMIT, so rows that were
-SKIPPED are behind it and are NOT reconsidered however well the file is fixed; they come back by
-re-importing, which is safe because the import upserts. (3) The 6.0 chunk step gives
-`rollbackCount == 0` on a run with skips (no item-by-item replay) and wraps a skip-limit failure
-in `FatalStepExecutionException: Unable to process chunk` — hence `JobExecutionResponse` now
-reports the whole cause chain. (4) The batch directory cannot live under `/app`: root-owned, and
-the app is not. (5) Spring's cron has SIX fields.
-**Follow-ups (not done, out of scope):** a manual trigger endpoint for the sales report; 202 +
-polling once jobs run long enough to time out a request; a supplier SKU in a unique column
-instead of keying the upsert on a non-unique name; restart across a container replacement is
-inferred from where the state lives, not tested; `@Scheduled` fires in every instance, so a real
-deployment wants a leader election rather than a JobRepository collision.
-
+<!-- Phase 14 archived to docs/progress/archive/phase-14-summary.md -->
