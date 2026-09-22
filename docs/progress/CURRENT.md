@@ -3,66 +3,52 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 8: Spring Security
-- **Branch:** feature/phase-08-spring-security
-- **Step:** PR_OPEN
+- **Phase:** 9: JWT Authentication
+- **Branch:** feature/phase-09-jwt
+- **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #8 — raised, awaiting review
-- **Waiting for user:** YES — review and merge PR #8, then say `merged, continue`
+- **PR:** none yet
+- **Waiting for user:** no
 
-## Phase 07 merge verification (passed 2026-09-22)
-PR #7 MERGED with a merge commit (fe2e02c, 2 parents: cf50c2f + ae20fd2); branch is an ancestor
+## Phase 08 merge verification (passed 2026-09-22)
+PR #8 MERGED with a merge commit (0af4342, 2 parents: fe2e02c + 4569a3e); branch is an ancestor
 of `main`; no commits and no file diffs between branch and `main`; local and remote branches
-intact; every "What you'll implement" item present in `main` (`PostgresContainerConfig` with
-`@ServiceConnection`, `IntegrationTest` base class, `ProductApiIT`/`CartApiIT`/`OrderApiIT`,
-`application-it.properties`, Surefire/Failsafe split in `pom.xml`, `docs/test-reports/phase-07.md`);
-`./mvnw clean verify` on `main` -> BUILD SUCCESS, Surefire 120 tests + Failsafe 15 tests,
-0 failures; the app on `main` started with "Successfully validated 4 migrations" / "Current
-version of schema public: 4"; `scripts/smoke-test.sh` -> 78 passed, 0 failed, 0 skipped, 0 ERROR
-in the app log; tag `phase-07-complete` pushed.
+intact; every "What you'll implement" item present in `main` (`security/` package with
+SecurityConfig + AppUserDetails(Service) + CurrentUser + the ApiError 401/403 handlers,
+`customer/` with User/Role/UserRepository/CustomerService/CustomerController/dto,
+`V5__add_users.sql`, `V6__cart_and_orders_per_user.sql`, `WithSecurityRules`,
+`TestAuthentication`, `docs/test-reports/phase-08.md`); `./mvnw clean verify` on `main` ->
+BUILD SUCCESS, Surefire 163 + Failsafe 23, 0 failures, 0 skipped; the app on `main` started with
+"Successfully validated 6 migrations" / "Current version of schema public: 6";
+`scripts/smoke-test.sh` -> 110 passed, 0 failed, 0 skipped, 0 ERROR in the app log;
+tag `phase-08-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] `customer` feature: registration (BCrypt), profile, `users` table via Flyway, admin seeded by a migration
-- [x] Roles `CUSTOMER` and `ADMIN` with HTTP Basic authentication
-- [x] Rules: product reads public, product writes ADMIN, cart and orders CUSTOMER
-- [x] Cart per user (replaces the shared cart), orders owned by the user
-- [x] `@PreAuthorize` so users only see their own orders
-- [x] 401 and 403 in the standard error format
-- [x] `@WithMockUser` tests covering allowed and denied access per role
-- [x] Smoke test additions (anon read 200, anon cart 401, customer create product 403, admin 201,
-      customer A cannot read customer B's order, full flow as a logged-in customer)
-- [x] Testing protocol run in full + docs/test-reports/phase-08.md
-- [x] README section, decisions.md, RECENT.md rotation (Phase 06 archived), tracker -> 🔵
-- [x] PR raised (#8)
+- [ ] `POST /api/auth/login` returns a signed JWT with role claims and a short expiry
+- [ ] Resource Server validation of the token on every request, key from an environment variable
+- [ ] Swagger UI configured for Bearer tokens
+- [ ] Expired and tampered tokens are rejected (the "Done when")
+- [ ] Smoke test additions (login returns a JWT, the full flow runs with a Bearer token,
+      a tampered token -> 401, an expired token -> 401 with a short test expiry)
+- [ ] Testing protocol run in full + docs/test-reports/phase-09.md
+- [ ] README section, decisions.md, RECENT.md rotation (Phase 07 archived), tracker -> 🔵
+- [ ] PR raised
+
+**Out of scope, suggest only:** the phase file lists a refresh token endpoint as *optional*.
+Per hard rule 7 it is NOT being built; it will be suggested in the PR.
 
 ## Last test run
-- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS. Surefire 163 (was 120), Failsafe 23 (was 15),
-  0 failures, 0 skipped. Run four times, all green (36.1 / 31.4 / 31.8 / 33.3 s).
-- 2026-09-22: `./mvnw clean test` -> 163 tests, 11.4 s, zero "Creating container" lines: the fast
-  suite still needs no Docker.
-- 2026-09-22: the app started against the live Phase 7 database and applied V5 and V6
-  incrementally ("Successfully applied 2 migrations ... now at version v6"); a restart then
-  re-validated 6 migrations. 0 ERROR in the log.
-- 2026-09-22: `scripts/smoke-test.sh` -> 110 passed, 0 failed, 0 skipped. Run three times (twice
-  on one instance, once after a restart, which satisfied the persistence check).
-- 2026-09-22: manual checks - 401 carries no WWW-Authenticate, a registration body with
-  "role":"ADMIN" still yields CUSTOMER, that account gets 403 on POST /api/products, duplicate
-  registration is 409, /v3/api-docs declares basicAuth. Probe account deleted afterwards.
+- none yet this phase. Baseline inherited from `main`: 163 Surefire + 23 Failsafe, smoke 110.
 
 ## Open issues / blockers
-- none.
+- **Decide how the signing key is supplied without a manual step.** The phase says "the key from
+  an environment variable", and hard rule 9 forbids a secret in Git — but the phase also says the
+  user has NO manual steps, so the app must start with `JWT_SECRET` unset. Planned answer:
+  read `JWT_SECRET` when present; otherwise generate a random key at startup and log a loud WARN
+  saying tokens will not survive a restart. To be confirmed while implementing.
 
 ## Decisions this phase (copied to docs/decisions.md ⬜)
-- Two migrations, not one: V5 adds `users` + the seeded admin, V6 attaches cart and orders.
-- ADMIN is refused on /api/cart and /api/orders (403). Being an admin does not imply being a
-  customer; the phase file says those endpoints "require CUSTOMER" and this takes it literally.
-- Reading somebody else's order is 403 (`@PostAuthorize`), not 404. The phase file allows either.
-- `@WebMvcTest` does NOT pick up our SecurityConfig; @WithSecurityRules imports it so the slices
-  test the real rules instead of Boot's fallback "deny everything" chain.
-- ApiErrorWriter injects Jackson 3's `tools.jackson.databind.json.JsonMapper` — Boot 4 defines no
-  `com.fasterxml.jackson.databind.ObjectMapper` bean even though Jackson 2 is on the classpath.
-- V6 deletes the existing cart rows (scratch state, no correct owner) but keeps existing orders
-  and attributes them to the seeded admin; orders.user_id is ON DELETE RESTRICT.
+- none yet.
 
 ## Environment left behind
 Docker container `ecomdemo-postgres` (postgres:18-alpine, port 5432) is RUNNING, schema at **v6**.
@@ -72,10 +58,7 @@ The database holds three accounts: `admin` (seeded by V5) plus `smoke-customer` 
 `smoke-customer-b`, created by the smoke test. All passwords are BCrypt hashes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. Wait for the user.
-- If they say `merged, continue` -> run merge verification (execution-protocol §5) on `main`:
-  `./mvnw clean verify` (needs Docker running) and `scripts/smoke-test.sh` (needs the
-  `ecomdemo-postgres` container up and the app running), the git-workflow Verification Checklist,
-  then tag and push `phase-08-complete`, then start Phase 9 (`docs/phases/phase-09-jwt.md`).
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
-- Do NOT merge unless they say exactly `approved, merge it`.
+Start step 5 (IMPLEMENTING) of the execution protocol on `feature/phase-09-jwt`: read
+`docs/phases/phase-09-jwt.md`, then work the checklist above top-down with small Conventional
+Commits, beginning with the `spring-boot-starter-oauth2-resource-server` dependency, the key
+configuration and `POST /api/auth/login`.

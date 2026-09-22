@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 08: Spring Security (tag: pending, PR: pending)
+## Phase 08: Spring Security (tag: phase-08-complete, PR #8)
 **What exists now:** The application knows who is calling. `users` (V5) holds BCrypt-hashed
 accounts with roles CUSTOMER and ADMIN; the ADMIN (`admin`/`admin123`) is seeded by the
 migration because registration always creates a CUSTOMER. HTTP Basic on a stateless chain:
