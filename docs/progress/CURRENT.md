@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-17-kafka
 - **Step:** PR_OPEN (follow-up PR #22, on the same branch)
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #21 MERGED (68769a6). Follow-up #22 open for the defect merge verification found.
+- **PR:** #21 MERGED (68769a6). Follow-up #22 open — CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN.
   https://github.com/mr-sujay-patil/ecomdemo/pull/22
 - **Waiting for user:** YES — review and merge the follow-up PR
 
