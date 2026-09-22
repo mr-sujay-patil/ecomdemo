@@ -3,6 +3,9 @@ package com.ecomdemo;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.modulith.core.ApplicationModules;
@@ -57,10 +60,21 @@ class ModularityTest {
      * under {@code docs/modules/}, so a pull request that moves a dependency shows the moved arrow
      * in its diff.
      *
-     * <p>{@code writeDocumentation()} produces a C4 component diagram per module plus an overall
-     * one, in PlantUML, and an Asciidoc canvas listing each module's published types and its
-     * dependencies. Nothing renders them here; they are source, and GitHub renders PlantUML in a
-     * diff.
+     * <p>It produces a C4 component diagram per module plus an overall one, in PlantUML, and an
+     * Asciidoc canvas listing each module's published types and its dependencies. Nothing renders
+     * them here; they are source, and GitHub renders PlantUML in a diff.
+     *
+     * <h2>Why the output is sorted afterwards</h2>
+     *
+     * <p>{@code Documenter} does not emit its relationship lines in a stable order — the same
+     * unchanged code produces the same lines shuffled differently from run to run. Committed
+     * output that reshuffles defeats the entire reason for committing it: every {@code ./mvnw
+     * test} would dirty the working tree, and a real dependency change — the one thing these files
+     * exist to make visible — would be one line lost among twenty reordered ones.
+     *
+     * <p>So each generated file has its {@code Rel(...)} lines sorted into a canonical order
+     * before it is written. After this, a diff in {@code docs/modules/} means the GRAPH changed,
+     * which is the only claim worth making about a generated file that lives in Git.
      */
     @Test
     @DisplayName("the module documentation regenerates from the code")
@@ -72,5 +86,45 @@ class ModularityTest {
                 .writeModulesAsPlantUml()
                 .writeIndividualModulesAsPlantUml()
                 .writeModuleCanvases();
+
+        try (var files = Files.list(output)) {
+            for (Path file : files.filter(f -> f.toString().endsWith(".puml")).toList()) {
+                canonicalise(file);
+            }
+        }
+    }
+
+    /**
+     * Sorts a PlantUML file's relationship lines, leaving everything else exactly where it is.
+     *
+     * <p>Only the {@code Rel(...)} block is unstable, and it is always contiguous — the component
+     * declarations above it and the layout directives below it come out in a fixed order. So the
+     * file is rewritten with that one run of lines sorted and every other line untouched, which
+     * keeps the output something PlantUML still understands and something a human can still read
+     * top to bottom.
+     */
+    private static void canonicalise(Path file) throws IOException {
+        List<String> lines = Files.readAllLines(file);
+        int first = -1;
+        int last = -1;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).startsWith("Rel(")) {
+                if (first < 0) {
+                    first = i;
+                }
+                last = i;
+            }
+        }
+        if (first < 0) {
+            return;
+        }
+
+        List<String> relations = new ArrayList<>(lines.subList(first, last + 1));
+        Collections.sort(relations);
+
+        List<String> rewritten = new ArrayList<>(lines.subList(0, first));
+        rewritten.addAll(relations);
+        rewritten.addAll(lines.subList(last + 1, lines.size()));
+        Files.write(file, rewritten);
     }
 }
