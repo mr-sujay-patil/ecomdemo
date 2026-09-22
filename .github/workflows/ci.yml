@@ -1,0 +1,195 @@
+# =============================================================================================
+# EcomDemo — Continuous Integration
+# =============================================================================================
+# CI is the "build and test every change, automatically" half. CD — actually deploying it — is
+# the other half, and this project does not have it yet: the publish job below pushes an image
+# to a registry and stops there. Nobody pulls it, nothing runs it. That distinction is worth
+# keeping straight, because "we have CI/CD" usually means "we have CI".
+#
+# The vocabulary, in the order it nests:
+#   WORKFLOW  this file. Triggered by events.
+#   JOB       `build` and `publish`. Each gets a fresh RUNNER — a clean virtual machine — so
+#             jobs are isolated and run in parallel unless `needs:` says otherwise.
+#   STEP      one command or one action inside a job. Steps share the runner and its filesystem.
+
+name: CI
+
+on:
+  # Every pull request targeting main: this is the gate. Once "Require status checks to pass" is
+  # on in the branch protection, a red run here makes the Merge button unavailable.
+  pull_request:
+    branches: [main]
+  # And every push to main, which in this project only ever happens through a merge. That run is
+  # what publishes the image — see the publish job.
+  push:
+    branches: [main]
+
+# Least privilege, set at the top and widened per job. GITHUB_TOKEN is minted per run and expires
+# with it; a workflow that only reads code should not hold a token that can write packages.
+permissions:
+  contents: read
+
+# Pushing a second commit to a PR cancels the run still working on the first. The result would be
+# thrown away anyway, and runner minutes are not free. Never applied to main: those runs publish.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+
+  # -------------------------------------------------------------------------------------------
+  # Build and test
+  # -------------------------------------------------------------------------------------------
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    # `./mvnw verify` starts a PostgreSQL container through Testcontainers. GitHub's ubuntu
+    # runners ship a working Docker daemon, so this needs no service container and no extra
+    # configuration — the same command a developer runs locally is the command that runs here.
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          # CACHING. Without it every run re-downloads ~200 MB of dependencies from Maven Central:
+          # slow, and rude to a free service. The cache key is derived from the pom files, so it
+          # is reused while the dependencies are unchanged and rebuilt when they are not — the
+          # same idea as the Docker layer ordering in the Dockerfile, applied to ~/.m2.
+          cache: maven
+
+      - name: Build and run every test
+        # -B (batch mode) turns off the ANSI progress spinner, which in a log file is thousands
+        # of lines of noise. This is deliberately the identical command from the README, so a
+        # failure here is reproducible locally with no translation.
+        run: ./mvnw -B clean verify
+
+      - name: Upload the test reports
+        # `always()` is the point of this step. The default is to skip a step when an earlier one
+        # failed — which would mean the reports are uploaded only when everything passed, exactly
+        # when nobody needs them. This uploads them when the build is red, too.
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-reports
+          path: |
+            target/surefire-reports/
+            target/failsafe-reports/
+          retention-days: 14
+          # Nothing to upload is not a failure: a compilation error fails before any test runs.
+          if-no-files-found: ignore
+
+      - name: Summarise the results
+        if: always()
+        # Written to $GITHUB_STEP_SUMMARY, which GitHub renders on the run's page — so the counts
+        # are visible without opening a log or downloading an artifact.
+        run: |
+          {
+            echo "## Test results"
+            echo
+            echo "| Suite | Tests | Failures | Errors | Skipped |"
+            echo "|---|---:|---:|---:|---:|"
+            for suite in surefire failsafe; do
+              dir="target/${suite}-reports"
+              [ -d "$dir" ] || continue
+              python3 - "$dir" "$suite" <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+          directory, suite = sys.argv[1], sys.argv[2]
+          totals = dict(tests=0, failures=0, errors=0, skipped=0)
+          for path in glob.glob(f"{directory}/TEST-*.xml"):
+              attrib = ET.parse(path).getroot().attrib
+              for key in totals:
+                  totals[key] += int(attrib.get(key, 0))
+          print(f"| {suite} | {totals['tests']} | {totals['failures']} "
+                f"| {totals['errors']} | {totals['skipped']} |")
+          PY
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------------------------
+  # Publish the image
+  # -------------------------------------------------------------------------------------------
+  publish:
+    name: Publish image to GHCR
+    runs-on: ubuntu-latest
+    # `needs` is the gate that makes this meaningful: no image is ever published from a commit
+    # whose tests did not pass. Without it the two jobs would run in parallel and a red build
+    # would still publish.
+    needs: build
+    # Only on a push to main. A pull_request run must not publish: its code has not been reviewed
+    # or merged, and on a fork it is not even trusted.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      # Widened here and nowhere else. This is what lets GITHUB_TOKEN write to GHCR — there is no
+      # secret to create and no password to rotate, because the token is minted for this run and
+      # expires with it.
+      packages: write
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        # BuildKit, which is what makes the Dockerfile's layer caching work the same way in CI as
+        # it does locally, and what the GitHub Actions cache below plugs into.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Work out the image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # TWO TAGS, for two different jobs.
+          #
+          #   sha-<7 chars>  immutable. It names exactly one commit, for ever, so a deployment
+          #                  can be traced back to the code that produced it and a rollback is a
+          #                  matter of naming an older one.
+          #   latest         mutable. A convenience for "give me the newest", and precisely
+          #                  because it moves it must never be what a deployment pins — a
+          #                  `latest` deployed twice can be two different images.
+          tags: |
+            type=sha,format=short,prefix=sha-
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Layer caching across runs, stored in GitHub's own cache. A runner is a fresh machine
+          # every time, so without this the ~200 MB of dependencies would be re-downloaded and
+          # every layer rebuilt on every push. `mode=max` caches the intermediate build stage as
+          # well as the final image, which is what the multi-stage Dockerfile needs.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Say what was published
+        run: |
+          {
+            echo "## Image published"
+            echo
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo
+            echo "Pull the exact commit, not \`latest\`, when it matters:"
+            echo
+            echo '```bash'
+            echo "docker pull ghcr.io/${{ github.repository }}:sha-$(git rev-parse --short HEAD)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

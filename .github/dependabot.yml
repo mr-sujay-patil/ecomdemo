@@ -1,0 +1,52 @@
+# Dependabot opens a pull request when a dependency has a newer version. That is the whole
+# feature, and the reason it matters is that both ecosystems below rot silently: a Maven
+# dependency with a published CVE keeps building happily, and a pinned action keeps running the
+# code it was pinned to.
+#
+# Every update arrives as a PR, which means it goes through the same CI as any other change. A
+# dependency bump that breaks the build is a red PR rather than a surprise on someone's laptop —
+# which is also why this phase comes after CI rather than before it.
+
+version: 2
+updates:
+
+  # --- Maven ---------------------------------------------------------------------------------
+  # The application's own dependencies. Most of them come from the Spring Boot BOM, so the
+  # meaningful PR here is usually a single bump of spring-boot-starter-parent that moves the
+  # whole managed set together.
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      # Conventional Commits, so Dependabot's PRs read like the rest of the history.
+      prefix: "chore(deps)"
+    groups:
+      # One PR for a whole coordinated set rather than five that each fail on their own. Spring
+      # releases its modules together, and reviewing them together is the only way they make
+      # sense.
+      spring:
+        patterns:
+          - "org.springframework*"
+      test-dependencies:
+        patterns:
+          - "org.testcontainers:*"
+          - "com.h2database:*"
+        update-types:
+          - minor
+          - patch
+
+  # --- GitHub Actions ------------------------------------------------------------------------
+  # The actions used by the workflows in .github/workflows. They are pinned to a major version
+  # (@v7), which picks up fixes within that major automatically but never crosses a breaking
+  # change — so Dependabot is what tells us a v8 exists rather than surprising us with it.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
