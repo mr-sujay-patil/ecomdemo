@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 10: Containerization (tag: pending, PR: pending)
+## Phase 10: Containerization (tag: phase-10-complete, PR #10)
 **What exists now:** `cp .env.example .env && docker compose up --build` starts the whole system:
 `ecomdemo-app` and `ecomdemo-db` on a private network, the app waiting for `pg_isready` before it
 connects, the data in a named volume that survives `down`. The image is multi-stage — JDK+Maven
