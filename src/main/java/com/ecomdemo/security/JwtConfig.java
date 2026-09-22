@@ -54,6 +54,18 @@ public class JwtConfig {
 
     private static final String ALGORITHM = "HmacSHA256";
 
+    /**
+     * One instance, reused.
+     *
+     * <p>Constructing a {@code SecureRandom} per call is the mistake this guards against: each
+     * new instance re-seeds from the operating system's entropy source, which is slow, and on
+     * some platforms a burst of fresh instances created in the same moment can be seeded from
+     * correlated state. A single instance is also explicitly thread-safe, and it accumulates
+     * entropy rather than starting from scratch. This is only reached once at startup, but "it
+     * only happens once" is how the habit survives into code where it happens constantly.
+     */
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
     @Bean
     public SecretKey jwtSigningKey(JwtProperties properties) {
         String secret = properties.secret();
@@ -65,7 +77,7 @@ public class JwtConfig {
                     to at least {} characters before running anything you expect to keep working.""",
                     MINIMUM_KEY_BYTES);
             byte[] generated = new byte[MINIMUM_KEY_BYTES];
-            new SecureRandom().nextBytes(generated);
+            SECURE_RANDOM.nextBytes(generated);
             return new SecretKeySpec(generated, ALGORITHM);
         }
 

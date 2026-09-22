@@ -1,0 +1,103 @@
+# =============================================================================================
+# SonarQube — code quality analysis
+# =============================================================================================
+# A SEPARATE compose file from `compose.yaml`, on purpose. SonarQube needs about 2 GB of RAM and
+# runs an embedded Elasticsearch; the application stack needs neither. Keeping them apart means
+# `docker compose up` stays the lean two-container dev stack Phase 10 built, and this heavyweight
+# is started only when somebody actually wants an analysis.
+#
+#   docker compose -f compose.sonar.yaml up -d      start it (first boot takes ~1-2 minutes)
+#   open http://localhost:9000                      log in: admin / admin, then change it
+#   ./mvnw clean verify sonar:sonar \
+#     -Dsonar.host.url=http://localhost:9000 \
+#     -Dsonar.token=<a token from My Account -> Security>
+#   docker compose -f compose.sonar.yaml down       stop it, keeping the analysis history
+#   docker compose -f compose.sonar.yaml down -v    ...and throw the history away
+#
+# `verify` before `sonar:sonar` is not optional: the scanner reads the compiled classes and the
+# merged JaCoCo report, and analysing without them gives an analysis with no coverage at all.
+
+services:
+
+  sonarqube:
+    # Community Edition, pinned to an exact build.
+    #
+    # NOT `lts-community`: that tag still resolves to SonarQube 9.9, which predates PostgreSQL 16
+    # and dies part-way through its own schema migration against a modern server ("The version of
+    # SonarQube is too old. Please upgrade to the Long-Term Active version first."). The
+    # long-term-active tags are published for the paid editions only - Community Build moved to a
+    # rolling release, so the honest choice for Community is to pin an exact version and bump it
+    # deliberately.
+    image: sonarqube:26.9.0.129388-community
+    container_name: ecomdemo-sonarqube
+    depends_on:
+      sonar-db:
+        condition: service_healthy
+    environment:
+      # SonarQube keeps its data in PostgreSQL. It will run on an embedded H2 with no
+      # configuration at all, but refuses to start a second time and cannot be upgraded - the
+      # database below is what makes the analysis history survive a restart.
+      SONAR_JDBC_URL: jdbc:postgresql://sonar-db:5432/sonar
+      SONAR_JDBC_USERNAME: ${SONAR_DB_USER:-sonar}
+      SONAR_JDBC_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+      # SonarQube bundles Elasticsearch, which refuses to start if it thinks the host cannot give
+      # it enough mmap regions. Docker Desktop's VM sets vm.max_map_count high enough on current
+      # versions; on a Linux host that fails with "max virtual memory areas ... is too low", run
+      #   sudo sysctl -w vm.max_map_count=524288
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    ports:
+      - "${SONAR_PORT:-9000}:9000"
+    volumes:
+      # Three named volumes, because SonarQube keeps three different things: the analysis data,
+      # the search index, and any plugins added later. Losing the index is survivable; losing
+      # `data` loses every past analysis, which is what makes "new code" comparisons possible.
+      - sonarqube-data:/opt/sonarqube/data
+      - sonarqube-extensions:/opt/sonarqube/extensions
+      - sonarqube-logs:/opt/sonarqube/logs
+    healthcheck:
+      # The status endpoint reports STARTING for a long while before UP - Elasticsearch has to
+      # come up first. A plain port check would call it ready far too early.
+      #
+      # `curl`, not `wget`: this image ships curl and no wget, so a wget probe fails with
+      # "wget: not found" for ever. The service keeps working and the container is simply marked
+      # unhealthy - which is worse than a loud failure, because anything waiting on
+      # `service_healthy` then waits for ever. (The application image is Alpine-based and has
+      # busybox wget, which is why compose.yaml can use it.)
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/api/system/status | grep -q '\"status\":\"UP\"'"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
+    # SonarQube is a tool, not part of the application: it should not come back by itself after a
+    # reboot the way the app stack does.
+    restart: unless-stopped
+
+  sonar-db:
+    # SonarQube's own database, entirely separate from the application's `db` service in
+    # compose.yaml - different container, different volume, different compose project. An
+    # analysis tool sharing a database with the thing it analyses would be a strange dependency.
+    image: postgres:18-alpine
+    container_name: ecomdemo-sonar-db
+    environment:
+      POSTGRES_DB: sonar
+      POSTGRES_USER: ${SONAR_DB_USER:-sonar}
+      POSTGRES_PASSWORD: ${SONAR_DB_PASSWORD:-sonar}
+    volumes:
+      # /var/lib/postgresql, not /var/lib/postgresql/data - see the note in compose.yaml. The
+      # postgres:18 image moved its data directory and the old path refuses to start.
+      - sonar-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SONAR_DB_USER:-sonar} -d sonar"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    # Deliberately NOT published to the host. Nothing outside this compose network needs to
+    # reach it, and an unpublished port is one fewer thing listening on the machine.
+    restart: unless-stopped
+
+volumes:
+  sonarqube-data:
+  sonarqube-extensions:
+  sonarqube-logs:
+  sonar-db-data:

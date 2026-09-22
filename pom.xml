@@ -16,6 +16,42 @@
 	<properties>
 		<java.version>21</java.version>
 		<springdoc.version>3.1.1</springdoc.version>
+
+		<!--
+			JaCoCo is not managed by the Spring Boot parent, so the version is pinned here.
+			0.8.15 is the current line and the first few to understand Java 21's class file
+			format; an older one fails to instrument rather than quietly under-reporting.
+		-->
+		<jacoco.version>0.8.15</jacoco.version>
+		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
+
+		<!--
+			Empty defaults. The JaCoCo executions below fill these in, and Surefire and Failsafe
+			read them with @{...} late evaluation. Without a default here, a build run with
+			-Djacoco.skip=true would put the literal string "@{jacocoUnitArgLine}" on the command
+			line and fail to start the JVM.
+		-->
+		<jacocoUnitArgLine></jacocoUnitArgLine>
+		<jacocoItArgLine></jacocoItArgLine>
+
+		<!--
+			Where the scanner looks for coverage. It is the MERGED report, so Sonar counts a line
+			as covered whether a unit test or an integration test reached it. Pointing this at
+			only the unit report is the usual way a project reports a coverage number that is
+			quietly wrong.
+		-->
+		<sonar.coverage.jacoco.xmlReportPaths>${project.build.directory}/site/jacoco-merged/jacoco.xml</sonar.coverage.jacoco.xmlReportPaths>
+
+		<!--
+			Generated code and configuration-only classes are excluded from coverage, not from
+			analysis: Sonar still reports bugs and smells in them. `EcomdemoApplication` is a
+			main method Spring Boot generates the body of, and the dto records are data carriers
+			whose accessors are compiler-generated - "covering" either measures nothing.
+		-->
+		<sonar.coverage.exclusions>
+			**/EcomdemoApplication.java,
+			**/dto/**
+		</sonar.coverage.exclusions>
 	</properties>
 	<dependencies>
 		<dependency>
@@ -245,7 +281,14 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 				<configuration>
-					<argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+					<!--
+						@{jacocoUnitArgLine} rather than ${...}: the @ form is Surefire's LATE
+						evaluation, resolved when the test JVM is forked rather than when the pom
+						is read. JaCoCo sets the property during the build, so the ${...} form
+						would expand to the empty default it had at parse time and no coverage
+						would be recorded - a silent failure that looks like 0% coverage.
+					-->
+					<argLine>@{jacocoUnitArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
 					<!--
 						Activate the `test` profile for every test JVM, so the suite reads
 						src/test/resources/application-test.properties and talks to H2 instead of
@@ -297,7 +340,7 @@
 						the command line is the supported way and keeps this JVM behaving like
 						the Surefire one.
 					-->
-					<argLine>-javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+					<argLine>@{jacocoItArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
 				</configuration>
 				<executions>
 					<execution>
@@ -307,6 +350,107 @@
 						</goals>
 					</execution>
 				</executions>
+			</plugin>
+
+			<!--
+				JaCoCo measures which lines the tests actually executed, by instrumenting classes
+				as the JVM loads them.
+
+				It is declared AFTER Failsafe on purpose. Plugin executions bound to the same
+				phase run in the order they appear here, and the merge and report below are bound
+				to `verify` - the same phase as `failsafe:verify`. Declared earlier, they would
+				merge and report the integration coverage before the integration tests had
+				finished writing it.
+
+				WHY TWO AGENTS AND A MERGE. Surefire and Failsafe fork separate JVMs, so each
+				needs its own agent and writes its own exec file. A single `prepare-agent` would
+				instrument only the unit run, and the coverage number would silently count the
+				fast suite alone - which for this project would badly understate it, since the
+				*IT tests are the only ones that exercise the controllers over real HTTP.
+			-->
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco.version}</version>
+				<executions>
+
+					<!-- Unit and slice tests (Surefire). Binds to `initialize` by default. -->
+					<execution>
+						<id>prepare-agent-unit</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+						<configuration>
+							<destFile>${project.build.directory}/jacoco-unit.exec</destFile>
+							<propertyName>jacocoUnitArgLine</propertyName>
+						</configuration>
+					</execution>
+
+					<!-- Integration tests (Failsafe). Binds to `pre-integration-test`. -->
+					<execution>
+						<id>prepare-agent-it</id>
+						<goals>
+							<goal>prepare-agent-integration</goal>
+						</goals>
+						<configuration>
+							<destFile>${project.build.directory}/jacoco-it.exec</destFile>
+							<propertyName>jacocoItArgLine</propertyName>
+						</configuration>
+					</execution>
+
+					<!--
+						One file from the two runs. `fileset` rather than naming the two files so
+						that a build which ran only `./mvnw test` still merges cleanly - there is
+						simply one file to merge, and the report then honestly shows unit
+						coverage only.
+					-->
+					<execution>
+						<id>merge-coverage</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>merge</goal>
+						</goals>
+						<configuration>
+							<fileSets>
+								<fileSet>
+									<directory>${project.build.directory}</directory>
+									<includes>
+										<include>jacoco-*.exec</include>
+									</includes>
+								</fileSet>
+							</fileSets>
+							<destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+						</configuration>
+					</execution>
+
+					<!--
+						The human-readable report (HTML, open target/site/jacoco-merged/index.html)
+						and the XML one the Sonar scanner reads.
+					-->
+					<execution>
+						<id>report-coverage</id>
+						<phase>verify</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+						<configuration>
+							<dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+							<outputDirectory>${project.build.directory}/site/jacoco-merged</outputDirectory>
+						</configuration>
+					</execution>
+				</executions>
+			</plugin>
+
+			<!--
+				The Sonar scanner. Not bound to a phase: analysis is an explicit
+				`./mvnw sonar:sonar` against a running SonarQube, never something that happens
+				during an ordinary build. Pinned, because a scanner that changes under you
+				changes what the quality gate sees.
+			-->
+			<plugin>
+				<groupId>org.sonarsource.scanner.maven</groupId>
+				<artifactId>sonar-maven-plugin</artifactId>
+				<version>${sonar-maven-plugin.version}</version>
 			</plugin>
 		</plugins>
 	</build>

@@ -84,7 +84,7 @@ class OrderServiceTest {
             assertThat(order.id()).isEqualTo(7L);
             verify(orderPlacementService, times(1)).placeOnce();
             verify(orderAuditService)
-                    .record(eq(OrderOutcome.PLACED), eq(7L), eq("Order placed with 1 line(s), total 100.00"));
+                    .recordAttempt(OrderOutcome.PLACED, 7L, "Order placed with 1 line(s), total 100.00");
         }
 
         @Test
@@ -102,7 +102,7 @@ class OrderServiceTest {
             // Then
             assertThat(order.id()).isEqualTo(8L);
             verify(orderPlacementService, times(2)).placeOnce();
-            verify(orderAuditService).record(eq(OrderOutcome.PLACED), eq(8L), any());
+            verify(orderAuditService).recordAttempt(eq(OrderOutcome.PLACED), eq(8L), any());
         }
 
         @Test
@@ -119,7 +119,7 @@ class OrderServiceTest {
                     .hasMessageContaining("try again");
             verify(orderPlacementService, times(OrderService.MAX_ATTEMPTS)).placeOnce();
             verify(orderAuditService)
-                    .record(eq(OrderOutcome.REJECTED), isNull(), eq("Gave up after 3 concurrent-update conflicts"));
+                    .recordAttempt(eq(OrderOutcome.REJECTED), isNull(), eq("Gave up after 3 concurrent-update conflicts"));
         }
 
         @Test
@@ -135,7 +135,7 @@ class OrderServiceTest {
             verify(orderPlacementService, times(1)).placeOnce();
             // The rejection was already audited inside the attempt, by the transaction that then
             // rolled back; auditing it again here would double-count it.
-            verify(orderAuditService, never()).record(any(), any(), any());
+            verify(orderAuditService, never()).recordAttempt(any(), any(), any());
         }
 
         private static OrderResponse placed(long id) {

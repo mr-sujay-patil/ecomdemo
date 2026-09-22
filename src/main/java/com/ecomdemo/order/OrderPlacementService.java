@@ -106,7 +106,7 @@ class OrderPlacementService {
         } catch (ConflictException ex) {
             // Written in its own transaction, so it is already committed when this one rolls
             // back a line below. A rejected checkout leaves no trace anywhere else.
-            orderAuditService.record(OrderOutcome.REJECTED, null, ex.getMessage());
+            orderAuditService.recordAttempt(OrderOutcome.REJECTED, null, ex.getMessage());
             throw ex;
         }
     }

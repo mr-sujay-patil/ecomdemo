@@ -194,7 +194,7 @@ class OrderPlacementServiceTest {
         // propagates and rolls this attempt back.
         assertThatThrownBy(() -> placementService.placeOnce()).isInstanceOf(ConflictException.class);
         verify(orderAuditService)
-                .record(
+                .recordAttempt(
                         eq(OrderOutcome.REJECTED),
                         isNull(),
                         eq("Cannot place an order: the cart is empty"));
@@ -210,7 +210,7 @@ class OrderPlacementServiceTest {
         assertThatThrownBy(() -> placementService.placeOnce())
                 .isInstanceOf(InsufficientStockException.class);
         verify(orderAuditService)
-                .record(
+                .recordAttempt(
                         eq(OrderOutcome.REJECTED),
                         isNull(),
                         eq("Insufficient stock for 'Lamp': requested 3, available 2"));
@@ -229,7 +229,7 @@ class OrderPlacementServiceTest {
 
         // Then: the PLACED row is written by OrderService AFTER this transaction commits, so
         // nothing is audited from in here on the happy path.
-        verify(orderAuditService, never()).record(any(), any(), any());
+        verify(orderAuditService, never()).recordAttempt(any(), any(), any());
     }
 
     private static Answer<Order> saveReturnsItsArgument() {

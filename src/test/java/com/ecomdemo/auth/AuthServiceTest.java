@@ -91,8 +91,12 @@ class AuthServiceTest {
         when(authenticationManager.authenticate(any()))
                 .thenThrow(new UsernameNotFoundException("No account named nobody"));
 
-        // When / Then: a different exception internally, the same 401 to the client
-        assertThatThrownBy(() -> authService.login(new LoginRequest("nobody", "whatever-password")))
+        // When / Then: a different exception internally, the same 401 to the client.
+        // The request is built OUTSIDE the lambda so that only the call under test can throw —
+        // otherwise a constructor that started validating its arguments would satisfy this
+        // assertion without login() ever being reached.
+        LoginRequest unknownAccount = new LoginRequest("nobody", "whatever-password");
+        assertThatThrownBy(() -> authService.login(unknownAccount))
                 .isInstanceOf(UsernameNotFoundException.class);
         verify(tokenService, never()).issueFor(any());
     }

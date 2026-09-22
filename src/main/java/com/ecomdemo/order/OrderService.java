@@ -67,7 +67,7 @@ public class OrderService {
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
                 OrderResponse placed = orderPlacementService.placeOnce();
-                orderAuditService.record(
+                orderAuditService.recordAttempt(
                         OrderOutcome.PLACED,
                         placed.id(),
                         "Order placed with %d line(s), total %s"
@@ -80,7 +80,7 @@ public class OrderService {
                 if (attempt == MAX_ATTEMPTS) {
                     String detail =
                             "Gave up after %d concurrent-update conflicts".formatted(MAX_ATTEMPTS);
-                    orderAuditService.record(OrderOutcome.REJECTED, null, detail);
+                    orderAuditService.recordAttempt(OrderOutcome.REJECTED, null, detail);
                     throw new ConcurrentUpdateException(
                             "Another order changed the same products while this one was being "
                                     + "placed. Please try again.");

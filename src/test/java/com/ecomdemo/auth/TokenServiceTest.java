@@ -59,7 +59,10 @@ class TokenServiceTest {
         // because nothing reads the database again
         var jwt = decoder.decode(response.accessToken());
         assertThat(jwt.getSubject()).isEqualTo("asha");
-        assertThat(jwt.getClaim(JwtConfig.Claims.USER_ID).toString()).isEqualTo("7");
+        // Assigned to Object first: getClaim is generic (<T> T), so passing it straight to
+        // assertThat leaves the compiler unable to choose an overload.
+        Object userIdClaim = jwt.getClaim(JwtConfig.Claims.USER_ID);
+        assertThat(userIdClaim).hasToString("7");
         assertThat(jwt.getClaimAsStringList(JwtConfig.Claims.ROLES)).containsExactly("CUSTOMER");
         // Read as a string, not via getIssuer(): that accessor insists on a URL, and this
         // application's issuer is a plain name. The decoder's issuer validator compares strings.
