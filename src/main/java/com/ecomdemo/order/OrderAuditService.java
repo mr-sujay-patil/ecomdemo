@@ -11,7 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>This service exists as a separate bean for a reason that is easy to get wrong.
  * {@code @Transactional} works through a proxy: Spring wraps the bean and starts the transaction
  * as the call crosses that wrapper. A call from one method of a class to another method of the
- * <em>same</em> class never crosses it — {@code this.record(...)} goes straight to the target
+ * <em>same</em> class never crosses it — {@code this.recordAttempt(...)} goes straight to the target
  * object — so the annotation is silently ignored and the "new" transaction is really the caller's
  * own. That is the self-invocation pitfall, and here it would not just be a missed optimisation:
  * the audit row would join the transaction that is about to roll back and vanish with it.
@@ -35,13 +35,17 @@ public class OrderAuditService {
      * when the caller's transaction rolls back, so a rejected checkout leaves evidence behind
      * even though it left no order, no stock change and no emptied cart.
      *
+     * <p>The method is {@code recordAttempt}, not {@code record}: `record` is a restricted
+     * identifier in Java (it names the class kind introduced in 16), and a method that shadows
+     * one reads badly at every call site even where the compiler allows it.
+     *
      * <p>The cost is honest to state. Two transactions mean two connections held at once, so a
      * pool sized for N concurrent checkouts now needs headroom, and the audit row commits even if
      * the caller later succeeds in a way that contradicts it. For a log, being written too often
      * beats not being written at all.
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void record(OrderOutcome outcome, Long orderId, String detail) {
+    public void recordAttempt(OrderOutcome outcome, Long orderId, String detail) {
         orderAuditRepository.save(new OrderAudit(outcome, orderId, detail, Instant.now()));
     }
 }

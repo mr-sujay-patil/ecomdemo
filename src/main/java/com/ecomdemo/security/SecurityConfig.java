@@ -57,8 +57,26 @@ public class SecurityConfig {
         this.accessDeniedHandler = accessDeniedHandler;
     }
 
+    /**
+     * Suppressed after review, not ignored. {@code java:S4502} asks "make sure disabling CSRF
+     * protection is safe here", and the answer is in the CSRF comment inside the method: this API
+     * is stateless, sets no cookie, and reads a Bearer token from a header the client must attach
+     * deliberately, so there is no ambient authority to forge.
+     *
+     * <p>It is suppressed HERE, in the code, rather than marked "accepted" in SonarQube's
+     * database — because a decision that lives only in the server is lost the moment the server
+     * is rebuilt, and is invisible in code review. The day this application authenticates with a
+     * cookie, deleting this annotation is what makes the rule speak up again.
+     *
+     * <p>Note also the absence of {@code throws Exception}, which every Spring Security example
+     * carries. It was needed while {@code HttpSecurity.build()} declared a checked
+     * {@code Exception}; Spring Security 7 no longer does, so keeping it would declare a failure
+     * that cannot happen and force callers to handle it. The compiler confirms it: the class
+     * builds without it.
+     */
+    @SuppressWarnings("java:S4502")
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) {
         http
                 // --- CSRF ------------------------------------------------------------------
                 // Cross-Site Request Forgery is an attack on AMBIENT AUTHORITY: the browser

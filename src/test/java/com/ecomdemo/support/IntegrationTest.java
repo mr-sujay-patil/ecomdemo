@@ -7,6 +7,7 @@ import com.ecomdemo.customer.dto.RegisterRequest;
 import org.assertj.core.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restclient.RestTemplateBuilder;
+import org.springframework.web.util.DefaultUriBuilderFactory;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -121,12 +122,15 @@ public abstract class IntegrationTest {
      * exactly as they did under Basic, and it mirrors what a real client does — attach the token
      * once and forget about it until it expires.
      *
-     * <p>{@code rootUri} is copied from the injected template, because that is what carries the
+     * <p>The root URI is copied from the injected template, because that is what carries the
      * random port Tomcat was given; without it the relative paths in the tests would go nowhere.
+     * It is applied through a {@link DefaultUriBuilderFactory} rather than the builder's
+     * {@code rootUri(String)}, which Spring Boot 4 has deprecated for removal — the factory is
+     * what that method was configuring all along.
      */
     protected TestRestTemplate withToken(String token) {
         return new TestRestTemplate(new RestTemplateBuilder()
-                .rootUri(rest.getRootUri())
+                .uriTemplateHandler(new DefaultUriBuilderFactory(rest.getRootUri()))
                 .additionalInterceptors((request, body, execution) -> {
                     request.getHeaders().setBearerAuth(token);
                     return execution.execute(request, body);

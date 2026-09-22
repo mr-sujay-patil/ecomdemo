@@ -208,8 +208,11 @@ class FlywayMigrationTest {
         // cost factor, and the whole string is always 60 characters.
         String stored = jdbc.queryForObject(
                 "SELECT password FROM users WHERE username = 'admin'", String.class);
-        assertThat(stored).startsWith("$2a$10$").hasSize(60);
-        assertThat(stored).as("a password must never be stored as typed").isNotEqualTo("admin123");
+        assertThat(stored)
+                .startsWith("$2a$10$")
+                .hasSize(60)
+                .as("a password must never be stored as typed")
+                .isNotEqualTo("admin123");
 
         // And the hash really is the hash of the documented development password, so the README's
         // "log in as admin/admin123" cannot quietly stop being true.

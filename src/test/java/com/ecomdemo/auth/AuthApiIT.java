@@ -92,8 +92,10 @@ class AuthApiIT extends IntegrationTest {
         String payload = new String(
                 Base64.getUrlDecoder().decode(token.split("\\.")[1]), StandardCharsets.UTF_8);
 
-        assertThat(payload).contains("\"sub\":\"" + SHOPPER + "\"").contains("\"roles\":[\"CUSTOMER\"]");
-        assertThat(payload).doesNotContain(IT_PASSWORD);
+        assertThat(payload)
+                .contains("\"sub\":\"" + SHOPPER + "\"")
+                .contains("\"roles\":[\"CUSTOMER\"]")
+                .doesNotContain(IT_PASSWORD);
     }
 
     @Test

@@ -71,8 +71,10 @@ class JwtConfigTest {
                     .issueFor(new AppUserDetails(TestData.user(2L, "admin", Role.ADMIN)))
                     .accessToken();
 
-            // Then: a valid signature is not on its own a reason to trust a token
-            assertThatThrownBy(() -> context.getBean(JwtDecoder.class).decode(token))
+            // Then: a valid signature is not on its own a reason to trust a token.
+            // The bean is looked up outside the lambda so that only decode() can throw.
+            JwtDecoder decoder = context.getBean(JwtDecoder.class);
+            assertThatThrownBy(() -> decoder.decode(token))
                     .isInstanceOf(JwtValidationException.class);
         });
     }
@@ -102,7 +104,8 @@ class JwtConfigTest {
             // Then: expiry is checked by the decoder, not by anything we wrote — and because
             // nothing consults a database, it is the ONLY thing that ever takes a token out of
             // circulation. A signature that verifies is not enough.
-            assertThatThrownBy(() -> context.getBean(JwtDecoder.class).decode(token))
+            JwtDecoder decoder = context.getBean(JwtDecoder.class);
+            assertThatThrownBy(() -> decoder.decode(token))
                     .isInstanceOf(JwtValidationException.class)
                     .hasMessageContaining("exp");
         });

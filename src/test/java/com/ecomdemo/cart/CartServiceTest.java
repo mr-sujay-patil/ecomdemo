@@ -154,7 +154,8 @@ class CartServiceTest {
             when(productService.requireProduct(404L)).thenThrow(NotFoundException.product(404L));
 
             // When / Then
-            assertThatThrownBy(() -> cartService.addItem(new AddCartItemRequest(404L, 1)))
+            AddCartItemRequest request = new AddCartItemRequest(404L, 1);
+            assertThatThrownBy(() -> cartService.addItem(request))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessage("Product 404 not found");
             verify(cartRepository, never()).save(any());
@@ -187,7 +188,8 @@ class CartServiceTest {
             givenTheCallersCartIs(TestData.cart(1L));
 
             // When / Then
-            assertThatThrownBy(() -> cartService.updateItem(10L, new UpdateCartItemRequest(5)))
+            UpdateCartItemRequest request = new UpdateCartItemRequest(5);
+            assertThatThrownBy(() -> cartService.updateItem(10L, request))
                     .isInstanceOf(NotFoundException.class)
                     .hasMessage("Product 10 is not in the cart");
             verify(cartRepository, never()).save(any());

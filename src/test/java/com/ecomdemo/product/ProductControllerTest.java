@@ -3,6 +3,7 @@ package com.ecomdemo.product;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -306,7 +307,7 @@ class ProductControllerTest {
         @Test
         void delete_whenTheProductIsMissing_returns404() {
             // Given
-            org.mockito.Mockito.doThrow(NotFoundException.product(404L))
+            doThrow(NotFoundException.product(404L))
                     .when(productService)
                     .delete(404L);
 
