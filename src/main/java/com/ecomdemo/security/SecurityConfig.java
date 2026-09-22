@@ -9,6 +9,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -17,11 +19,19 @@ import org.springframework.security.web.SecurityFilterChain;
  * <p><strong>The filter chain.</strong> Adding the security starter puts a single servlet
  * {@code Filter} in front of the whole application, and that filter delegates to an ordered
  * chain of small ones. Each does one job and hands the request on: work out who is calling
- * (here, {@code BasicAuthenticationFilter} reading the {@code Authorization} header), put the
- * result in the {@code SecurityContextHolder}, and finally decide whether this caller may have
- * this URL ({@code AuthorizationFilter}). A request that fails is answered <em>by the chain</em>
- * and never reaches the {@code DispatcherServlet} — which is why 401 and 403 need the handlers
- * in this package rather than {@code GlobalExceptionHandler}.
+ * (since Phase 9, {@code BearerTokenAuthenticationFilter} reading the {@code Authorization}
+ * header and verifying a JWT), put the result in the {@code SecurityContextHolder}, and finally
+ * decide whether this caller may have this URL ({@code AuthorizationFilter}). A request that
+ * fails is answered <em>by the chain</em> and never reaches the {@code DispatcherServlet} —
+ * which is why 401 and 403 need the handlers in this package rather than
+ * {@code GlobalExceptionHandler}.
+ *
+ * <p><strong>What changed in Phase 9.</strong> Only the first of those steps. HTTP Basic sent the
+ * password on every request, so every request cost a database lookup and a deliberately slow
+ * BCrypt verification. A Bearer token replaces both with a signature check over bytes the
+ * request already carries: nothing is read, nothing is hashed, and the application holds no
+ * session either. The authorization rules below are untouched — they were always decided from
+ * authorities, and where those authorities came from was never their concern.
  *
  * <p><strong>The rules are ordered and the first match wins.</strong> That makes the sequence
  * below meaningful, not cosmetic: the public GET rule for products has to come before the ADMIN
@@ -70,16 +80,24 @@ public class SecurityConfig {
 
                 // --- Sessions --------------------------------------------------------------
                 // STATELESS: never create an HttpSession and never look for one. Every request
-                // carries its own credentials and is authenticated from scratch. That costs a
-                // BCrypt verification per call — deliberately expensive work — which is the
-                // price of Basic authentication and one of the reasons Phase 9 replaces it with
-                // a signed token.
+                // proves itself from scratch, which since Phase 9 costs a signature check rather
+                // than a database read and a BCrypt verification.
+                //
+                // Stateless vs session-based, plainly: a session keeps the truth on the SERVER
+                // and hands the client an opaque id, so logging someone out is a matter of
+                // deleting a row — but every instance then needs access to that store, and
+                // scaling means sharing it. A token keeps the truth in the TOKEN, signed, so any
+                // instance can verify it with no shared state at all. The cost is the mirror
+                // image: nothing can be withdrawn before it expires, which is why the expiry is
+                // short.
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 
                 .authorizeHttpRequests(requests -> requests
                         // Registration must be reachable by someone who has no account yet:
-                        // requiring authentication to create an account is a closed loop.
+                        // requiring authentication to create an account is a closed loop. The
+                        // same is true of logging in — you cannot present a token to get a token.
                         .requestMatchers(HttpMethod.POST, "/api/customers/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
 
                         // The catalogue is the shop window. Browsing needs no account; changing
                         // the catalogue is the shopkeeper's job. Order matters here — see above.
@@ -101,17 +119,52 @@ public class SecurityConfig {
 
                         .anyRequest().authenticated())
 
-                // HTTP Basic: the username and password, joined by a colon, Base64-encoded into
-                // `Authorization: Basic ...`. Base64 is an ENCODING, not encryption — anybody who
-                // can see the request can read the password, so Basic is only acceptable over
-                // TLS, or, as here, on localhost in a learning project.
-                .httpBasic(basic -> basic.authenticationEntryPoint(authenticationEntryPoint))
+                // --- Bearer tokens ---------------------------------------------------------
+                // "Resource server" is the OAuth2 name for an API that accepts tokens. The filter
+                // it adds takes `Authorization: Bearer <jwt>`, hands the token to the JwtDecoder
+                // (signature, expiry and issuer — see JwtConfig), and converts the claims into an
+                // Authentication.
+                //
+                // The payload is only Base64url, so a client can read its own claims; what it
+                // cannot do is change them, because the signature covers them. That is the
+                // difference from Basic, where the header WAS the password.
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                        // The resource server has an entry point of its own, and it is the one
+                        // used when a token is present but bad. Without this line a tampered or
+                        // expired token would come back with an empty body and a
+                        // `WWW-Authenticate: Bearer error="invalid_token"` header instead of the
+                        // ApiError shape every other failure uses.
+                        .authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler(accessDeniedHandler))
 
+                // And this is the one used when there is no token at all, where the denial comes
+                // from the authorization rules rather than from the token filter. Both paths have
+                // to be covered, which is easy to get half right.
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(authenticationEntryPoint)
                         .accessDeniedHandler(accessDeniedHandler));
 
         return http.build();
+    }
+
+    /**
+     * Turns the {@code roles} claim into Spring Security authorities.
+     *
+     * <p>The default converter reads OAuth2's {@code scope}/{@code scp} claim and prefixes with
+     * {@code SCOPE_}. This application issues its own tokens and thinks in roles, so it reads
+     * {@code roles} and prefixes with {@code ROLE_} — which is what makes the untouched
+     * {@code hasRole("ADMIN")} rules above keep working, and what lets the token itself stay
+     * free of a framework convention.
+     */
+    private JwtAuthenticationConverter jwtAuthenticationConverter() {
+        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
+        authorities.setAuthoritiesClaimName(JwtConfig.Claims.ROLES);
+        authorities.setAuthorityPrefix(AppUserDetails.ROLE_PREFIX);
+
+        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
+        converter.setJwtGrantedAuthoritiesConverter(authorities);
+        return converter;
     }
 
     /**

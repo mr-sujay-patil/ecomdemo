@@ -73,8 +73,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 5 | [Database Migrations](phases/phase-05-flyway.md) | Flyway | `feature/phase-05-flyway` | ✅ |
 | 6 | [Transactions & Concurrency](phases/phase-06-transactions.md) | @Transactional + optimistic locking | `feature/phase-06-transactions` | ✅ |
 | 7 | [Integration Testing](phases/phase-07-testcontainers.md) | Testcontainers | `feature/phase-07-testcontainers` | ✅ |
-| 8 | [Spring Security](phases/phase-08-spring-security.md) | Spring Security | `feature/phase-08-spring-security` | 🔵 |
-| 9 | [JWT Authentication](phases/phase-09-jwt.md) | JWT (OAuth2 Resource Server) | `feature/phase-09-jwt` | ⬜ |
+| 8 | [Spring Security](phases/phase-08-spring-security.md) | Spring Security | `feature/phase-08-spring-security` | ✅ |
+| 9 | [JWT Authentication](phases/phase-09-jwt.md) | JWT (OAuth2 Resource Server) | `feature/phase-09-jwt` | 🔵 |
 | 10 | [Containerization](phases/phase-10-docker.md) | Docker + Docker Compose | `feature/phase-10-docker` | ⬜ |
 | 11 | [Continuous Integration](phases/phase-11-github-actions.md) | GitHub Actions | `feature/phase-11-github-actions` | ⬜ |
 | 12 | [Code Quality](phases/phase-12-sonarqube.md) | SonarQube + JaCoCo | `feature/phase-12-sonarqube` | ⬜ |

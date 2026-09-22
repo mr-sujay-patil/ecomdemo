@@ -64,7 +64,7 @@ public class CustomerController {
     }
 
     @GetMapping("/me")
-    @SecurityRequirement(name = "basicAuth")
+    @SecurityRequirement(name = "bearerAuth")
     @Operation(
             summary = "Your own profile",
             description =
@@ -73,14 +73,14 @@ public class CustomerController {
     @ApiResponse(responseCode = "200", description = "The authenticated account")
     @ApiResponse(
             responseCode = "401",
-            description = "No credentials, or the wrong ones",
+            description = "No Bearer token, or one that is invalid or expired",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CustomerResponse me() {
         return customerService.currentProfile();
     }
 
     @PutMapping("/me")
-    @SecurityRequirement(name = "basicAuth")
+    @SecurityRequirement(name = "bearerAuth")
     @Operation(
             summary = "Change your own display name",
             description =
@@ -93,7 +93,7 @@ public class CustomerController {
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     @ApiResponse(
             responseCode = "401",
-            description = "No credentials, or the wrong ones",
+            description = "No Bearer token, or one that is invalid or expired",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CustomerResponse updateMe(@Valid @RequestBody UpdateProfileRequest request) {
         return customerService.updateCurrentProfile(request);

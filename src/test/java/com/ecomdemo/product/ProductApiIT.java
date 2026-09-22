@@ -27,10 +27,10 @@ import org.springframework.http.ResponseEntity;
  * because of the database rather than because of Java.
  *
  * <p>Since Phase 8 the writes need an ADMIN and the reads need nobody, and the credentials here
- * are real: {@link #admin} sends the seeded administrator's password and it is checked against
- * the BCrypt hash migration V5 put in the container's database. The slice tests assert the same
- * rules with a fabricated principal; this is the only place the rules and a real login are
- * exercised together.
+ * are real: {@link #admin} holds a token issued by the running application after it verified the
+ * seeded administrator's password against the BCrypt hash migration V5 put in the container's
+ * database. The slice tests assert the same rules with a fabricated principal; this is the only
+ * place the rules, a real login and a real signature are exercised together.
  */
 class ProductApiIT extends IntegrationTest {
 
@@ -183,19 +183,4 @@ class ProductApiIT extends IntegrationTest {
         assertThat(all.getBody()).extracting(ProductResponse::name).doesNotContain("IT Forbidden Item");
     }
 
-    @Test
-    @DisplayName("a wrong password is a 401, and it does not say whether the account exists")
-    void badCredentialsAreRefusedWithoutLeakingWhichPartWasWrong() {
-        ResponseEntity<ApiError> wrongPassword = rest.withBasicAuth(ADMIN_USERNAME, "not-the-password")
-                .getForEntity("/api/customers/me", ApiError.class);
-        ResponseEntity<ApiError> noSuchUser = rest.withBasicAuth("nobody-here", "not-the-password")
-                .getForEntity("/api/customers/me", ApiError.class);
-
-        assertThat(wrongPassword.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        assertThat(noSuchUser.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        // Identical bodies on purpose: a difference here would be a username-enumeration oracle.
-        assertThat(wrongPassword.getBody()).isNotNull();
-        assertThat(noSuchUser.getBody()).isNotNull();
-        assertThat(wrongPassword.getBody().message()).isEqualTo(noSuchUser.getBody().message());
-    }
 }

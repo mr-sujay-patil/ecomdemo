@@ -12,7 +12,48 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 08: Spring Security (tag: pending, PR: pending)
+## Phase 09: JWT Authentication (tag: pending, PR: pending)
+**What exists now:** The password is sent once. `POST /api/auth/login` returns a signed HS256 JWT
+(15 min) carrying `sub`, `uid` and `roles`; every other call sends `Authorization: Bearer <token>`
+and the OAuth2 Resource Server filter verifies signature, expiry and issuer. No session, no
+per-request database read, no per-request BCrypt: measured 106 ms for a login against 14 ms for an
+authenticated call. Every Phase 8 rule is unchanged — they were always decided from authorities.
+220 tests (190 + 30), smoke test 125 checks. Schema unchanged at V6.
+**Key code:** `auth/` is new — `AuthController` (`POST /api/auth/login`), `AuthService` (delegates
+to the `AuthenticationManager`, then issues), `TokenService` (builds the claim set and signs),
+`AuthenticationManagerConfig` (the `DaoAuthenticationProvider`, deliberately NOT in
+`SecurityConfig`), `dto/LoginRequest` (masks the password in `toString`), `dto/TokenResponse`.
+In `security/`: `JwtProperties` + `JwtConfig` (the `SecretKey`, `JwtEncoder`, `JwtDecoder` and
+`Claims` constants), `SecurityConfig` swaps `httpBasic` for `oauth2ResourceServer` with a
+`JwtGrantedAuthoritiesConverter` on the `roles` claim, `CurrentUser` now reads the `Jwt`
+principal, `ApiErrorAuthenticationEntryPoint` distinguishes "no token" from "bad token".
+`GlobalExceptionHandler` maps `AuthenticationException` to one identical 401.
+**Config & infrastructure:** New dependency `spring-boot-starter-oauth2-resource-server` (brings
+`spring-security-oauth2-jose`, so the encoder needs nothing extra). New properties
+`ecomdemo.jwt.secret=${JWT_SECRET:}`, `ecomdemo.jwt.issuer=ecomdemo`, `ecomdemo.jwt.expiry=15m`.
+No default key in Git: unset means a random key plus a loud WARN; under 32 bytes fails startup.
+OpenAPI now declares `bearerAuth` (`bearerFormat: JWT`) and no longer declares `basicAuth`.
+**Tests:** +27 unit/slice (`TokenServiceTest` 6, `CurrentUserTest` 6, `JwtConfigTest` 5,
+`AuthControllerTest` 5, `AuthServiceTest` 4) and +8 IT (`AuthApiIT`). `IntegrationTest` now logs
+in over HTTP for a real token (`asAdmin()`, `asCustomer()`, `login()`, `withToken()`);
+`TestAuthentication` installs a `Jwt` principal. `ProductApiIT` lost its bad-credentials test to
+`AuthApiIT`. Test report: `docs/test-reports/phase-09.md`.
+**Gotchas:** `@WebMvcTest` slices now need `JwtConfig` imported too — a resource server cannot be
+built without a `JwtDecoder` — which is why the `AuthenticationManager` had to move out of
+`SecurityConfig` (a slice has no `UserDetailsService`). `Jwt.getIssuer()` insists on a URL, so a
+plain-string issuer must be read with `getClaimAsString("iss")`; the decoder's issuer validator
+compares strings and is fine with it. The resource server has its own `AuthenticationEntryPoint`
+for bad tokens, separate from `exceptionHandling()`'s for missing ones — both must be set or half
+the 401s lose the `ApiError` shape. A `uid` claim comes back as `Integer` or `Long` depending on
+its size. The decoder allows 60 s of clock skew, so short expiries cannot be tested by waiting.
+bash 3.2 mis-splits escaped quotes nested in a command substitution inside a quoted string.
+**Follow-ups (not done, out of scope):** a refresh token endpoint (optional in the phase file,
+deliberately skipped — it needs storage, rotation and reuse detection). Revocation via a token
+deny-list. RS256 and a JWKS endpoint, needed as soon as a second service accepts these tokens —
+relevant from Phase 20. TLS termination, which a Bearer token really requires — the deployment
+phases.
+
+## Phase 08: Spring Security (tag: phase-08-complete, PR #8)
 **What exists now:** The application knows who is calling. `users` (V5) holds BCrypt-hashed
 accounts with roles CUSTOMER and ADMIN; the ADMIN (`admin`/`admin123`) is seeded by the
 migration because registration always creates a CUSTOMER. HTTP Basic on a stateless chain:
@@ -52,39 +93,3 @@ error under `set -u`, which is why the smoke test's auth code uses no arrays.
 **Follow-ups (not done, out of scope):** JWT instead of Basic, so a BCrypt verification is not paid
 per request — Phase 9. Password change, account lockout and login rate limiting — not planned.
 An admin view over all orders — not planned; the repository deliberately has no "all orders" query.
-
-## Phase 07: Integration Testing (tag: phase-07-complete, PR #7)
-**What exists now:** `./mvnw verify` starts PostgreSQL 18 in a Testcontainers container, applies
-V1-V4 to it and drives the whole application over real HTTP against it. 135 tests: 120 under
-Surefire (unchanged, H2, ~9 s) and 15 under Failsafe (`*IT`, PostgreSQL, ~8 s including the
-container). The Phase 6 oversell race is now proven against PostgreSQL's own locking in the
-build, not just against H2 and the hand-run smoke test.
-**Key code:** `support/PostgresContainerConfig` declares `PostgreSQLContainer` as a
-`@TestConfiguration` `@Bean` with `@ServiceConnection` (image pinned `postgres:18-alpine`).
-`support/IntegrationTest` is the base class every `*IT` extends: `@SpringBootTest(RANDOM_PORT)` +
-`@AutoConfigureTestRestTemplate` + `@Import(PostgresContainerConfig.class)` +
-`@ActiveProfiles("it")`, and it holds the `protected TestRestTemplate rest`. `ProductApiIT` (5),
-`CartApiIT` (6), `OrderApiIT` (4, including the race).
-**Config & infrastructure:** New test-scope dependencies: `spring-boot-testcontainers`,
-`org.testcontainers:testcontainers-postgresql` (2.0.5 from the BOM), and
-`org.springframework.boot:spring-boot-restclient` (TestRestTemplate needs `RestTemplateBuilder`).
-`maven-failsafe-plugin` bound to BOTH `integration-test` and `verify`, with the same Mockito
-`-javaagent` argLine Surefire uses. `src/test/resources/application-it.properties` sets a small
-Hikari pool and deliberately NO datasource url. Docker must be running for `verify`; `./mvnw test`
-still needs nothing.
-**Tests:** +15, all new files; no existing test was edited, moved or deleted. Test report:
-`docs/test-reports/phase-07.md`. The smoke test is unchanged at 78 checks.
-**Gotchas:** In Testcontainers 2.x the module is `testcontainers-postgresql` (1.x called it
-`postgresql`) and the class is `org.testcontainers.postgresql.PostgreSQLContainer`, non-generic;
-the old `org.testcontainers.containers.PostgreSQLContainer` is still on the classpath and is the
-wrong one. Spring Boot 4 moved `TestRestTemplate` to `org.springframework.boot.resttestclient`
-and registers its auto-configuration ONLY through `@AutoConfigureTestRestTemplate` — without it
-the field is simply not injected. Every annotation on `IntegrationTest` is part of the context
-cache key: add a `@MockitoBean` to one subclass and that class silently gets its own context AND
-its own container. Failsafe bound to `integration-test` alone does NOT fail the build; the
-separate `verify` goal is what does. Surefire's `*Test.java` and Failsafe's `*IT.java` patterns
-do not overlap, so the file name is the whole mechanism for choosing a suite.
-**Follow-ups (not done, out of scope):** giving CI a Docker daemon so `verify` can run there -
-Phase 11. Migrating `ConcurrentCheckoutTest`/`FlywayMigrationTest` onto Testcontainers, and
-`withReuse(true)` for the inner loop - not planned. Per-user carts would remove the shared-cart
-cleanup dance in `CartApiIT` and `OrderApiIT` - Phase 8.

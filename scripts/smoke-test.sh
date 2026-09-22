@@ -9,10 +9,11 @@
 #   Usage:  ./mvnw spring-boot:run          # in one terminal
 #           scripts/smoke-test.sh           # in another
 #
-# Since Phase 8 the API needs credentials. The script authenticates as the ADMIN seeded by
-# migration V5 for catalogue writes, and as a CUSTOMER it registers for itself for everything
-# else. Both passwords are throwaway local development credentials and can be overridden:
-# SMOKE_ADMIN_PASSWORD, SMOKE_CUSTOMER_PASSWORD.
+# Since Phase 8 the API needs credentials, and since Phase 9 those credentials are exchanged
+# once for a token. The script logs in as the ADMIN seeded by migration V5 for catalogue writes,
+# and as a CUSTOMER it registers for itself for everything else, then sends
+# `Authorization: Bearer <jwt>` on every call. Both passwords are throwaway local development
+# credentials and can be overridden: SMOKE_ADMIN_PASSWORD, SMOKE_CUSTOMER_PASSWORD.
 #
 #   BASE_URL overrides the target, e.g. BASE_URL=http://localhost:9090 scripts/smoke-test.sh
 #
@@ -62,9 +63,10 @@ section() {
 # --------------------------------------------------------------------------------------------
 # Who the next request is sent as
 # --------------------------------------------------------------------------------------------
-# HTTP Basic: curl's -u puts "user:password", Base64-encoded, into the Authorization header. The
-# encoding is not encryption - anyone who can see the request can read the password - which is
-# why Basic is only acceptable over TLS or, as here, on localhost.
+# Bearer tokens: the password is sent once, to POST /api/auth/login, and every later call
+# carries the signed JWT that came back. "Bearer" is meant literally - whoever holds the token
+# is the account - so a token is as sensitive as a password and, like Basic before it, is only
+# safe over TLS or, as here, on localhost.
 #
 # The credentials below are throwaway local development values. The admin's is the one migration
 # V5 seeds; the customer's belongs to an account this script registers for itself through the
@@ -76,12 +78,18 @@ CUSTOMER_PASSWORD="${SMOKE_CUSTOMER_PASSWORD:-smoke-test-password}"
 # A second shopper, so the script can prove one customer cannot read another's order.
 OTHER_USER="${SMOKE_CUSTOMER_B:-smoke-customer-b}"
 
-AUTH=""   # empty means "send no credentials at all"
+# Tokens, filled in by login() once the application is up. AUTH holds the one in use.
+ADMIN_TOKEN=""
+CUSTOMER_TOKEN=""
+OTHER_TOKEN=""
+
+AUTH=""   # empty means "send no Authorization header at all"
 
 as_anonymous() { AUTH=""; }
-as_admin()     { AUTH="$ADMIN_USER:$ADMIN_PASSWORD"; }
-as_customer()  { AUTH="$CUSTOMER_USER:$CUSTOMER_PASSWORD"; }
-as_other()     { AUTH="$OTHER_USER:$CUSTOMER_PASSWORD"; }
+as_admin()     { AUTH="$ADMIN_TOKEN"; }
+as_customer()  { AUTH="$CUSTOMER_TOKEN"; }
+as_other()     { AUTH="$OTHER_TOKEN"; }
+as_token()     { AUTH="$1"; }
 
 # request <METHOD> <PATH> [JSON] -> echoes the HTTP status, body lands in $BODY
 # Sends whatever $AUTH currently holds, so a test switches identity by calling as_admin() etc.
@@ -92,9 +100,10 @@ request() {
     if [ -n "$AUTH" ]; then
         if [ -n "$data" ]; then
             curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" \
-                -u "$AUTH" -H 'Content-Type: application/json' -d "$data"
+                -H "Authorization: Bearer $AUTH" -H 'Content-Type: application/json' -d "$data"
         else
-            curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" -u "$AUTH"
+            curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" \
+                -H "Authorization: Bearer $AUTH"
         fi
     elif [ -n "$data" ]; then
         curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$BASE_URL$path" \
@@ -104,14 +113,41 @@ request() {
     fi
 }
 
+# login <username> <password> -> echoes the access token, or nothing on failure.
+# The only place in the script a password is sent.
+login() {
+    local username="$1" password="$2" saved="$AUTH" status body
+    # printf into a variable first: bash 3.2 mis-splits escaped double quotes nested inside a
+    # command substitution inside a quoted string, and the body arrives mangled.
+    body="$(printf '{"username":"%s","password":"%s"}' "$username" "$password")"
+    as_anonymous
+    status="$(request POST /api/auth/login "$body")"
+    AUTH="$saved"
+    if [ "$status" = "200" ]; then
+        jget "d['accessToken']"
+    fi
+}
+
+# jwt_part <token> <0|1> -> decodes the header or the payload of a JWT and prints it as JSON.
+# No key is needed, and that is the point: a JWT payload is Base64url-ENCODED, not encrypted.
+jwt_part() {
+    python3 -c "
+import base64, json, sys
+part = sys.argv[1].split('.')[int(sys.argv[2])]
+part += '=' * (-len(part) % 4)
+print(json.dumps(json.loads(base64.urlsafe_b64decode(part))))
+" "$1" "$2" 2>/dev/null
+}
+
 # register <username> -> creates a CUSTOMER account, or accepts that it already exists.
 # The script is re-runnable against a long-lived database, so 409 is a normal outcome: the
 # account is there either way and its password has not changed.
 register() {
-    local username="$1" status saved="$AUTH"
+    local username="$1" status saved="$AUTH" body
+    body="$(printf '{"username":"%s","password":"%s","fullName":"Smoke Test %s"}' \
+        "$username" "$CUSTOMER_PASSWORD" "$username")"
     as_anonymous
-    status="$(request POST /api/customers/register \
-        "{\"username\":\"$username\",\"password\":\"$CUSTOMER_PASSWORD\",\"fullName\":\"Smoke Test $username\"}")"
+    status="$(request POST /api/customers/register "$body")"
     AUTH="$saved"
     case "$status" in
         201|409) return 0 ;;
@@ -153,19 +189,10 @@ as_anonymous
 check "anonymous GET /api/products returns 200" "200" "$(request GET /api/products)"
 
 # The cart is somebody's. With no credentials the server cannot know whose, so it asks for them.
-# 401 means "unauthenticated" despite the name: sending credentials could change the answer.
+# 401 means "unauthenticated" despite the name: presenting a token could change the answer.
 check "anonymous GET /api/cart returns 401" "401" "$(request GET /api/cart)"
 check "and the 401 uses the standard error shape" "401" "$(jget "d['status']")"
-
-# A wrong password is the same 401 with the same body as a username that does not exist, so the
-# API cannot be used to find out which accounts are real.
-AUTH="$ADMIN_USER:definitely-not-the-password"
-check "a wrong password returns 401" "401" "$(request GET /api/customers/me)"
-WRONG_PASSWORD_MESSAGE="$(jget "d['message']")"
-AUTH="no-such-account-at-all:definitely-not-the-password"
-check "an unknown username returns 401" "401" "$(request GET /api/customers/me)"
-check "and says exactly the same thing, so usernames cannot be enumerated" \
-    "$WRONG_PASSWORD_MESSAGE" "$(jget "d['message']")"
+check "and it says where to log in" "True" "$(jget "'/api/auth/login' in d['message']")"
 
 # Registration has to be reachable by someone with no account - requiring one would be a closed
 # loop. A second run finds the account already there, which is a 409 and equally fine.
@@ -178,15 +205,123 @@ else
 fi
 register "$OTHER_USER" && pass "a second customer account exists"
 
+# --- Logging in ---------------------------------------------------------------------------
+# The one request in the whole script that carries a password.
+ADMIN_TOKEN="$(login "$ADMIN_USER" "$ADMIN_PASSWORD")"
+CUSTOMER_TOKEN="$(login "$CUSTOMER_USER" "$CUSTOMER_PASSWORD")"
+OTHER_TOKEN="$(login "$OTHER_USER" "$CUSTOMER_PASSWORD")"
+
+if [ -z "$ADMIN_TOKEN" ] || [ -z "$CUSTOMER_TOKEN" ] || [ -z "$OTHER_TOKEN" ]; then
+    fail "login returns a token" "a JWT for admin, customer and the second customer" "one was empty"
+    printf '\nCannot continue without tokens.\n'
+    exit 1
+fi
+pass "login returns a token for the admin and both customers"
+
+# A JWT is three Base64url segments joined by dots: header, payload, signature.
+check "the token has three dot-separated parts" "3" \
+    "$(printf '%s' "$CUSTOMER_TOKEN" | awk -F. '{print NF}')"
+check "the header names the signing algorithm" "HS256" \
+    "$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['alg'])" "$(jwt_part "$CUSTOMER_TOKEN" 0)" 2>/dev/null)"
+
+# The payload decodes with no key at all. That is not a flaw - it is why nothing secret may ever
+# go into a claim, and why the signature rather than secrecy is what makes claims trustworthy.
+CLAIMS="$(jwt_part "$CUSTOMER_TOKEN" 1)"
+check "the payload is readable without any key (encoded, not encrypted)" "$CUSTOMER_USER" \
+    "$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['sub'])" "$CLAIMS" 2>/dev/null)"
+check "it carries the roles the rules are decided from" "CUSTOMER" \
+    "$(python3 -c "import json,sys;print(','.join(json.loads(sys.argv[1])['roles']))" "$CLAIMS" 2>/dev/null)"
+check "it never carries the password" "True" \
+    "$(python3 -c "import sys;print(sys.argv[2] not in sys.argv[1])" "$CLAIMS" "$CUSTOMER_PASSWORD")"
+
+# Short-lived on purpose: a JWT cannot be withdrawn, so expiry is the only thing that ever takes
+# one out of circulation.
+TOKEN_LIFETIME="$(python3 -c "import json,sys;d=json.loads(sys.argv[1]);print(d['exp']-d['iat'])" "$CLAIMS" 2>/dev/null)"
+if [ -n "${TOKEN_LIFETIME:-}" ] && [ "$TOKEN_LIFETIME" -gt 0 ] && [ "$TOKEN_LIFETIME" -le 3600 ]; then
+    pass "the token is short-lived (${TOKEN_LIFETIME}s), because it cannot be revoked"
+else
+    fail "the token is short-lived" "1..3600 seconds" "${TOKEN_LIFETIME:-<unreadable>}"
+fi
+
+# --- Tokens that must not work ---------------------------------------------------------------
+# Tampering: take a real CUSTOMER token and rewrite the payload to claim ADMIN. The signature no
+# longer covers the payload, so the token never becomes an identity at all - hence 401, not 403.
+FORGED="$(python3 -c "
+import base64, json, sys
+header, payload, signature = sys.argv[1].split('.')
+padded = payload + '=' * (-len(payload) % 4)
+claims = json.loads(base64.urlsafe_b64decode(padded))
+claims['roles'] = ['ADMIN']
+forged = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip('=')
+print('.'.join([header, forged, signature]))
+" "$CUSTOMER_TOKEN" 2>/dev/null)"
+
+as_token "$FORGED"
+check "a tampered token returns 401" "401" "$(request GET /api/customers/me)"
+check "and says the token is invalid or expired" "True" \
+    "$(jget "'invalid or has expired' in d['message']")"
+as_token "$FORGED"
+check "a tampered ADMIN claim buys nothing" "401" \
+    "$(request POST /api/products '{"name":"Forged","price":1.00,"stockQuantity":1}')"
+
+# Expiry. A correctly signed token whose lifetime is entirely in the past is only mintable with
+# the signing key, so this check runs in full when JWT_SECRET is set and falls back to an
+# unsigned expired token otherwise - which the server refuses just as firmly, though for the
+# signature rather than the clock. Either way the honest thing is to say which ran.
+EXPIRED_TOKEN="$(python3 -c "
+import base64, hashlib, hmac, json, os, sys
+
+def b64(raw):
+    return base64.urlsafe_b64encode(raw).decode().rstrip('=')
+
+issued = int(__import__('time').time()) - 7200          # two hours ago
+claims = {'iss': 'ecomdemo', 'sub': sys.argv[1], 'uid': 1, 'roles': ['CUSTOMER'],
+          'iat': issued, 'exp': issued + 900}           # expired 105 minutes ago
+header = b64(json.dumps({'alg': 'HS256'}).encode())
+payload = b64(json.dumps(claims).encode())
+secret = os.environ.get('JWT_SECRET', '')
+signing_input = (header + '.' + payload).encode()
+signature = b64(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()) if secret \
+    else b64(b'not-a-real-signature')
+print('.'.join([header, payload, signature]))
+" "$CUSTOMER_USER" 2>/dev/null)"
+
+as_token "$EXPIRED_TOKEN"
+check "an expired token returns 401" "401" "$(request GET /api/customers/me)"
+check "and says the token is invalid or expired" "True" \
+    "$(jget "'invalid or has expired' in d['message']")"
+if [ -n "${JWT_SECRET:-}" ]; then
+    pass "the expired token was correctly signed, so expiry alone caused the refusal"
+else
+    pass "the expired token was unsigned (JWT_SECRET unset); set it to test expiry specifically"
+fi
+
+as_token "not-even-a-jwt"
+check "nonsense in the Authorization header is a 401, not a 500" "401" "$(request GET /api/customers/me)"
+
+# --- Login failures ---------------------------------------------------------------------------
+as_anonymous
+# Built with printf into a variable first. Nesting escaped double quotes inside a command
+# substitution inside a quoted string is one of the places bash 3.2 gets the word splitting
+# wrong, and the body arrives mangled (a 400 instead of the 401 this is testing).
+WRONG_PASSWORD_BODY="$(printf '{"username":"%s","password":"definitely-wrong"}' "$CUSTOMER_USER")"
+check "a wrong password returns 401" "401" "$(request POST /api/auth/login "$WRONG_PASSWORD_BODY")"
+WRONG_PASSWORD_MESSAGE="$(jget "d['message']")"
+check "an unknown username returns 401" "401" \
+    "$(request POST /api/auth/login '{"username":"no-such-account-at-all","password":"definitely-wrong"}')"
+check "and says exactly the same thing, so usernames cannot be enumerated" \
+    "$WRONG_PASSWORD_MESSAGE" "$(jget "d['message']")"
+
+# --- What each role may do --------------------------------------------------------------------
 as_customer
-check "the new account can read its own profile" "200" "$(request GET /api/customers/me)"
+check "the token opens the account's own profile" "200" "$(request GET /api/customers/me)"
 check "and the profile is its own" "$CUSTOMER_USER" "$(jget "d['username']")"
 check "registration never hands out an ADMIN role" "CUSTOMER" "$(jget "d['role']")"
 check "no endpoint ever returns the password or its hash" "True" \
     "$(jget "'password' not in d")"
 
-# 403, not 401: the server knows exactly who this is and the answer is still no. Repeating the
-# request with the same credentials will never help - only a different role would.
+# 403, not 401: the server knows exactly who this is and the answer is still no. Presenting the
+# same token again will never help - only a different role would.
 STATUS="$(request POST /api/products \
     '{"name":"Forbidden Probe","description":"a customer may not create this","price":1.00,"stockQuantity":1,"category":"TEST"}')"
 check "a CUSTOMER creating a product returns 403" "403" "$STATUS"
@@ -564,7 +699,7 @@ check "the last unit is in the cart" "200" "$STATUS"
 # do overlap, and the application log shows the versioned UPDATE being rejected.
 # -o is given twice because -o applies to one transfer each; -w prints per transfer.
 RACE_RESULT="$(curl -sS --parallel --parallel-immediate -X POST \
-    -u "$CUSTOMER_USER:$CUSTOMER_PASSWORD" \
+    -H "Authorization: Bearer $CUSTOMER_TOKEN" \
     -o /dev/null -o /dev/null -w '%{http_code}\n' \
     "$BASE_URL/api/orders" "$BASE_URL/api/orders" | sort | paste -sd, -)"
 check "two simultaneous checkouts return exactly one 201 and one 409" "201,409" "$RACE_RESULT"

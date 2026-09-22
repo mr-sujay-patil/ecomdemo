@@ -4,6 +4,7 @@ import com.ecomdemo.common.GlobalExceptionHandler;
 import com.ecomdemo.security.ApiErrorAccessDeniedHandler;
 import com.ecomdemo.security.ApiErrorAuthenticationEntryPoint;
 import com.ecomdemo.security.ApiErrorWriter;
+import com.ecomdemo.security.JwtConfig;
 import com.ecomdemo.security.SecurityConfig;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
@@ -26,7 +27,13 @@ import org.springframework.context.annotation.Import;
  *
  * <p>The three {@code ApiError*} classes come along because {@code SecurityConfig} is
  * constructed from them, and {@link GlobalExceptionHandler} because the 401 and 403 bodies are
- * only half its story — method-security denials are converted there instead.
+ * only half its story — method-security denials and failed logins are converted there instead.
+ * {@link JwtConfig} comes along because since Phase 9 the chain is a resource server, and a
+ * resource server cannot be built without a {@code JwtDecoder}.
+ *
+ * <p>What deliberately does <em>not</em> come along is the {@code AuthenticationManager}: it
+ * needs a {@code UserDetailsService}, which a web slice has none of. It lives in
+ * {@code auth/AuthenticationManagerConfig} for exactly that reason.
  *
  * <p>Bundling them into one annotation rather than repeating a five-class {@code @Import} in
  * every slice also keeps the context cache key identical across those tests, so they share one
@@ -38,6 +45,7 @@ import org.springframework.context.annotation.Import;
 @Inherited
 @Import({
     SecurityConfig.class,
+    JwtConfig.class,
     ApiErrorWriter.class,
     ApiErrorAuthenticationEntryPoint.class,
     ApiErrorAccessDeniedHandler.class,

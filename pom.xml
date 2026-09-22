@@ -61,6 +61,27 @@
 		</dependency>
 
 		<!--
+			Spring Security's OAuth2 Resource Server. "Resource server" is the OAuth2 word for
+			an API that ACCEPTS tokens rather than one that issues them: it adds a filter that
+			pulls a Bearer token off the Authorization header, verifies its signature and its
+			expiry, and turns the claims into an Authentication. All of that used to be the job
+			of BasicAuthenticationFilter plus a database lookup on every request.
+
+			Strictly, this application is both halves — it also ISSUES the token, at
+			/api/auth/login — which a textbook OAuth2 deployment would split into a separate
+			authorization server. That is the honest simplification of this phase, and the README
+			says so. The starter brings `spring-security-oauth2-jose` with it, which carries
+			Nimbus JOSE and therefore both the decoder AND the encoder, so signing needs no
+			further dependency (and in particular no third-party JWT library).
+
+			The version comes from the Spring Boot BOM (Spring Security 7.1.1).
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+		</dependency>
+
+		<!--
 			The PostgreSQL JDBC driver. It is only ever loaded by reflection through the JDBC URL,
 			so runtime scope is enough - no application code imports it. The version comes from
 			the Spring Boot BOM, which pins a driver known to work with the managed HikariCP.

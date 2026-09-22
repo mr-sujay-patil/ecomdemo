@@ -1,8 +1,12 @@
 package com.ecomdemo.support;
 
+import com.ecomdemo.auth.dto.LoginRequest;
+import com.ecomdemo.auth.dto.TokenResponse;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
+import org.assertj.core.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.restclient.RestTemplateBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -41,11 +45,17 @@ import org.springframework.test.context.ActiveProfiles;
  * on a Tomcat thread that would not see the test thread's transaction anyway. They clean up after
  * themselves instead, through the same API they exercise.
  *
- * <p>Since Phase 8 most of the API needs credentials, and these tests send real ones — a real
- * {@code Authorization} header, verified against a real BCrypt hash in the container's database,
- * by the real filter chain. That is the whole point of running at this level: {@code @WithMockUser}
- * would skip the authentication it is supposed to be exercising. {@link #rest} stays
- * unauthenticated so that the "anonymous callers are refused" cases can still be written.
+ * <p>Since Phase 8 most of the API needs credentials, and these tests send real ones. Since
+ * Phase 9 that means a real round trip: {@link #asCustomer} and {@link #asAdmin} call
+ * {@code POST /api/auth/login} over HTTP, get a genuinely signed JWT back, and attach it as
+ * {@code Authorization: Bearer …} — so the password is verified against a real BCrypt hash in
+ * the container's database, the token is signed by the running application's key, and every
+ * later request has its signature, expiry and issuer checked by the real decoder. That is the
+ * whole point of running at this level: {@code @WithMockUser} would skip the authentication it
+ * is supposed to be exercising, and a hand-built {@code Jwt} would skip the signature.
+ *
+ * <p>{@link #rest} stays unauthenticated so that the "anonymous callers are refused" cases can
+ * still be written.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
@@ -68,27 +78,21 @@ public abstract class IntegrationTest {
     @Autowired
     protected TestRestTemplate rest;
 
-    /**
-     * A client authenticated as the seeded ADMIN.
-     *
-     * <p>{@code withBasicAuth} does not log in; it returns a copy of the template that attaches
-     * an {@code Authorization: Basic ...} header to every request. The login then happens on
-     * each call, which is exactly how a stateless API behaves.
-     */
+    /** A client carrying a freshly issued token for the seeded ADMIN. */
     protected TestRestTemplate asAdmin() {
-        return rest.withBasicAuth(ADMIN_USERNAME, ADMIN_PASSWORD);
+        return withToken(login(ADMIN_USERNAME, ADMIN_PASSWORD));
     }
 
     /**
-     * Registers a CUSTOMER (if this container has not seen it yet) and returns a client
-     * authenticated as it.
+     * Registers a CUSTOMER (if this container has not seen it yet), logs in, and returns a
+     * client carrying the token.
      *
      * <p>Registration goes through the public endpoint rather than straight into the database,
-     * so the password really is hashed by the application and really is verified back through
-     * the {@code PasswordEncoder} on the next call. A repeat run inside the same container gets
-     * a 409, which is fine: the account is there either way and the password has not changed.
+     * so the password really is hashed by the application and really is verified back at login.
+     * A repeat run inside the same container gets a 409, which is fine: the account is there
+     * either way and the password has not changed.
      *
-     * <p>Each test class uses a username of its own, because an account now owns a cart — two
+     * <p>Each test class uses a username of its own, because an account owns a cart — two
      * classes sharing a name would share a cart and interfere with each other.
      */
     protected TestRestTemplate asCustomer(String username) {
@@ -96,6 +100,36 @@ public abstract class IntegrationTest {
                 "/api/customers/register",
                 new RegisterRequest(username, IT_PASSWORD, username + " (integration test)"),
                 CustomerResponse.class);
-        return rest.withBasicAuth(username, IT_PASSWORD);
+        return withToken(login(username, IT_PASSWORD));
+    }
+
+    /** Exchanges credentials for a token over real HTTP, and fails the test if that does not work. */
+    protected String login(String username, String password) {
+        TokenResponse token = rest.postForObject(
+                "/api/auth/login", new LoginRequest(username, password), TokenResponse.class);
+        Assertions.assertThat(token)
+                .as("login as %s should return a token", username)
+                .isNotNull();
+        Assertions.assertThat(token.accessToken()).isNotBlank();
+        return token.accessToken();
+    }
+
+    /**
+     * A client that sends the given token on every request.
+     *
+     * <p>An interceptor rather than a header passed to every call: it keeps these tests reading
+     * exactly as they did under Basic, and it mirrors what a real client does — attach the token
+     * once and forget about it until it expires.
+     *
+     * <p>{@code rootUri} is copied from the injected template, because that is what carries the
+     * random port Tomcat was given; without it the relative paths in the tests would go nowhere.
+     */
+    protected TestRestTemplate withToken(String token) {
+        return new TestRestTemplate(new RestTemplateBuilder()
+                .rootUri(rest.getRootUri())
+                .additionalInterceptors((request, body, execution) -> {
+                    request.getHeaders().setBearerAuth(token);
+                    return execution.execute(request, body);
+                }));
     }
 }
