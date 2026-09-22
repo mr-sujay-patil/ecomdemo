@@ -5,10 +5,11 @@
 - **Updated:** 2026-09-22
 - **Phase:** 17: Messaging (Apache Kafka, KRaft)
 - **Branch:** feature/phase-17-kafka
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #21 — raised, awaiting CI
+  https://github.com/mr-sujay-patil/ecomdemo/pull/21
+- **Waiting for user:** YES — review and merge PR #21
 
 ## Phase 16 merge verification (passed 2026-09-22)
 PR #18 merged as a merge commit (e407627, parents 77a9d13 + 1313a6e), plus follow-up PR #19
@@ -40,7 +41,7 @@ No tag - a fix branch is not a phase. Report: `docs/test-reports/fix-product-cac
 - [x] Testing protocol run in full + docs/test-reports/phase-17.md
 - [x] README section, docs/decisions.md entries (13), RECENT.md rotation (Phase 15 archived),
       tracker -> 🔵
-- [ ] PR raised
+- [x] PR raised (#21)
 
 ## Last test run
 - 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 278 (was 273) + Failsafe 77
@@ -89,7 +90,16 @@ branch. The SonarQube stack was STOPPED during this phase to free memory for Tes
 is gitignored.
 
 ## Next action
-Raise the PR for Phase 17 and STOP for the user's review.
+STOPPED at the mandatory post-PR stop point.
+https://github.com/mr-sujay-patil/ecomdemo/pull/21
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
+  tag `phase-17-complete` and start Phase 18 (`docs/phases/phase-18-outbox.md`), which exists to
+  close the dual-write gap this phase measured.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say so explicitly.
+- Two things are outstanding for the user's eyes: the Grafana dashboards' RENDER (Phases 15-16)
+  and Kafka UI at http://localhost:8090, which is the nicest way to see a partition and a key.
+- The SonarQube stack is STOPPED; `docker compose -f compose.sonar.yaml up -d` brings it back.
 
 Five traps hit and fixed, all in the test report:
 1. `spring-kafka` alone gives no auto-configuration in Boot 4 - the auto-config lives in
