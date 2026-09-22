@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-22
 - **Phase:** 13: Caching
 - **Branch:** feature/phase-13-redis
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** no
@@ -20,35 +20,47 @@ image published as `latest` + `sha-1b03f5f`. `./mvnw clean verify` -> 190 + 30, 
 -> 125 passed, 0 failed, 0 skipped, 0 ERROR. Tag `phase-12-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [ ] Redis in Compose
-- [ ] `@Cacheable` on product reads, `@CacheEvict` / `@CachePut` on writes
-- [ ] JSON serialization with a TTL per cache
-- [ ] Hit/miss logging
-- [ ] A Testcontainers Redis test
-- [ ] Repeated reads skip the database and updates invalidate the cache (the "Done when")
-- [ ] Smoke test additions (after a product read the cache key exists in Redis; updating the
+- [x] Redis in Compose
+- [x] `@Cacheable` on product reads, `@CacheEvict` / `@CachePut` on writes
+- [x] JSON serialization with a TTL per cache
+- [x] Hit/miss logging
+- [x] A Testcontainers Redis test
+- [x] Repeated reads skip the database and updates invalidate the cache (the "Done when")
+- [x] Smoke test additions (after a product read the cache key exists in Redis; updating the
       product evicts or refreshes it)
-- [ ] Testing protocol run in full + docs/test-reports/phase-13.md
-- [ ] README section, decisions.md, RECENT.md rotation (Phase 11 archived), tracker -> 🔵
+- [x] Testing protocol run in full + docs/test-reports/phase-13.md
+- [x] README section, decisions.md, RECENT.md rotation (Phase 11 archived), tracker -> 🔵
 - [ ] PR raised, CI green
 
 ## Last test run
-- none yet this phase. Baseline inherited from `main`: 190 Surefire + 30 Failsafe, smoke 125,
-  coverage 97.3% line / 81.0% branch, Sonar gate OK with 0 issues.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 190 (unchanged) + Failsafe 38
+  (was 30), 0 failures, 0 skipped. Exactly ONE redis and ONE postgres container for the whole
+  Failsafe run (counted from the log) - the shared IntegrationTest context held.
+- 2026-09-22: `./mvnw clean test` -> 190 tests, 0 "Creating container" lines. The Phase 7
+  Docker-free promise still holds (`spring.cache.type=none` in the test profile).
+- 2026-09-22: `scripts/smoke-test.sh` against the compose stack -> 136 passed (was 125), 0 failed,
+  **0 skipped** - so every cache check really ran against Redis.
+- 2026-09-22: graceful degradation verified by hand: `docker compose stop cache`, then
+  `GET /api/products` -> 200 with "cache GET failed ... falling through to the database".
 
 ## Open issues / blockers
-- **What NOT to cache is the heart of this phase.** Stock changes on every checkout and is the
-  subject of the Phase 6 optimistic-locking race; caching it would resurrect the oversell bug
-  the hard way. Plan: cache the catalogue read path only, and make `OrderPlacementService` read
-  products through a path that never touches the cache — then prove it with the existing race.
-- **Serialization.** The default JDK serializer would make cache entries unreadable and tie them
-  to class shape. Use JSON, and check that `BigDecimal` money and `Instant` survive a round trip.
-- **The Testcontainers Redis test must not fork a second container set.** Every annotation on
-  `IntegrationTest` is part of the context cache key (Phase 7 lesson) — add Redis to that ONE
-  base configuration or the suite silently starts paying for a container per class.
+- none. All three opening concerns were handled and are covered by tests: `requireProduct` is
+  uncached and `checkoutIgnoresTheCache` proves the boundary; serialization is per-cache typed
+  and `bigDecimalKeepsItsScale` proves the round trip; one container of each was counted.
+- Worth carrying forward: `CacheManager.clear()` logged success while the keys survived
+  (`@CacheEvict` on explicit keys is fine, and that is all the application uses).
 
-## Decisions this phase (copied to docs/decisions.md ⬜)
-- none yet.
+## Decisions this phase (copied to docs/decisions.md ✅ — 11 entries)
+- Only the catalogue reads are cached; `requireProduct` (cart/checkout) never is.
+- DTOs are cached, never entities.
+- One JSON serializer per cache, typed — NOT generic + Jackson default typing (which failed to
+  round-trip AND is a deserialization gadget).
+- A CacheErrorHandler logs and falls through, so a Redis outage costs latency not availability.
+- Every cache has a TTL; `productService.save` evicts nothing (evict-before-commit race).
+- `/error` is permitted, because a 500 on a public endpoint was arriving as 401.
+- Redis container declared in the shared IntegrationTest config; `spring.cache.type=none` in the
+  test profile.
+- Redis runs with no persistence, a maxmemory ceiling and allkeys-lru.
 
 ## Environment left behind
 Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`), schema
@@ -62,6 +74,6 @@ and is gitignored. No stray Java processes.
   stated manual step, still undone.
 
 ## Next action
-Start step 5 (IMPLEMENTING) of the execution protocol on `feature/phase-13-redis`: read
-`docs/phases/phase-13-redis.md`, then work the checklist above top-down with small Conventional
-Commits, beginning with the Redis service in `compose.yaml` and the cache configuration.
+Raise the PR (`gh pr create --base main`), wait for CI to go green, then STOP for the user's
+review. NOTE: `required_status_checks` is now ENFORCED on `main` with `strict: true`, so the PR
+may also need `gh pr update-branch` before it can merge — confirm rather than assume.
