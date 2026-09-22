@@ -7,7 +7,8 @@
 - **Branch:** feature/phase-16-logging
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
+- **PR:** #18 — raised, awaiting CI
+  https://github.com/mr-sujay-patil/ecomdemo/pull/18
 - **Waiting for user:** YES - review and merge the PR
 
 ## Phase 15 merge verification (passed 2026-09-22)
