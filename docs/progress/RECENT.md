@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 11: Continuous Integration (tag: pending, PR: pending)
+## Phase 11: Continuous Integration (tag: phase-11-complete, PRs #11 and #13)
 **What exists now:** Every PR is built and tested by GitHub Actions before it can be merged, and
 every push to `main` publishes an image to GHCR tagged `sha-<short>` and `latest`. Proven, not
 assumed: a deliberately failing test was committed, the run went red with the publish job skipped
