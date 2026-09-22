@@ -1,0 +1,23 @@
+# Grafana dashboard provisioning (Phase 15).
+#
+# Points Grafana at a directory of dashboard JSON files and tells it to keep them in sync. The
+# dashboards themselves are ordinary JSON in Git, reviewed like any other file.
+
+apiVersion: 1
+
+providers:
+  - name: ecomdemo
+    orgId: 1
+    folder: EcomDemo
+    type: file
+    # Deleting the JSON file deletes the dashboard from Grafana too, rather than leaving an
+    # orphan behind that nobody can find the source of.
+    disableDeletion: false
+    # `false` means edits made in the UI are overwritten on the next reload. That is the intended
+    # behaviour: the file is the source of truth, and a change worth keeping is a change worth
+    # committing. The UI stays usable for exploring - "Save" is simply not where work is kept.
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

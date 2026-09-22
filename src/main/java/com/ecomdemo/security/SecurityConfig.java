@@ -1,5 +1,6 @@
 package com.ecomdemo.security;
 
+import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -146,6 +147,43 @@ public class SecurityConfig {
                         // Permitting /error does not expose anything: it renders whatever the
                         // failed request produced, and every deliberate error in this application
                         // already goes through GlobalExceptionHandler instead.
+                        // --- Actuator (Phase 15) ------------------------------------------
+                        // Matched by endpoint ID, not by URL. `EndpointRequest.to("health")`
+                        // keeps meaning the health endpoint even if management.endpoints.web
+                        // .base-path moves it off /actuator, which a hand-written
+                        // "/actuator/health" rule would not — it would silently match nothing
+                        // and the rule below it would take over. Security rules that fail open
+                        // when configuration moves are worth avoiding by construction.
+                        //
+                        // health and info are anonymous because their callers are machines with
+                        // no credentials: the container's own HEALTHCHECK, and every
+                        // orchestrator probe after it. The body is not a giveaway — show-details
+                        // is `when-authorized`, so an anonymous caller sees {"status":"UP"} and
+                        // nothing about which component is unhappy.
+                        .requestMatchers(EndpointRequest.to("health", "info")).permitAll()
+
+                        // The scrape endpoint is open to the compose network for the same
+                        // reason: Prometheus authenticates with nothing, and giving it a
+                        // 15-minute JWT would mean re-issuing one every 15 minutes forever.
+                        //
+                        // This is a deliberate, bounded trade-off and not a recommendation. The
+                        // page carries no customer data — meter names, counts and latencies —
+                        // but it does describe the system: every URI template, the pool sizes,
+                        // the heap. In a real deployment the fix is not authentication, it is
+                        // reachability: move the management endpoints to their own port with
+                        // `management.server.port` and publish that port only on the internal
+                        // network, so the question of who may scrape it never reaches Spring
+                        // Security at all. That is deliberately out of this phase's scope, and
+                        // docs/decisions.md records why.
+                        .requestMatchers(EndpointRequest.to("prometheus")).permitAll()
+
+                        // Everything else Actuator exposes — /actuator itself and
+                        // /actuator/metrics — is for an operator, so it needs an operator. This
+                        // rule comes LAST of the four so the three specific ones win, and it is
+                        // written as "any endpoint" rather than a list so that an endpoint added
+                        // to the exposure list later is closed by default rather than open.
+                        .requestMatchers(EndpointRequest.toAnyEndpoint()).hasRole("ADMIN")
+
                         .requestMatchers("/error").permitAll()
 
                         // The API description and the UI that renders it stay open, because a

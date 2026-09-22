@@ -242,7 +242,7 @@ then checks the schema against the entities and fails the startup if they disagr
 In a second terminal, against either way of running it:
 
 ```bash
-./mvnw clean verify             # build and run all 276 tests (needs Docker for the 47 *IT)
+./mvnw clean verify             # build and run all 303 tests (needs Docker for the 62 *IT)
 scripts/smoke-test.sh           # 156 end-to-end checks against the running app
 ```
 
@@ -1103,6 +1103,304 @@ the Dockerfile as the runtime user. Both halves matter: `/app` is owned by root 
 application is not, and an import that failed before a container was replaced could not be
 resumed if its staged input had gone with the container.
 
+## Metrics and monitoring
+
+Three pieces, and it is worth being clear about which does what. **Micrometer** is a facade the
+application records numbers against — `counter.increment()`, `timer.record()` — and it knows
+nothing about Prometheus. The **Prometheus registry** holds those numbers in memory and renders
+them, on request, as text at `/actuator/prometheus`. **Prometheus** walks up to that URL every
+fifteen seconds and stores what it finds. **Grafana** draws it.
+
+The important word is *request*. Prometheus is a **pull** system: the application never connects
+to it, never buffers, never retries, and cannot be slowed down by a monitoring system having a bad
+day. It also means a target that goes silent is a signal — `up == 0` — rather than an absence
+nobody notices, which is the failure mode of every push-based agent.
+
+```
+  OrderService                Actuator                 Prometheus            Grafana
+  ─────────────               ─────────                ──────────            ───────
+  counter.increment()  ──▶   in-memory registry
+  timer.record()              │
+                              └─ renders on demand ◀── GET /actuator/  ──▶  PromQL ──▶ panels
+                                 orders_placed_total    prometheus           every 15s
+                                                        (pull, every 15s)
+```
+
+### Four meter types, and when each is the right one
+
+| Type | Answers | Here |
+|---|---|---|
+| **Counter** | "how many, how fast" — only ever goes up | `orders.placed` |
+| **Gauge** | "what is it right now" — goes up and down, sampled | `jvm_memory_used_bytes`, `hikaricp_connections_active` (both auto-configured; this phase writes none of its own) |
+| **Timer** | "how long, and how many" — a counter and a duration in one meter | `checkout.duration` |
+| **Distribution summary** | "how big" — a timer for something that is not time | `order.value` |
+
+Two of those choices are the whole lesson.
+
+`order.value` is a **summary, not a counter**, because two questions are being asked of the same
+event: how much revenue (`_sum`) and how large is a typical basket (`_count`, and the buckets
+between). A counter of the amount answers the first and can never answer the second — the average
+of a stream of numbers is not recoverable from their total.
+
+`checkout.duration` is a **timer wrapping the whole retry loop**, not each attempt. A timer counts
+as well as times, so this single meter answers all three [RED](#red-and-use) questions. Timing each
+attempt separately would report a checkout that lost two optimistic locks and succeeded on the
+third as three quick checkouts — none of which anybody actually experienced.
+
+### Never graph a counter
+
+A counter resets to zero when the process restarts, so its raw value is meaningless. Every panel
+uses `rate()`, which understands that a drop to zero is a restart rather than negative traffic:
+
+```promql
+# orders per second, averaged over five minutes
+rate(orders_placed_total[5m])
+```
+
+### The one that bites: an absent series is not zero
+
+`CheckoutMetrics` registers **every** meter in its constructor, before a single order is placed —
+including the four failure outcomes that may never happen. This looks like ceremony and is not.
+
+A meter that has never been touched does not appear in the scrape at all. PromQL over a series
+that does not exist returns **no rows** — not zero — so a panel shows "No data", and, far worse, an
+alert written as `rate(...) > 0` can never fire, because there is nothing for the expression to be
+true about. Registering up front means the series exists at `0` from the first scrape, and "no
+orders in the last hour" becomes a fact the monitoring system can see rather than a silence
+indistinguishable from health.
+
+```console
+$ curl -s localhost:8080/actuator/prometheus | grep checkout_duration_seconds_count
+# a freshly started application, before anyone has bought anything
+checkout_duration_seconds_count{application="ecomdemo",outcome="conflict"} 0
+checkout_duration_seconds_count{application="ecomdemo",outcome="empty_cart"} 0
+checkout_duration_seconds_count{application="ecomdemo",outcome="error"} 0
+checkout_duration_seconds_count{application="ecomdemo",outcome="out_of_stock"} 0
+checkout_duration_seconds_count{application="ecomdemo",outcome="placed"} 0
+```
+
+### Tags are time series, so keep them countable
+
+`checkout.duration` carries one tag, `outcome`, whose values come from an enum with five
+constants. That bound is the point. Every distinct tag value is a separate time series, stored for
+ever; tagging by an order id, a username or an exception message is the textbook way to take a
+monitoring system down with the traffic of the thing it is monitoring.
+
+Spring Boot applies the same discipline to the HTTP timers it auto-configures: the `uri` tag is a
+**template**, `/api/orders/{id}`, not the path that was requested. One series covers every order
+ever fetched.
+
+The reverse mistake is collapsing tags that should be separate. The five outcomes are not one
+"failed" bucket, because the three ways of not creating an order call for three different
+reactions: `empty_cart` rising is a front-end bug, `out_of_stock` rising is a merchandising
+problem, and `conflict` rising is contention a human should look at.
+
+### RED and USE
+
+Two checklists for deciding what to put on a dashboard, and they apply to different things.
+
+**RED** is for anything that serves requests — **R**ate, **E**rrors, **D**uration. The dashboard
+answers all three for checkout from the one timer:
+
+```promql
+sum by (outcome) (rate(checkout_duration_seconds_count[5m]))                 # rate, and errors
+histogram_quantile(0.95, sum by (le) (rate(checkout_duration_seconds_bucket[5m])))  # duration
+```
+
+**USE** is for resources — **U**tilisation, **S**aturation, **E**rrors. Heap and CPU are
+utilisation; `hikaricp_connections_pending` is the saturation signal and the one to watch, because
+threads queueing for a database connection means requests are waiting before a single query has
+run.
+
+### Histograms, not percentiles
+
+The application publishes bucket counts and lets Prometheus compute the quantile:
+
+```properties
+management.metrics.distribution.percentiles-histogram.checkout.duration=true
+```
+
+Not `percentiles`, which computes p95 inside the JVM. A percentile calculated in one process
+cannot be combined with another process's — averaging the p95 of three instances gives the p95 of
+nothing. Buckets can simply be added up, which is why `histogram_quantile()` over three instances
+is correct and an average of three p95s is not. Buckets cost one time series each, so it is an
+opt-in list rather than a global switch.
+
+### Liveness is not readiness
+
+Two health groups, two different questions, two different remedies:
+
+| | Asks | If DOWN, do this | Includes |
+|---|---|---|---|
+| `/actuator/health/liveness` | is this process broken beyond recovery? | kill and restart it | the JVM's own lifecycle flag, nothing else |
+| `/actuator/health/readiness` | can it serve a request right now? | take it out of the load balancer and wait | lifecycle + the database |
+
+Getting these the wrong way round is an outage amplifier. Wire a restart to the *readiness*
+answer and a slow database makes every instance report not-ready, the orchestrator restarts all of
+them at once, and now there is a thundering herd of cold JVMs on top of a database that was merely
+slow.
+
+**Redis is deliberately not in readiness.** The cache is an optimisation: if it is down every read
+still works, just slower. Including it would take the whole application out of rotation over a
+degradation it can absorb — a one-line configuration choice that decides whether a cache outage is
+an outage.
+
+And nothing external is in liveness, because restarting this JVM cannot fix somebody else's
+database, and trying is how a dependency's bad ten minutes becomes an hour of restart loops.
+
+The container health check uses readiness, which is what `condition: service_healthy` in
+`compose.yaml` now waits for:
+
+```dockerfile
+HEALTHCHECK ... CMD wget -q -O /dev/null http://localhost:8080/actuator/health/readiness || exit 1
+```
+
+### What is exposed, and to whom
+
+`management.endpoints.web.exposure.include` is an explicit allow-list — never `*`. That list, not
+an authorization rule, is why `/actuator/env`, which would print the environment including
+`JWT_SECRET`, is a **404 even for an administrator**.
+
+| Endpoint | Who | Why |
+|---|---|---|
+| `/actuator/health`, `/actuator/info` | anonymous | their callers are machines with no credentials — the container health check, and every orchestrator probe after it |
+| `/actuator/prometheus` | anonymous | Prometheus carries no token, and a 15-minute JWT would need re-issuing every 15 minutes for ever |
+| `/actuator/metrics`, everything else | `ROLE_ADMIN` | written as `EndpointRequest.toAnyEndpoint()`, so an endpoint exposed later is closed by default |
+
+The rules match by **endpoint ID**, not by URL, so they keep meaning the right thing if
+`management.endpoints.web.base-path` ever moves — a hand-written `"/actuator/health"` matcher
+would silently match nothing and fall through to the rule below it.
+
+An anonymous caller gets `{"status":"UP"}` and nothing else; `show-details=when-authorized` means
+the per-component breakdown needs an admin, because the component names alone map the
+infrastructure for whoever asks.
+
+Leaving the scrape endpoint anonymous is a **bounded, deliberate trade-off for a local stack**, not
+a recommendation. The page carries no customer data, but it does describe the system. In a real
+deployment the answer is not authentication, it is reachability: move the management endpoints to
+their own port with `management.server.port` and publish that port only on the internal network,
+so the question never reaches Spring Security at all.
+
+### One alert, and why only one
+
+```yaml
+expr: |
+  sum(rate(checkout_duration_seconds_count{outcome="conflict"}[5m]))
+    / sum(rate(checkout_duration_seconds_count[5m])) > 0.05
+for: 10m
+```
+
+Three decisions are in those four lines.
+
+It is a **share, not a count**, so the rule means the same thing at ten orders a minute and at ten
+thousand. A threshold on the raw count would page someone on Black Friday and stay silent during an
+outage at 4am.
+
+It watches **`conflict` alone**. `out_of_stock` and `empty_cart` rise because customers did
+something; paging for those teaches people the alert is noise. `conflict` rises because the
+application is losing optimistic locks it cannot absorb, which is a system problem with a human fix.
+
+**`for: 10m`** is what separates an alert from a graph. Without it, one unlucky fifteen-second
+window during a deployment pages somebody.
+
+And there is exactly one rule, because an alert is a promise that a human will be woken up and will
+have something to do about it. A file of thirty aspirational rules is how a team learns to ignore
+all of them.
+
+### Everything is provisioned
+
+The Grafana datasource and dashboard are files in `docker/grafana/`, read at startup. Nothing was
+clicked. `allowUiUpdates: false` means edits made in the UI are overwritten on the next reload —
+the UI stays useful for exploring, it is simply not where work is kept.
+
+`DashboardMetricsTest` closes the loop: it reads the shipped dashboard JSON and the alert rules,
+pulls every metric name out of the PromQL, and fails the build if one is not a series the
+application actually registers. This exists because a metric name is a public interface with no
+compiler behind it — rename `orders.placed` and everything still builds, every test still passes,
+and a dashboard panel quietly goes blank while an alert becomes one that can never fire again.
+Monitoring fails silent by construction, which is exactly backwards from how a test suite fails.
+
+### Try it yourself
+
+```bash
+docker compose up -d --build
+
+# Prometheus: Status -> Targets should show `ecomdemo` UP
+open http://localhost:9090/targets
+
+# Grafana: the EcomDemo Overview dashboard is the home page (admin/admin)
+open http://localhost:3000
+```
+
+Now make something happen. Log in, buy something, and watch the counter move:
+
+```bash
+TOKEN=$(curl -s -X POST localhost:8080/api/auth/login -H 'Content-Type: application/json' \
+  -d '{"username":"asha","password":"correct-horse-battery-staple"}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["accessToken"])')
+
+curl -s localhost:8080/actuator/prometheus | grep '^orders_placed_total'
+# orders_placed_total{application="ecomdemo"} 0.0
+
+curl -s -X POST localhost:8080/api/cart/items -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"productId":1,"quantity":1}'
+curl -s -X POST localhost:8080/api/orders -H "Authorization: Bearer $TOKEN" > /dev/null
+
+curl -s localhost:8080/actuator/prometheus | grep '^orders_placed_total'
+# orders_placed_total{application="ecomdemo"} 1.0
+```
+
+Then check out an **empty** cart and watch a different series move — this is the `outcome` tag
+earning its place:
+
+```bash
+curl -s -X POST localhost:8080/api/orders -H "Authorization: Bearer $TOKEN" > /dev/null   # 409
+curl -s localhost:8080/actuator/prometheus | grep checkout_duration_seconds_count
+# ...outcome="empty_cart"} 1     <- moved
+# ...outcome="placed"} 1
+# ...outcome="conflict"} 0       <- the one the alert watches, untouched
+```
+
+And see the two probes disagree, which is the point of having two. Stop Redis and readiness stays
+UP, because the shop still works without a cache:
+
+```bash
+docker compose stop cache
+curl -s localhost:8080/actuator/health/readiness   # {"status":"UP"}
+docker compose start cache
+```
+
+Stop the database and readiness goes DOWN — while liveness stays UP, because restarting this JVM
+would not bring PostgreSQL back:
+
+```bash
+docker compose stop db
+curl -s -w ' HTTP=%{http_code} in %{time_total}s\n' localhost:8080/actuator/health/readiness
+# {"status":"DOWN"} HTTP=503 in 10.07s
+curl -s localhost:8080/actuator/health/liveness    # {"status":"UP"}
+docker compose start db
+```
+
+Notice the **ten seconds**. A health check is only as fast as its slowest indicator, and the
+`db` one waits out the PostgreSQL driver's `connectTimeout` before it can say anything at all.
+That is worth knowing before writing a probe timeout, because it means an unreachable database and
+a merely slow one are the same observation for the first ten seconds.
+
+It also interacts with the container health check, whose `--timeout=3s` is shorter than that. When
+the database is gone, `wget` gives up before readiness answers, so the check fails by *timeout*
+rather than by reading the 503 — and after `--retries=5` at `--interval=10s`, Docker marks the
+container `unhealthy` either way:
+
+```console
+$ docker inspect -f '{{.State.Health.Status}}' ecomdemo-app
+unhealthy
+```
+
+The outcome is right, and the route to it is worth being clear-eyed about: the check is reporting
+"did not answer in time", not "answered DOWN". Both are correct here, because a readiness probe
+that cannot answer within its budget is not ready — but a timeout cannot tell you *why*, which is
+the argument for keeping a probe's own timeout above its slowest indicator once there is more than
+one thing in the group.
+
 ## Code quality
 
 Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually
@@ -1758,8 +2056,8 @@ than an assumption the code makes.
 There are two suites now, and one command runs both.
 
 ```bash
-./mvnw test      # 229 tests, ~15 s, in-memory H2, no Docker
-./mvnw verify    # those 229 PLUS 47 integration tests against a real PostgreSQL and Redis
+./mvnw test      # 241 tests, ~15 s, in-memory H2, no Docker
+./mvnw verify    # those 241 PLUS 62 integration tests against a real PostgreSQL and Redis
 ```
 
 `./mvnw test` is the inner loop: it needs nothing installed and it is what you run constantly.
@@ -1776,6 +2074,7 @@ The fast suite sits at five levels, each loading only what it needs:
 | Persistence slice | `@DataJpaTest` | JPA and its own throwaway H2 database; no web layer, no Flyway | `CartRepositoryTest`, `OrderRepositoryTest` |
 | Full context | `@SpringBootTest` | The whole application, on a schema Flyway migrated | `PlaceOrderFlowTest`, `OpenApiDocumentationTest`, `FlywayMigrationTest`, `ConcurrentCheckoutTest`, `BatchJobRepositoryTest`, `SalesReportScheduleTest` |
 | Configuration | `ApplicationContextRunner` | A handful of beans and the properties, resolved as at startup | `DatasourceConfigurationTest`, `JwtConfigTest` |
+| Plain file | none | Two files off disk plus a `SimpleMeterRegistry` — no Spring at all | `DashboardMetricsTest` |
 
 The suite runs the **same migrations the application does**, then has Hibernate validate the
 result, so a migration that drifts from the entities fails the build rather than the next deploy.
@@ -1793,6 +2092,14 @@ correct on its own. It exists only in the interleaving, so proving it is gone me
 interleaving. For the same reason it is **not** `@Transactional`: a test transaction would wrap
 both threads' work in one unit and roll it back at the end, and the two checkouts would never
 commit against each other. It cleans up after itself instead.
+
+`DashboardMetricsTest` is the other odd one, and it is at the *bottom* of the pyramid on purpose.
+It loads no Spring context: it reads `docker/grafana/dashboards/ecomdemo.json` and
+`docker/prometheus/alerts.yml` as text, pulls the metric names out of the PromQL, and checks each
+against a registry built from the real `CheckoutMetrics` constructor. It belongs in the fast suite
+because the failure it catches — a renamed meter silently emptying a panel and permanently
+silencing an alert — is one nobody would otherwise notice at all, and a guard that only runs in the
+slow suite is found out too late to be useful.
 
 A unit test cannot check a transaction at all. `@Transactional` is applied by a proxy, and a
 service built with `new` in a Mockito test has no proxy around it — so in `OrderPlacementServiceTest`
@@ -1900,9 +2207,28 @@ cost a container start each time.
 
 ## Known gaps (closed by later phases)
 
+- **Nothing delivers the alert anywhere.** Prometheus evaluates `CheckoutConflictRateHigh` and
+  would mark it firing, and that is where it stops: there is no Alertmanager, so no email, no
+  pager, no Slack. The rule was proven to fire in shape — the identical expression with a label
+  that *was* over the threshold returns a row — but an alert nobody receives is a graph with
+  extra steps. Alertmanager is not in this phase's scope.
+- **`/actuator/prometheus` is anonymous.** Deliberate, bounded, and not a recommendation: the
+  scraper carries no token and a 15-minute JWT would need re-issuing for ever. The page holds no
+  customer data but does describe the system — every URI template, the pool sizes, the heap. The
+  real fix is reachability, not authentication: `management.server.port` on a port published only
+  to the internal network. That is a deployment concern and was left to a later phase.
+- **The dashboard has only ever had one instance to draw.** The `application` common tag and the
+  choice of histograms over client-side percentiles both exist so that the panels keep meaning
+  something when there are two. There is one, so neither has actually been exercised.
+- **No cardinality budget is asserted anywhere.** Tag values are bounded by an enum and URI
+  templates, and both facts are tested — but nothing counts total series and fails when the number
+  grows. The failure mode is gradual and nobody notices it until the Prometheus host does.
+- **Cache hit rate is published but not graphed.** Phase 13 listed hit-rate metrics as a follow-up
+  for this phase. Spring Boot's `cache_gets_total{result=...}` is in the scrape, and no panel uses
+  it; the dashboard covers checkout, HTTP and the JVM instead.
 - **The fast suite is still only ever run on H2.** `./mvnw verify` runs the migrations and the
-  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 47
-  integration tests. The other 229 still run on H2, so a PostgreSQL-specific problem in a code
+  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 62
+  integration tests. The other 241 still run on H2, so a PostgreSQL-specific problem in a code
   path no `*IT` exercises would still reach production.
 - **Restart across a process restart is inferred, not tested.** The JobRepository is on disk and
   staged uploads are on a named volume, so an import that failed before a container was replaced

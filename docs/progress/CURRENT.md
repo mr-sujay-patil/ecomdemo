@@ -3,76 +3,97 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-22
-- **Phase:** 14: Batch Processing
-- **Branch:** feature/phase-14-spring-batch
+- **Phase:** 15: Metrics & Monitoring
+- **Branch:** feature/phase-15-metrics
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #16 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
-- **Waiting for user:** YES — review and merge PR #16, then say `merged, continue`
+- **PR:** #17 — raised, CI green (`Build and test` pass, 2m00s), mergeStateStatus CLEAN
+- **Waiting for user:** YES — review and merge PR #17, then say `merged, continue`
 
-## Phase 13 merge verification (passed 2026-09-22)
-PR #15 MERGED with a merge commit (d674e1c, 2 parents: 1b03f5f + 8ecee91); branch is an ancestor
-of `main`; no commits and no file diffs between branch and `main`; all 14 feature branches intact
-locally and on GitHub; `cache/CacheConfig`, `cache/CacheNames`, `cache/LoggingCache`,
-`cache/CacheApiIT`, `support/RedisContainerConfig` and the compose `cache` service all present in
-`main`. **CI on `main` green** (run 35707090615, both jobs) and the image published to GHCR.
-`./mvnw clean verify` on `main` -> BUILD SUCCESS, 190 unit + 38 IT, 0 failures, 0 skipped.
-`scripts/smoke-test.sh` against the compose stack -> 136 passed, 0 failed, 0 skipped.
-Tag `phase-13-complete` pushed.
+## Phase 14 merge verification (passed 2026-09-22)
+PR #16 MERGED with a merge commit (a5ff674, 2 parents: d674e1c + e11d777); the branch is an
+ancestor of `main`; no commits and no file diffs between branch and `main`; all 15 branches intact
+on GitHub. The whole `com.ecomdemo.batch` package, `V7__batch_job_repository.sql`,
+`V8__index_product_name.sql` and the 7 batch test classes are present in `main`.
+**CI on `main` green** (run 35711849347: `Build and test` SUCCESS, `Publish image to GHCR` SUCCESS).
+`./mvnw clean verify` on `main` -> BUILD SUCCESS, 229 unit + 47 IT, 0 failures, 0 skipped.
+`docker compose up -d --build` from `main` rebuilt `ecomdemo:latest` (identical digest, so no
+container recreate); `scripts/smoke-test.sh` -> 156 passed, 0 failed, 0 skipped.
+Tag `phase-14-complete` pushed.
 
 ## Checklist (copied from the phase's "What you'll implement")
-- [x] Job 1, product CSV import: chunk-oriented, validation, upsert, skip limit, error file
-- [x] Job 2, daily sales report: CSV of order count, revenue and top products
-- [x] The JobRepository schema in PostgreSQL, through Flyway (V7) + V8 index on product.name
-- [x] Triggers: an ADMIN upload endpoint (Job 1) and `@Scheduled` cron (Job 2)
-- [x] A restartability demo (ProductImportJobIT + README "try it yourself")
-- [x] Done when: a 10,000-row import works with invalid rows skipped, and the report is
-      generated on schedule
-- [x] Smoke test additions (upload a CSV with invalid rows: job COMPLETED, product count up,
-      skip count matches the invalid rows) — 20 new checks
-- [x] Testing protocol run in full + docs/test-reports/phase-14.md
-- [x] README section, decisions.md (16 entries), RECENT.md rotation (Phase 12 archived),
+- [x] Exposed endpoints: health (with liveness and readiness groups), info, metrics, prometheus
+- [x] Business metrics: `orders.placed`, `order.value`, and a checkout timer
+- [x] Prometheus and Grafana in Compose, with a provisioned dashboard and one alert rule
+- [x] Done when: the dashboard shows live traffic and business metrics (data verified;
+      the visual render is ⚠️ manual - see below)
+- [x] Smoke test additions: after placing an order, `/actuator/prometheus` shows
+      `orders_placed_total` incremented; liveness and readiness are UP - 48 new checks
+- [x] Testing protocol run in full + docs/test-reports/phase-15.md
+- [x] README section, docs/decisions.md entries (16), RECENT.md rotation (Phase 13 archived),
       tracker -> 🔵
-- [x] PR raised (#16), CI green
+- [x] PR raised (#17)
 
 ## Last test run
-- 2026-09-22: `./mvnw verify` -> BUILD SUCCESS, Surefire 229 (was 190) + Failsafe 47 (was 38),
-  0 failures, 0 skipped. One postgres and one redis container for the whole Failsafe run.
-- 2026-09-22: `./mvnw clean test` -> 0 "Creating container" lines; the Docker-free fast suite
-  still holds.
-- 2026-09-22: `scripts/smoke-test.sh` against the compose stack -> 156 passed (was 136), 0 failed,
-  **0 skipped**.
-- 2026-09-22: restart demo run by hand against the compose stack: execution 5 FAILED (100 written,
-  50 skipped, cause chain naming the skip limit), the staged file fixed in place with `sed`,
-  execution 6 of instance 5 COMPLETED reading only 80 of 180 rows. Demo products cleaned up.
+- 2026-09-22: `./mvnw clean verify` -> BUILD SUCCESS, Surefire 241 (was 229) + Failsafe 62
+  (was 47), 0 failures, 0 skipped. One postgres + one redis for the whole Failsafe run.
+- 2026-09-22: `./mvnw clean test` -> 241, 0 "Creating container" lines; the fast suite is still
+  Docker-free.
+- 2026-09-22: `scripts/smoke-test.sh` -> 204 passed (was 156), 0 failed, **0 skipped**.
+- 2026-09-22: DashboardMetricsTest verified by MUTATION - renaming the counter in the dashboard
+  and the timer in the alert rule each fail the suite; both files restored and green.
+- 2026-09-22: all 16 dashboard panel queries run through the Prometheus API after ~105 real
+  orders -> every one returns data. The alert expression evaluates to 0 for `conflict`, and the
+  same expression with `empty_cart` (0.21) crosses the threshold and returns a row, so the rule
+  shape does fire.
+- 2026-09-22: failure scenarios by hand. Redis stopped -> /health DOWN, **readiness UP**,
+  catalogue still 200. PostgreSQL stopped -> readiness `{"status":"DOWN"}` 503 after **10.07s**
+  (driver connectTimeout), liveness UP, container eventually `unhealthy`. Both recovered.
 
 ## Open issues / blockers
-- none. The big one is fixed: Spring Batch 6 defaults to `ResourcelessJobRepository` (in memory),
-  so every job ran fine and NOTHING was written to the BATCH_ tables. `BatchConfig` now extends
-  `DefaultBatchConfiguration` and supplies a `JdbcJobRepositoryFactoryBean`;
-  `BatchJobRepositoryTest` asserts rows in the tables so it cannot regress silently.
+- ⚠️ The Grafana dashboard could not be screenshotted: Chrome's site permissions block
+  localhost:3000 for browser automation in this environment. Verified instead by running all 16
+  of the dashboard's own panel queries through the Prometheus API - every one returns live data.
+  The visual render needs the user's eyes; steps are in `docs/test-reports/phase-15.md` §8.
+- The failure test corrected a README claim: readiness with the DB down answers
+  `{"status":"DOWN"}` 503, NOT `OUT_OF_SERVICE`, and takes ~10s. README rewritten to the
+  measured behaviour.
 
-## Decisions this phase (copied to docs/decisions.md ❌ — not yet)
-- The JobRepository is JDBC-backed by an explicit `BatchConfig extends DefaultBatchConfiguration`.
-- V7 is Spring Batch's own schema-postgresql.sql, verbatim; V8 indexes product.name for the
-  upsert lookup (NOT unique - the API has always allowed duplicate names).
-- Upload is staged to disk under a UUID name: restart re-reads the same path, and a unique path
-  makes each upload its own JobInstance.
-- Only two exception types are skippable; the skip limit failure is what the restart demo uses.
-- The import evicts the Phase 13 caches in afterStep, never inside the chunk transaction.
-- The import runs synchronously (SyncTaskExecutor), so the response carries the real counters.
-- A restart resumes past SKIPPED rows: they are recovered by re-importing, not by restarting.
+## Decisions this phase (copied to docs/decisions.md ✅ — 16 entries)
+- Actuator stays on the main port 8080; the production answer (management.server.port on an
+  internal-only network) is named in SecurityConfig and deliberately out of scope.
+- health/info/prometheus are anonymous because their callers are machines with no credentials;
+  everything else Actuator exposes is ADMIN via EndpointRequest.toAnyEndpoint().
+- Exposure is an explicit allow-list, so /actuator/env is a 404 even for an ADMIN.
+- Readiness = readinessState + db. Redis is deliberately excluded: a cache outage is a
+  slowdown the app survives, and including it would turn that into an outage.
+- Liveness = livenessState alone. No dependency belongs in the probe whose remedy is a restart.
+- The container healthcheck moved from /api/products to /actuator/health/readiness.
+- checkout.duration wraps the whole retry loop, so one checkout is one observation.
+- Five outcome tag values including a catch-all `error`, so the RED error rate cannot lie by
+  omission.
+- Every meter pre-registered in the CheckoutMetrics constructor: an absent series is not zero,
+  and an alert on one can never fire.
+- percentiles-histogram, not percentiles: quantiles are computed by Prometheus from buckets so
+  they can be aggregated across instances.
+- A MeterFilter drops /actuator URIs, so the scrape is not the busiest endpoint in the shop.
+- One alert rule, on the conflict SHARE rather than the count, with `for: 10m`.
+- Grafana datasource and dashboard are provisioned from files; UI edits are overwritten.
 
 ## Environment left behind
 Docker Desktop RUNNING. Application stack up and healthy (`ecomdemo-app`, `ecomdemo-db`,
-`ecomdemo-cache`), schema v6. SonarQube stack (`ecomdemo-sonarqube`, `ecomdemo-sonar-db`) also up
-at http://localhost:9000; stop it with `docker compose -f compose.sonar.yaml down` if the memory
-is wanted back. `.env` holds a real JWT_SECRET and is gitignored. No stray Java processes.
+`ecomdemo-cache`), schema v8, image built from `main`. SonarQube stack (`ecomdemo-sonarqube`,
+`ecomdemo-sonar-db`) also up at http://localhost:9000; stop it with
+`docker compose -f compose.sonar.yaml down` if the memory is wanted back. `.env` holds a real
+JWT_SECRET and is gitignored. No stray Java processes.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point. PR #16 is open, CI is green, mergeStateStatus CLEAN.
-`Publish image to GHCR` shows SKIPPED because that job only runs on `main`.
+STOPPED at the mandatory post-PR stop point. PR #17 is open, CI is green, mergeStateStatus CLEAN.
+`Publish image to GHCR` shows skipping because that job only runs on `main`.
+https://github.com/mr-sujay-patil/ecomdemo/pull/17
 - If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, then
-  tag `phase-14-complete` and start Phase 15 (`docs/phases/phase-15-metrics.md`).
+  tag `phase-15-complete` and start Phase 16 (`docs/phases/phase-16-logging.md`).
 - If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
 - Do NOT merge unless they say exactly `approved, merge it`.
+- One ⚠️ is outstanding for the user: look at the Grafana dashboard's RENDER (its data is fully
+  verified). Steps in `docs/test-reports/phase-15.md` §8.

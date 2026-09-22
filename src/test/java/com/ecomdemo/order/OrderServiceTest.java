@@ -12,11 +12,16 @@ import static org.mockito.Mockito.when;
 
 import com.ecomdemo.common.ConcurrentUpdateException;
 import com.ecomdemo.common.ConflictException;
+import com.ecomdemo.common.InsufficientStockException;
 import com.ecomdemo.common.NotFoundException;
 import com.ecomdemo.customer.User;
+import com.ecomdemo.metrics.CheckoutMetrics;
+import com.ecomdemo.metrics.CheckoutOutcome;
+import com.ecomdemo.metrics.MetricNames;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.security.CurrentUser;
 import com.ecomdemo.support.TestData;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -27,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -63,8 +69,30 @@ class OrderServiceTest {
     @Mock
     private CurrentUser currentUser;
 
+    /**
+     * A real registry, not a mock.
+     *
+     * <p>Mocking {@link CheckoutMetrics} would verify that a method was called; a
+     * {@code SimpleMeterRegistry} verifies what the meter actually ended up holding, which is the
+     * only thing a dashboard can read. It is in-memory and needs no configuration, so there is no
+     * reason to accept the weaker assertion.
+     */
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
+    @Spy
+    private CheckoutMetrics checkoutMetrics = new CheckoutMetrics(meterRegistry);
+
     @InjectMocks
     private OrderService orderService;
+
+    /** The count in the {@code checkout.duration} timer carrying this {@code outcome} tag. */
+    private long checkoutsTagged(String outcome) {
+        return meterRegistry
+                .get(MetricNames.CHECKOUT_DURATION)
+                .tag(MetricNames.TAG_OUTCOME, outcome)
+                .timer()
+                .count();
+    }
 
     private static final User SHOPPER = TestData.customer();
 
@@ -136,6 +164,113 @@ class OrderServiceTest {
             // The rejection was already audited inside the attempt, by the transaction that then
             // rolled back; auditing it again here would double-count it.
             verify(orderAuditService, never()).recordAttempt(any(), any(), any());
+        }
+
+        private static OrderResponse placed(long id) {
+            return OrderResponse.from(order("100.00", id));
+        }
+    }
+
+    /**
+     * What the meters hold after a checkout — the part a dashboard and an alert rule read.
+     *
+     * <p>These sit next to the retry tests rather than in {@code CheckoutMetricsTest} because
+     * what is under test is not the meters, it is the <em>classification</em>: which of the five
+     * outcomes {@code place()} decides an exception means. That decision lives here, and a
+     * mistake in it is invisible — every graph still draws, it just draws the wrong line.
+     */
+    @Nested
+    @DisplayName("checkout metrics")
+    class CheckoutMeters {
+
+        @Test
+        void everyMeterExistsBeforeAnyCheckoutHappens() {
+            // The point of pre-registering: a series that reads zero is a fact, an absent series
+            // is a silence. An alert on a meter that does not exist yet can never fire.
+            assertThat(meterRegistry.get(MetricNames.ORDERS_PLACED).counter().count()).isZero();
+            assertThat(meterRegistry.get(MetricNames.ORDER_VALUE).summary().count()).isZero();
+            for (CheckoutOutcome outcome : CheckoutOutcome.values()) {
+                assertThat(checkoutsTagged(outcome.tagValue())).isZero();
+            }
+        }
+
+        @Test
+        void aPlacedOrderIncrementsTheCounter_recordsItsValue_andTimesItAsPlaced() {
+            when(orderPlacementService.placeOnce()).thenReturn(placed(7L));
+
+            orderService.place();
+
+            assertThat(meterRegistry.get(MetricNames.ORDERS_PLACED).counter().count()).isEqualTo(1.0);
+            // The summary carries both answers: how much (sum) and how many (count).
+            assertThat(meterRegistry.get(MetricNames.ORDER_VALUE).summary().totalAmount())
+                    .isEqualTo(100.00);
+            assertThat(meterRegistry.get(MetricNames.ORDER_VALUE).summary().count()).isEqualTo(1);
+            assertThat(checkoutsTagged("placed")).isEqualTo(1);
+        }
+
+        @Test
+        void aRetriedButSuccessfulCheckoutIsOneTimedCheckout_notTwo() {
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new OptimisticLockingFailureException("row was changed"))
+                    .thenReturn(placed(8L));
+
+            orderService.place();
+
+            // Two attempts, one checkout. The customer waited once.
+            verify(orderPlacementService, times(2)).placeOnce();
+            assertThat(checkoutsTagged("placed")).isEqualTo(1);
+        }
+
+        @Test
+        void anExhaustedRetryBudgetIsTimedAsConflict_andPlacesNothing() {
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new OptimisticLockingFailureException("row was changed"));
+
+            assertThatThrownBy(() -> orderService.place())
+                    .isInstanceOf(ConcurrentUpdateException.class);
+
+            assertThat(checkoutsTagged("conflict")).isEqualTo(1);
+            assertThat(checkoutsTagged("empty_cart")).isZero();
+            assertThat(meterRegistry.get(MetricNames.ORDERS_PLACED).counter().count()).isZero();
+        }
+
+        @Test
+        void aShortStockLineIsTimedAsOutOfStock_notAsTheGeneralConflict() {
+            // The catch order in place() is what this asserts: InsufficientStockException is a
+            // ConflictException, so a general-first catch would label it empty_cart and nobody
+            // would ever know.
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new InsufficientStockException("Lamp", 3, 2));
+
+            assertThatThrownBy(() -> orderService.place())
+                    .isInstanceOf(InsufficientStockException.class);
+
+            assertThat(checkoutsTagged("out_of_stock")).isEqualTo(1);
+            assertThat(checkoutsTagged("empty_cart")).isZero();
+            assertThat(checkoutsTagged("conflict")).isZero();
+        }
+
+        @Test
+        void anEmptyCartIsTimedAsEmptyCart() {
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new ConflictException("Cannot place an order: the cart is empty"));
+
+            assertThatThrownBy(() -> orderService.place()).isInstanceOf(ConflictException.class);
+
+            assertThat(checkoutsTagged("empty_cart")).isEqualTo(1);
+        }
+
+        @Test
+        void anUnexpectedFailureIsStillTimed_andStillPropagates() {
+            // The RED "errors" figure is only honest if the unforeseen lands somewhere.
+            when(orderPlacementService.placeOnce())
+                    .thenThrow(new IllegalStateException("the database went away"));
+
+            assertThatThrownBy(() -> orderService.place())
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("the database went away");
+
+            assertThat(checkoutsTagged("error")).isEqualTo(1);
         }
 
         private static OrderResponse placed(long id) {

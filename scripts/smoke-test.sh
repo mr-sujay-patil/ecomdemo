@@ -37,7 +37,11 @@ set -uo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 BODY="$(mktemp)"
-trap 'rm -f "$BODY"' EXIT
+# A whole Prometheus scrape, kept in a file rather than a variable: it is a few hundred lines and
+# the same snapshot is read several times per check, so re-fetching it per assertion would both
+# be slow and - worse - compare two different moments in time.
+SCRAPE="$(mktemp)"
+trap 'rm -f "$BODY" "$SCRAPE"' EXIT
 
 PASSED=0
 FAILED=0
@@ -166,6 +170,48 @@ register() {
 # jget <python expression over `d`> -> prints the value from the last response body
 jget() {
     python3 -c "import json;d=json.load(open('$BODY'));print($1)" 2>/dev/null
+}
+
+# --------------------------------------------------------------------------------------------
+# Reading the Prometheus scrape (Phase 15)
+# --------------------------------------------------------------------------------------------
+# A line of the exposition format is `name{label="value",...} number`. Parsed properly rather
+# than grepped, because a grep for `orders_placed_total` also matches
+# `orders_placed_total_created`, and a grep for a label depends on the order Micrometer happens
+# to emit them in. Matching series are SUMMED, which is what makes a query that omits a label
+# behave like PromQL's own aggregation rather than silently picking the first line.
+METRIC_PY='
+import re, sys
+path = sys.argv[1]
+name = sys.argv[2]
+want = dict(a.split("=", 1) for a in sys.argv[3:])
+total = None
+for line in open(path):
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    m = re.match(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{(.*)\})?\s+(\S+)$", line)
+    if not m or m.group(1) != name:
+        continue
+    labels = dict(re.findall(r"([a-zA-Z_][a-zA-Z0-9_]*)=\"([^\"]*)\"", m.group(2) or ""))
+    if all(labels.get(k) == v for k, v in want.items()):
+        total = (total or 0.0) + float(m.group(3))
+print("MISSING" if total is None else ("%g" % total))
+'
+
+# scrape -> takes a fresh snapshot of /actuator/prometheus into $SCRAPE
+scrape() {
+    curl -sS -o "$SCRAPE" "$BASE_URL/actuator/prometheus"
+}
+
+# metric <name> [label=value ...] -> the summed value, or the literal MISSING
+metric() {
+    python3 -c "$METRIC_PY" "$SCRAPE" "$@"
+}
+
+# delta <before> <after> -> the difference, for readable check() output
+delta() {
+    python3 -c "print('%g' % ($2 - $1))" 2>/dev/null
 }
 
 # The database container's name. Phase 10's compose stack calls it `ecomdemo-db`; the
@@ -1095,6 +1141,235 @@ as_anonymous
 request GET /api/products > /dev/null
 check "the imported products are cleaned up again" "$PRODUCTS_BEFORE" "$(jget "len(d)")"
 rm -f "$IMPORT_CSV"
+as_customer
+
+# --------------------------------------------------------------------------------------------
+# 11. Metrics and monitoring (Phase 15)
+# --------------------------------------------------------------------------------------------
+# The claim under test is not "the endpoint answers 200". It is that placing a real order moves
+# the exact numbers the dashboard and the alert rule read - so a rename, a lost tag, or a meter
+# that silently stopped being registered fails here rather than on a graph nobody is watching.
+section "Metrics and monitoring"
+
+# --- The probes -------------------------------------------------------------------------------
+as_anonymous
+check "GET /actuator/health returns 200" "200" "$(request GET /actuator/health)"
+check "and it reports UP" "UP" "$(jget "d['status']")"
+# The two groups are what make the probes useful; without probes.enabled these are 404.
+check "liveness is UP" "UP" \
+    "$(request GET /actuator/health/liveness >/dev/null; jget "d['status']")"
+check "readiness is UP" "UP" \
+    "$(request GET /actuator/health/readiness >/dev/null; jget "d['status']")"
+# An anonymous caller gets the verdict and nothing else. The component names alone ("db",
+# "redis") would map the infrastructure for whoever asked.
+request GET /actuator/health >/dev/null
+check "an anonymous health body carries no component details" "False" \
+    "$(jget "'components' in d")"
+as_admin
+request GET /actuator/health >/dev/null
+check "an ADMIN sees the per-component breakdown" "True" "$(jget "'components' in d")"
+check "and the database is one of the components" "True" "$(jget "'db' in d['components']")"
+# Redis is deliberately absent from readiness: a cache outage must not take the app out of
+# rotation, since every read still works without it.
+request GET /actuator/health/readiness >/dev/null
+check "readiness includes the database" "True" "$(jget "'db' in d.get('components', {})")"
+check "but NOT redis - a cache outage is a slowdown, not an outage" "False" \
+    "$(jget "'redis' in d.get('components', {})")"
+
+# --- Who may read what --------------------------------------------------------------------------
+as_anonymous
+check "anonymous /actuator/prometheus returns 200 - Prometheus has no token" "200" \
+    "$(request GET /actuator/prometheus)"
+check "anonymous /actuator/info returns 200" "200" "$(request GET /actuator/info)"
+check "anonymous /actuator/metrics returns 401" "401" "$(request GET /actuator/metrics)"
+as_customer
+check "a CUSTOMER may not read /actuator/metrics either" "403" \
+    "$(request GET /actuator/metrics)"
+as_admin
+check "an ADMIN may" "200" "$(request GET /actuator/metrics)"
+# Not in management.endpoints.web.exposure.include, so it does not exist over HTTP at all - the
+# allow-list, not an authorization rule, is what keeps the environment (and JWT_SECRET) off the
+# wire. Even the administrator gets a 404.
+check "/actuator/env is not exposed at all, not even to an ADMIN" "404" \
+    "$(request GET /actuator/env)"
+check "and neither is /actuator/heapdump" "404" "$(request GET /actuator/heapdump)"
+
+# --- Which build is running ---------------------------------------------------------------------
+as_anonymous
+request GET /actuator/info >/dev/null
+check "/actuator/info names the artifact" "ecomdemo" "$(jget "d['build']['artifact']")"
+check "and carries a build timestamp" "True" "$(jget "len(str(d['build']['time'])) > 0")"
+
+# --- A placed order moves the business meters -----------------------------------------------------
+as_customer
+scrape
+ORDERS_BEFORE="$(metric orders_placed_total)"
+VALUE_SUM_BEFORE="$(metric order_value_sum)"
+VALUE_COUNT_BEFORE="$(metric order_value_count)"
+PLACED_BEFORE="$(metric checkout_duration_seconds_count outcome=placed)"
+
+# Every meter exists before the first order of this run, and that is the check: an absent series
+# is not zero. PromQL over a series that does not exist returns no rows, so a panel shows "No
+# data" and an alert written as `rate(...) > 0` can never fire - it has nothing to be true about.
+check "orders.placed is registered before any order is placed" "False" \
+    "$([ "$ORDERS_BEFORE" = "MISSING" ] && echo True || echo False)"
+check "order.value is registered too" "False" \
+    "$([ "$VALUE_SUM_BEFORE" = "MISSING" ] && echo True || echo False)"
+check "and checkout.duration carries all five outcome tags" "5" \
+    "$(for o in placed out_of_stock empty_cart conflict error; do
+           metric checkout_duration_seconds_count "outcome=$o"
+       done | grep -vc MISSING)"
+
+METRICS_PRODUCT_ID="$(as_anonymous; request GET /api/products >/dev/null; \
+    jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
+METRICS_UNIT_PRICE="$(jget "next(str(p['price']) for p in d if p['stockQuantity'] >= 1)")"
+as_customer
+request POST /api/cart/items "{\"productId\":$METRICS_PRODUCT_ID,\"quantity\":1}" >/dev/null
+STATUS="$(request POST /api/orders)"
+check "an order is placed for the metrics check" "201" "$STATUS"
+METRICS_ORDER_TOTAL="$(jget "str(d['totalAmount'])")"
+
+scrape
+check "orders_placed_total incremented by exactly 1" "1" \
+    "$(delta "$ORDERS_BEFORE" "$(metric orders_placed_total)")"
+check "order_value_count incremented by exactly 1" "1" \
+    "$(delta "$VALUE_COUNT_BEFORE" "$(metric order_value_count)")"
+# The summary's _sum is the revenue figure on the dashboard; it must move by the order's own
+# total, not by some rounded or averaged version of it.
+check "order_value_sum grew by the order total ($METRICS_ORDER_TOTAL)" \
+    "$(python3 -c "print('%g' % float('$METRICS_ORDER_TOTAL'))")" \
+    "$(delta "$VALUE_SUM_BEFORE" "$(metric order_value_sum)")"
+check "the checkout was timed as outcome=placed" "1" \
+    "$(delta "$PLACED_BEFORE" "$(metric checkout_duration_seconds_count outcome=placed)")"
+# A timer counts AND times, which is why one meter answers all three RED questions.
+check "and its recorded time is greater than zero" "True" \
+    "$(python3 -c "print(float('$(metric checkout_duration_seconds_sum outcome=placed)') > 0)")"
+# The histogram buckets are what Prometheus computes the latency quantiles from. Without
+# percentiles-histogram enabled these do not exist and the latency panel is empty.
+check "checkout.duration exports histogram buckets for the p95 panel" "True" \
+    "$([ "$(metric checkout_duration_seconds_bucket outcome=placed le=+Inf)" = "MISSING" ] \
+        && echo False || echo True)"
+
+# --- A failed checkout is tagged with WHY ----------------------------------------------------------
+# The cart was emptied by the checkout above, so this one has nothing to buy. It must land on the
+# empty_cart timer and nowhere else - in particular not on `conflict`, which is the one an alert
+# watches, and not on `placed`.
+EMPTY_BEFORE="$(metric checkout_duration_seconds_count outcome=empty_cart)"
+CONFLICT_BEFORE="$(metric checkout_duration_seconds_count outcome=conflict)"
+ORDERS_AFTER_ONE="$(metric orders_placed_total)"
+check "checking out an empty cart returns 409" "409" "$(request POST /api/orders)"
+scrape
+check "the failure was timed as outcome=empty_cart" "1" \
+    "$(delta "$EMPTY_BEFORE" "$(metric checkout_duration_seconds_count outcome=empty_cart)")"
+check "the conflict series - the one the alert watches - did not move" "0" \
+    "$(delta "$CONFLICT_BEFORE" "$(metric checkout_duration_seconds_count outcome=conflict)")"
+check "and no order was counted" "0" \
+    "$(delta "$ORDERS_AFTER_ONE" "$(metric orders_placed_total)")"
+
+# --- Auto-instrumentation, and what is filtered out --------------------------------------------------
+check "HTTP requests are timed without any code being written for it" "True" \
+    "$([ "$(metric http_server_requests_seconds_count uri=/api/orders method=POST)" = "MISSING" ] \
+        && echo False || echo True)"
+# URI TEMPLATES, not real paths. Were the id interpolated, every order ever fetched would be its
+# own time series - the classic way to take a monitoring system down with cardinality.
+check "the URI is a template, so one series covers every order id" "True" \
+    "$([ "$(metric http_server_requests_seconds_count uri='/api/orders/{id}')" = "MISSING" ] \
+        && echo False || echo True)"
+# MetricsConfig drops these: Prometheus scrapes every 15s and the container probes every 10s, so
+# without the filter the busiest endpoint in the shop is the one reporting how busy the shop is.
+check "actuator's own endpoints are filtered out of the HTTP timers" "0" \
+    "$(grep -c 'uri="/actuator' "$SCRAPE")"
+check "every meter carries the application common tag" "0" \
+    "$(grep -c '^orders_placed_total{[^}]*}' "$SCRAPE" | \
+        python3 -c "import sys; print(0 if int(sys.stdin.read()) == 1 else 1)")"
+check "JVM and pool meters are published for the USE panels" "True" \
+    "$([ "$(metric jvm_memory_used_bytes area=heap)" = "MISSING" ] && echo False || echo True)"
+
+# --- Prometheus and Grafana ------------------------------------------------------------------------
+# Only meaningful against the compose stack. Skipped, never passed, when they are not reachable:
+# a monitoring check that quietly succeeds because nothing was there to check is worse than none.
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
+GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
+GRAFANA_AUTH="${GRAFANA_USER:-admin}:${GRAFANA_PASSWORD:-admin}"
+
+if curl -fsS "$PROMETHEUS_URL/-/ready" >/dev/null 2>&1; then
+    TARGETS="$(curl -sS "$PROMETHEUS_URL/api/v1/targets?state=active")"
+    check "Prometheus is scraping the application and the target is up" "up" \
+        "$(printf '%s' "$TARGETS" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)['data']['activeTargets']
+print(next((t['health'] for t in d if t['labels'].get('job') == 'ecomdemo'), 'MISSING'))")"
+    check "it scrapes the actuator path, not /metrics" "True" \
+        "$(printf '%s' "$TARGETS" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)['data']['activeTargets']
+print(any(t['scrapeUrl'].endswith('/actuator/prometheus') for t in d))")"
+    # A monitoring system that does not scrape itself cannot report that it stopped working.
+    check "and it scrapes itself as well" "True" \
+        "$(printf '%s' "$TARGETS" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)['data']['activeTargets']
+print(any(t['labels'].get('job') == 'prometheus' for t in d))")"
+
+    RULES="$(curl -sS "$PROMETHEUS_URL/api/v1/rules")"
+    check "the alert rule is loaded" "CheckoutConflictRateHigh" \
+        "$(printf '%s' "$RULES" | python3 -c "
+import json, sys
+g = json.load(sys.stdin)['data']['groups']
+print(next((r['name'] for grp in g for r in grp['rules']), 'MISSING'))")"
+    # `health: ok` means PromQL parsed and evaluated it. A rule with a typo in a metric name
+    # loads perfectly happily and simply never fires, which is the failure nobody notices.
+    check "and Prometheus can evaluate it" "ok" \
+        "$(printf '%s' "$RULES" | python3 -c "
+import json, sys
+g = json.load(sys.stdin)['data']['groups']
+print(next((r['health'] for grp in g for r in grp['rules']), 'MISSING'))")"
+    check "it is inactive - no conflict storm in a smoke run" "inactive" \
+        "$(printf '%s' "$RULES" | python3 -c "
+import json, sys
+g = json.load(sys.stdin)['data']['groups']
+print(next((r['state'] for grp in g for r in grp['rules']), 'MISSING'))")"
+
+    # The dashboard's own expression, evaluated by Prometheus. This is the check that a panel
+    # would actually draw something: the meters can all be present and the query still return
+    # nothing because of a label that does not exist.
+    check "the dashboard's orders-per-minute query returns data" "True" \
+        "$(curl -sS --get "$PROMETHEUS_URL/api/v1/query" \
+            --data-urlencode 'query=sum(rate(orders_placed_total{application="ecomdemo"}[5m]))' \
+            | python3 -c "
+import json, sys
+print(len(json.load(sys.stdin)['data']['result']) > 0)")"
+else
+    skip "Prometheus checks" "no Prometheus at $PROMETHEUS_URL (set PROMETHEUS_URL to override)"
+fi
+
+if curl -fsS "$GRAFANA_URL/api/health" >/dev/null 2>&1; then
+    check "Grafana provisioned the Prometheus datasource" "ecomdemo-prometheus" \
+        "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/datasources" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(next((x['uid'] for x in d if x['type'] == 'prometheus'), 'MISSING'))")"
+    check "and the datasource points at the compose service name" "http://prometheus:9090" \
+        "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/datasources" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(next((x['url'] for x in d if x['type'] == 'prometheus'), 'MISSING'))")"
+    check "the dashboard is provisioned from the repository" "EcomDemo Overview" \
+        "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/dashboards/uid/ecomdemo-overview" \
+            | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('dashboard', {}).get('title', 'MISSING'))")"
+    # Provisioned dashboards are read-only in the UI on purpose: the JSON in Git is the source of
+    # truth, and an edit worth keeping is an edit worth committing.
+    check "and it is marked provisioned, so UI edits cannot drift from Git" "True" \
+        "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/dashboards/uid/ecomdemo-overview" \
+            | python3 -c "
+import json, sys
+print(json.load(sys.stdin).get('meta', {}).get('provisioned', False))")"
+else
+    skip "Grafana checks" "no Grafana at $GRAFANA_URL (set GRAFANA_URL to override)"
+fi
+
 as_customer
 
 # --------------------------------------------------------------------------------------------

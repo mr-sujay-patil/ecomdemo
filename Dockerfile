@@ -115,12 +115,25 @@ EXPOSE 8080
 ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
 
 # --- Health check -----------------------------------------------------------------------------
-# Compose uses this to decide when the service is genuinely ready, not merely started. The
-# catalogue endpoint is used rather than an actuator probe because Actuator arrives in Phase 15;
-# it is public (Phase 8 kept the shop window open), so no token is needed, and it touches the
-# database, which means a pass really does mean "the whole stack answers".
+# Compose uses this to decide when the service is genuinely ready, not merely started.
+#
+# READINESS, not liveness, and not /actuator/health. Which one is chosen here decides what
+# `condition: service_healthy` in compose.yaml actually waits for:
+#   /actuator/health            everything Spring knows about, Redis included - so the app would
+#                               be reported unhealthy over a cache outage it can survive
+#   /actuator/health/liveness   the JVM's own lifecycle only - true almost immediately, so
+#                               dependent services would start before the database was reachable
+#   /actuator/health/readiness  the lifecycle flag AND the DataSource: "this process can serve a
+#                               request right now", which is the question being asked
+#
+# Anonymous by design (SecurityConfig permits the health endpoint) because a HEALTHCHECK has no
+# credentials, and the body it gets back is the bare {"status":"UP"} - show-details is
+# `when-authorized`. A DOWN answer is HTTP 503, which wget exits non-zero on, so the shape below
+# needs no JSON parsing.
+#
+# Phase 14 and earlier probed /api/products instead, because Actuator did not exist yet.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=40s --retries=5 \
-    CMD wget -q -O /dev/null http://localhost:8080/api/products || exit 1
+    CMD wget -q -O /dev/null http://localhost:8080/actuator/health/readiness || exit 1
 
 # `sh -c` so $JAVA_OPTS is expanded; exec so the JVM becomes PID 1 and receives SIGTERM directly,
 # which is what lets `docker compose down` shut Spring down gracefully instead of killing it

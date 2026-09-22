@@ -1,0 +1,30 @@
+# Grafana datasource provisioning (Phase 15).
+#
+# Grafana reads every file under /etc/grafana/provisioning/datasources at startup and makes the
+# datasources described here exist. The alternative - clicking through the UI once and hoping the
+# volume survives - is how a monitoring stack becomes a pet: it works on the machine where
+# somebody did the clicking, and nowhere else. Everything in this directory is in Git, so
+# `docker compose down -v && docker compose up` rebuilds the whole thing identically.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    # `proxy`: the browser asks Grafana, and Grafana asks Prometheus from inside the compose
+    # network. With `direct` the browser would have to reach prometheus:9090 itself, which it
+    # cannot - that hostname only resolves inside Docker.
+    access: proxy
+    url: http://prometheus:9090
+    # Referenced by UID from the dashboard JSON, so the dashboard binds to this datasource
+    # regardless of the order Grafana happens to create things in. A dashboard that refers to a
+    # datasource by NAME, or by an auto-generated UID, is the usual reason a provisioned
+    # dashboard comes up showing "Datasource not found".
+    uid: ecomdemo-prometheus
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match `global.scrape_interval` in prometheus.yml. Grafana uses it as the floor for
+      # the $__rate_interval variable, which is what keeps rate() windows wide enough to contain
+      # at least two samples - the single most common cause of a rate graph full of gaps.
+      timeInterval: 15s
