@@ -3,7 +3,7 @@
 - **Date:** 2026-09-22
 - **Branch:** `feature/phase-14-spring-batch`
 - **Toolchain:** Spring Boot 4.1.1 (`spring-boot-starter-batch`), Spring Batch 6.0.5,
-  PostgreSQL 18.6, Redis 8, Testcontainers 2.0.5, JDK 21, Docker 28.5.1, Compose v2.40.3
+  PostgreSQL 18.6, Redis 8, Testcontainers 2.0.5, JDK 21, Docker 29.7.2, Compose v5.4.0
 - **Result:** ✅ all green. **One serious bug was found by asserting on rows in a table rather
   than on behaviour** — §4 — and it is the most useful part of this report.
 
