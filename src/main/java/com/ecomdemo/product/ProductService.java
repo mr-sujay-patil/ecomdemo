@@ -9,6 +9,7 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,11 +53,21 @@ public class ProductService {
     private final ProductRepository productRepository;
 
     /**
+     * How this service tells the rest of the application that something happened, without knowing
+     * who is listening. Today the only listener is {@code ProductCacheEvictor}; the alternative —
+     * injecting a {@code CacheManager} here — would put cache mechanics inside the catalogue's
+     * domain logic and make this class harder to test for reasons having nothing to do with
+     * products.
+     */
+    private final ApplicationEventPublisher events;
+
+    /**
      * Constructor injection: the dependency is final, the object cannot exist in a half-built
      * state, and the class can be instantiated in a plain unit test with {@code new}.
      */
-    public ProductService(ProductRepository productRepository) {
+    public ProductService(ProductRepository productRepository, ApplicationEventPublisher events) {
         this.productRepository = productRepository;
+        this.events = events;
     }
 
     /**
@@ -149,22 +160,28 @@ public class ProductService {
      * <p>Always called from inside the checkout transaction, which it joins. The versioned
      * UPDATE that this eventually produces is not issued here — it is issued when that
      * transaction flushes, which is where an optimistic lock failure surfaces.
-     */
-    /**
-     * <p><strong>Deliberately does not evict anything.</strong> This is the checkout's path: it is
-     * called once per line, inside a transaction that may still roll back, and evicting there
-     * would throw away good entries on every failed checkout — and, worse, evict before the
-     * commit, so a concurrent read could repopulate the cache from the pre-commit state and be
-     * wrong until the TTL expires.
      *
-     * <p>What that costs is honest: after a sale, a cached product shows the old stock figure for
-     * up to the cache's TTL. That is the trade this phase is actually about. The catalogue is a
-     * browsing view and a slightly stale count there misleads nobody — checkout reads through
-     * {@link #requireProduct(Long)}, which never touches the cache, so the number that decides
-     * whether a sale happens is always live.
+     * <p><strong>It still evicts nothing itself</strong>, and the Phase 13 reasoning for that is
+     * unchanged: this runs once per line inside a transaction that may still roll back, so an
+     * {@code @CacheEvict} here would discard good entries on every failed checkout and — worse —
+     * evict before the commit, leaving a window in which a concurrent read repopulates the cache
+     * from the pre-commit row and is wrong until the TTL.
+     *
+     * <p><strong>What has changed is that the eviction now happens afterwards.</strong> Phase 13
+     * accepted a stale catalogue for up to a TTL after every sale, and recorded transaction
+     * synchronisation as the real answer, deferred. This is that answer: the method publishes
+     * {@link ProductStockChangedEvent}, and {@code ProductCacheEvictor} acts on it in
+     * {@code AFTER_COMMIT} — so a rolled-back checkout still evicts nothing, and a committed one
+     * leaves no stale entry behind.
+     *
+     * <p>The event is published inside the transaction and delivered outside it; that is what
+     * {@code @TransactionalEventListener} does, and publishing here rather than in
+     * {@code OrderPlacementService} keeps the ordering code free of any knowledge that a cache
+     * exists.
      */
     @Transactional
     public void save(Product product) {
         productRepository.save(product);
+        events.publishEvent(new ProductStockChangedEvent(product.getId()));
     }
 }

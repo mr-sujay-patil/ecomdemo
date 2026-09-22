@@ -196,7 +196,12 @@ for line in open(path):
     labels = dict(re.findall(r"([a-zA-Z_][a-zA-Z0-9_]*)=\"([^\"]*)\"", m.group(2) or ""))
     if all(labels.get(k) == v for k, v in want.items()):
         total = (total or 0.0) + float(m.group(3))
-print("MISSING" if total is None else ("%g" % total))
+# %.12g, NOT %g. The default is SIX significant digits, which silently rounds a metric the
+# moment it outgrows them: order_value_sum at 167656.5 printed as 167656, so a delta that should
+# have been 2499.5 came out as 2499 and the check failed by exactly the rounding. Twelve digits
+# covers any figure this application produces while still printing 1.0 as "1", which the
+# counter checks compare against.
+print("MISSING" if total is None else ("%.12g" % total))
 '
 
 # scrape -> takes a fresh snapshot of /actuator/prometheus into $SCRAPE
@@ -211,7 +216,9 @@ metric() {
 
 # delta <before> <after> -> the difference, for readable check() output
 delta() {
-    python3 -c "print('%g' % ($2 - $1))" 2>/dev/null
+    # See the note on METRIC_PY above for why this is not %g. It also absorbs the float
+    # subtraction artefacts that would otherwise print 2499.4999999999995.
+    python3 -c "print('%.12g' % ($2 - $1))" 2>/dev/null
 }
 
 # The database container's name. Phase 10's compose stack calls it `ecomdemo-db`; the
@@ -998,6 +1005,53 @@ else
     skip "deleting the product evicts the entry" "same as above"
     skip "and the product is really gone" "same as above"
 fi
+
+# --- A sale must not leave the catalogue advertising stock it no longer has -------------------
+# The regression check for the defect found during Phase 16: placing an order decremented the
+# database and evicted neither cache, so the product page and the listing kept showing the
+# pre-sale figure for up to their TTL (ten minutes and two). A shopper could read "5 in stock",
+# add five to a cart, and be refused at checkout.
+#
+# WARMING THE CACHE FIRST IS THE WHOLE POINT. The happy-path section already reads the stock back
+# after an order, and it passed throughout the bug - because nothing had put that product in the
+# cache beforehand, so its read was a miss that went to the database. A regression test for a
+# cache has to guarantee the entry exists before the thing it is testing happens.
+as_admin
+STATUS="$(request POST /api/products \
+    '{"name":"Eviction Probe","description":"bought once, to prove the catalogue keeps up","price":40.00,"stockQuantity":5,"category":"TEST"}')"
+check "a product for the eviction check is created" "201" "$STATUS"
+EVICTION_ID="$(jget "d['id']")"
+
+as_customer
+# Start from an empty cart, the same way the happy path does: a line left over from an earlier
+# section makes this checkout fail for a reason that has nothing to do with caching.
+request GET /api/cart >/dev/null
+for product_id in $(jget "' '.join(str(i['productId']) for i in d['items'])"); do
+    request DELETE "/api/cart/items/$product_id" >/dev/null
+done
+
+# Warm both caches: the single product and the whole listing.
+request GET "/api/products/$EVICTION_ID" >/dev/null
+check "the catalogue shows 5 before the sale" "5" "$(jget "d['stockQuantity']")"
+request GET /api/products >/dev/null
+check "and the listing agrees" "5" \
+    "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")"
+
+request POST /api/cart/items "{\"productId\":$EVICTION_ID,\"quantity\":2}" >/dev/null
+check "buying 2 of them succeeds" "201" "$(request POST /api/orders)"
+
+# No sleep anywhere: the eviction is part of finishing the checkout, so the very next read is
+# already right. A check that needed a sleep would be a check that accepted staleness.
+request GET "/api/products/$EVICTION_ID" >/dev/null
+check "the product page shows 3 immediately, not the pre-sale 5" "3" "$(jget "d['stockQuantity']")"
+
+request GET /api/products >/dev/null
+check "and the listing shows 3 as well" "3" \
+    "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")"
+
+as_admin
+request DELETE "/api/products/$EVICTION_ID" >/dev/null
+as_customer
 
 # --------------------------------------------------------------------------------------------
 # Batch processing (Phase 14)
