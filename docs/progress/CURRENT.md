@@ -82,7 +82,13 @@ keeps the 270-check net at its most trustworthy.
       StockMutationRulesTest now names ONE module, which is exactly what Phase 19 predicted.
       The CSV import gained `ImportedProduct` because a processor cannot set stock on an unsaved
       product. `./mvnw clean verify` -> 334 + 82, 0 failures. Smoke -> **270 passed, unchanged**.
-- [ ] **Step 3 - CartItem drops its FK to product**, snapshots name and price like OrderItem.
+- [x] **Step 3 - CartItem drops its FK to product**, snapshots name and price. V12 backfills
+      through the join that is about to disappear, then drops the constraint. ORDER NO LONGER
+      DEPENDS ON CATALOG AT ALL - checkout builds the line and the reservation from the cart's
+      snapshot, so order-service will place an order without calling catalog-service. Removing the
+      FK also removed a query (CartRepository's second JOIN FETCH). BEHAVIOUR CHANGE: a cart now
+      reflects the catalogue as at add-to-cart time, pinned by a new CartApiIT test.
+      `./mvnw clean verify` -> 334 + 83, 0 failures. Smoke -> **270 passed, unchanged**.
 - [ ] Step 1 - Maven multi-module skeleton (parent + common).
 - [ ] Steps 4-7 - extract the five services, compose, rebuild the smoke test per service.
 
@@ -95,6 +101,12 @@ keeps the 270-check net at its most trustworthy.
   longer look one up. The first small tax of the split, and the honest one to pay.
 - ProductResponse takes stock as a PARAMETER so the lookup stays batched - one call for a listing,
   not one per row, which becomes N+1 HTTP round trips after the split.
+- CartItem snapshots productId/productName/unitPrice instead of holding @ManyToOne Product. The
+  cart stops reflecting today's catalogue and starts reflecting it as at add-to-cart time; that is
+  the trade, and CartApiIT pins it.
+- Incremental `mvn test-compile` can report success against STALE test classes. Use
+  `mvn clean test-compile` when a signature changes, or the tests appear to compile when they
+  cannot.
 - @MockitoBean does NOT work for ApplicationEventPublisher (Spring resolves it as the context
   itself, not a bean). @RecordApplicationEvents is the right tool and tests the real publication.
 
@@ -103,14 +115,18 @@ Docker Desktop running; the compose stack is **UP** (nine containers), schema no
 The SonarQube stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-Step 3: `CartItem` drops `@ManyToOne Product` and the `fk_cart_item_product` foreign key, and
-snapshots productName and unitPrice the way `OrderItem` already does. A migration is needed to add
-the columns and drop the constraint.
+Both data changes are DONE and green, which was the whole reason for doing them first. What
+remains is structural:
 
-BEHAVIOUR CHANGE to state in the PR and the test report: the cart currently reflects TODAY's
-catalogue because it joins to the live product on every load. Afterwards it reflects the catalogue
-as at add-to-cart time. That is eventual consistency arriving where it always arrives first - in a
-read that used to be a join. The smoke test asserts cart totals, so watch for checks that assume a
-price change is picked up by an existing cart.
+1. **Step 1 - Maven multi-module skeleton**: parent POM, a `common` library module (shared,
+   logging, metrics, cache), the monolith still running as one deployable. Touches the build
+   (JaCoCo, Surefire/Failsafe, Sonar, the Dockerfile, CI), not behaviour.
+2. **Steps 4-6** - extract catalog-service and inventory-service, then customer-service and
+   notification-service, leaving order-service; HTTP clients between them; JWT validation in each;
+   five databases; compose with per-service memory limits and kafka-ui behind a profile.
+3. **Step 7** - rebuild the smoke test against per-service ports.
+4. Testing protocol in full, test report, README, decisions, RECENT rotation, PR.
 
-Then step 1 (Maven multi-module), then the extractions.
+MEMORY: cap each service at 384M. A JVM idles at ~296 MiB and Docker Desktop has 3.8 GB total;
+five uncapped JVMs against that cgroup is the mistake compose.yaml already warns about, five
+times over.
