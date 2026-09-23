@@ -1773,8 +1773,28 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     check "an order is placed for the messaging check" "201" "$(request POST /api/orders)"
     KAFKA_ORDER_ID="$(jget "d['id']")"
 
-    check "the topic grew by exactly one message" "1" \
-        "$(( $(topic_message_count orders.placed) - OFFSETS_BEFORE ))"
+    # Polled, not read once. Phase 17 published from an AFTER_COMMIT listener on an async pool,
+    # which was fast enough that reading the offset the instant the checkout returned almost always
+    # won. Phase 18 put a transactional outbox in between: the row is committed with the order and
+    # a RELAY publishes it on a one-second poll, so there is now up to a second plus an
+    # acknowledgement between the 201 and the message existing. The immediate read became a race
+    # that usually won - which is the worst kind, because it fails on someone else's machine, or
+    # during a merge verification, long after the change that caused it.
+    #
+    # The notification check immediately below this one has polled since Phase 17 and says why.
+    # This one simply never got the same treatment when the outbox arrived.
+    TOPIC_GROWTH=0
+    for _ in $(seq 1 20); do
+        TOPIC_GROWTH=$(( $(topic_message_count orders.placed) - OFFSETS_BEFORE ))
+        [ "$TOPIC_GROWTH" -ge 1 ] && break
+        sleep 1
+    done
+
+    # Waiting for "at least one" and then asserting "exactly one" is deliberate: a SECOND message
+    # for the same order would be a duplicate publication, and the check below - exactly one
+    # notification row - is what catches that, because the consumer's processed_event table is
+    # what makes a duplicate harmless rather than invisible.
+    check "the topic grew by exactly one message" "1" "$TOPIC_GROWTH"
 
     # The consumer runs on its own thread, after the HTTP response has already been returned -
     # that is the whole point of publishing asynchronously - so this polls instead of asserting

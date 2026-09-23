@@ -5,10 +5,9 @@
 - **Updated:** 2026-09-23
 - **Phase:** 19: Modular Monolith (Spring Modulith)
 - **Branch:** feature/phase-19-modulith
-- **Step:** PR_OPEN
+- **Step:** PR_OPEN (follow-up, on the same branch)
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #24 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
-  https://github.com/mr-sujay-patil/ecomdemo/pull/24
+- **PR:** #24 MERGED (6e96292). Follow-up open for two defects the merge verification found.
 - **Waiting for user:** YES — review and merge
 
 ## Phase 18 merge verification (PASSED 2026-09-23)
@@ -26,6 +25,36 @@ rather than resolved unilaterally. The user's answer: **"Skip my recent instruct
 same instructions that we have decided on earlier."** So the protocol stands unchanged - full
 `./mvnw clean verify` and `scripts/smoke-test.sh` at merge verification and before every PR. The
 memory written for the interim preference has been deleted. Do not re-raise this.
+
+## Phase 19 merge verification (2026-09-23)
+PR #24 merged as merge commit 6e96292 (parents 90d5d68 + 5f78945). Branch is an ancestor of
+`main`, no missing commits, no file diff, all 21 remote branches intact, CI on `main` green.
+`./mvnw clean verify` on `main` -> **319 + 82**, 0 failures, 0 skipped.
+
+It found TWO defects, both in this phase's or the last one's own work, both fixed on this branch:
+
+1. **The generated diagrams were non-deterministic.** `clean verify` left four .puml files
+   modified and the diff was pure REORDERING - Documenter does not emit Rel(...) lines in a stable
+   order. That defeats the reason they are committed: a real dependency change would be one line
+   lost among twenty reordered ones. Now sorted into a canonical order before writing; verified by
+   running twice and getting no diff.
+2. **`the topic grew by exactly one message` was a race.** It read the Kafka offset the instant
+   the checkout returned. Fine in Phase 17 (AFTER_COMMIT on an async pool); Phase 18's outbox put
+   a one-second relay poll in between, so the read became a race it usually won. Now polled, the
+   same way the notification check beside it has polled since Phase 17.
+
+ALSO, and NOT a code defect: 7 Grafana checks failed first, for two environment reasons worth
+knowing. (a) Checking out a branch while Grafana runs replaces the bind-mounted provisioning
+directory's inode and the container keeps the old one - `docker compose up -d --force-recreate
+grafana` fixes it (Phase 16 documented this; it bit again). (b) The user changed the Grafana admin
+password during the manual dashboard check, which persists on the `grafana-data` volume because
+`GF_SECURITY_ADMIN_PASSWORD` only applies at FIRST init - and the smoke test's repeated 401s then
+tripped Grafana's brute-force lockout, so even the correct password was refused for five minutes.
+Reset with `grafana-cli --homepath /usr/share/grafana --configOverrides
+cfg:default.paths.data=/var/lib/grafana admin reset-admin-password admin`.
+
+Final: `scripts/smoke-test.sh` -> **270 passed, 0 failed, 0 skipped**.
+NO TAG YET - `phase-19-complete` is pushed only after the follow-up merges and verifies.
 
 ## Checklist (copied from the phase's "What you'll implement")
 - [x] Modules: 14 of them, each with a public API, an `internal` package and a DECLARED

@@ -15,12 +15,12 @@ Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "Ecomdemo
   Component(EcomdemoApplication.EcomdemoApplication.Catalog, "Catalog", $techn="Module", $descr="", $tags="", $link="")
 }
 
-Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoApplication.Catalog, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoApplication.Inventory, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Catalog, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
-Rel(EcomdemoApplication.EcomdemoApplication.Inventory, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Inventory, EcomdemoApplication.EcomdemoApplication.Catalog, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Inventory, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
 @enduml
