@@ -89,7 +89,10 @@ keeps the 270-check net at its most trustworthy.
       FK also removed a query (CartRepository's second JOIN FETCH). BEHAVIOUR CHANGE: a cart now
       reflects the catalogue as at add-to-cart time, pinned by a new CartApiIT test.
       `./mvnw clean verify` -> 334 + 83, 0 failures. Smoke -> **270 passed, unchanged**.
-- [ ] Step 1 - Maven multi-module skeleton (parent + common).
+- [x] **Step 1 - the build is a REACTOR.** Parent (builds nothing, owns every version and plugin
+      config in <pluginManagement>), `common` (a LIBRARY depending on no other module), and
+      `ecomdemo-app` (still the whole application, one deployable). Dockerfile and CI paths updated.
+      `./mvnw clean verify` -> 334 + 83, 0 failures. Smoke -> **270 passed**.
 - [ ] Steps 4-7 - extract the five services, compose, rebuild the smoke test per service.
 
 ## Decisions this phase (to be copied into docs/decisions.md)
@@ -107,6 +110,13 @@ keeps the 270-check net at its most trustworthy.
 - Incremental `mvn test-compile` can report success against STALE test classes. Use
   `mvn clean test-compile` when a signature changes, or the tests appear to compile when they
   cannot.
+- `shared.AuthMessages` holds the 401 wording, because `shared` importing it from `security` was a
+  cycle Maven cannot resolve once they are separate modules. Same answer as Phase 19's TokenClaims.
+- Tests that read repo files go through `ProjectRoot`, which walks up to find compose.yaml. Maven
+  sets the working directory to the MODULE, and `../` would encode the current depth into every
+  call site - which this phase changes again with every extraction.
+- Moving a constant is a refactor; REWORDING it is a user-facing change. Doing both at once is how
+  the second happens by accident - AuthApiIT caught exactly that.
 - @MockitoBean does NOT work for ApplicationEventPublisher (Spring resolves it as the context
   itself, not a bean). @RecordApplicationEvents is the right tool and tests the real publication.
 
@@ -118,14 +128,15 @@ The SonarQube stack is stopped. `.env` holds a real JWT_SECRET and is gitignored
 Both data changes are DONE and green, which was the whole reason for doing them first. What
 remains is structural:
 
-1. **Step 1 - Maven multi-module skeleton**: parent POM, a `common` library module (shared,
-   logging, metrics, cache), the monolith still running as one deployable. Touches the build
-   (JaCoCo, Surefire/Failsafe, Sonar, the Dockerfile, CI), not behaviour.
-2. **Steps 4-6** - extract catalog-service and inventory-service, then customer-service and
+1. **Steps 4-6** - extract catalog-service and inventory-service, then customer-service and
    notification-service, leaving order-service; HTTP clients between them; JWT validation in each;
    five databases; compose with per-service memory limits and kafka-ui behind a profile.
-3. **Step 7** - rebuild the smoke test against per-service ports.
-4. Testing protocol in full, test report, README, decisions, RECENT rotation, PR.
+2. **Step 7** - rebuild the smoke test against per-service ports.
+3. Testing protocol in full, test report, README, decisions, RECENT rotation, PR.
+
+`cache` did NOT go into `common`, and the dependency graph is why: it reads catalog's DTOs and
+listens for inventory's stock event, so a `common` containing it would have to depend on both.
+It stays in `ecomdemo-app` and belongs to catalog-service when that is extracted.
 
 MEMORY: cap each service at 384M. A JVM idles at ~296 MiB and Docker Desktop has 3.8 GB total;
 five uncapped JVMs against that cgroup is the mistake compose.yaml already warns about, five
