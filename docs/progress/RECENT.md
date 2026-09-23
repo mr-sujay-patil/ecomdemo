@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 19: Modular Monolith (tag: pending, PR: pending)
+## Phase 19: Modular Monolith (tag: phase-19-complete, PR #24 + follow-up #25)
 **What exists now:** Fourteen named modules, each declaring in `package-info.java` exactly which
 others it may depend on, enforced by `ModularityTest` - an undeclared import now fails the build
 naming both ends. The graph is ACYCLIC. Every module keeps its published API at its package root
