@@ -1275,7 +1275,11 @@ check "and neither is /actuator/heapdump" "404" "$(request GET /actuator/heapdum
 # --- Which build is running ---------------------------------------------------------------------
 as_anonymous
 request GET /actuator/info >/dev/null
-check "/actuator/info names the artifact" "ecomdemo" "$(jget "d['build']['artifact']")"
+# `ecomdemo-app` since Phase 20 made the build a reactor: the deployable is a MODULE now, and
+# the artifact name is the module's. That is the check working rather than the check being wrong -
+# the whole point of this endpoint is that it says which build is running, so the day the answer
+# changes it should say so.
+check "/actuator/info names the artifact" "ecomdemo-app" "$(jget "d['build']['artifact']")"
 check "and carries a build timestamp" "True" "$(jget "len(str(d['build']['time'])) > 0")"
 
 # --- A placed order moves the business meters -----------------------------------------------------

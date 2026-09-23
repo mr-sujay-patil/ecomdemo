@@ -1,0 +1,20 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.auth`
+|Spring components
+|_Controllers_
+
+* `c.e.a.AuthController`
+
+_Services_
+
+* `c.e.a.AuthService`
+* `c.e.a.TokenService`
+
+_Others_
+
+* `c.e.a.AuthenticationManagerConfig`
+|Bean references
+|* `c.e.s.JwtProperties` (in Security)
+|===

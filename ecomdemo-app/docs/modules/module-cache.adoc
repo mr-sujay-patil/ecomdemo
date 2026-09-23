@@ -1,0 +1,15 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.cache`
+|Spring components
+|_Event listeners_
+
+* `c.e.c.ProductCacheEvictor`
+
+_Others_
+
+* `c.e.c.CacheConfig`
+|Events listened to
+|* `c.e.i.ProductStockChangedEvent` 
+|===

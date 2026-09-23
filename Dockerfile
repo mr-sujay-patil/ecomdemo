@@ -25,11 +25,18 @@ WORKDIR /build
 # every layer after it. Dependencies change rarely and source changes constantly, so the pom is
 # copied and resolved FIRST. An ordinary code edit then reuses the cached dependency layer and
 # the build starts from `mvn package`, instead of re-downloading ~200 MB every time.
+#
+# Since Phase 20 the build is a REACTOR, so the poms are copied as a set: the parent, which owns
+# every version and plugin configuration, and one per module. `go-offline` then resolves the whole
+# tree in a layer that a code edit does not invalidate, exactly as before.
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
+COPY common/pom.xml common/
+COPY ecomdemo-app/pom.xml ecomdemo-app/
 RUN ./mvnw -B -q dependency:go-offline
 
-COPY src/ src/
+COPY common/src/ common/src/
+COPY ecomdemo-app/src/ ecomdemo-app/src/
 
 # -DskipTests, deliberately. Tests run in the build (`./mvnw clean verify`) and in CI, where a
 # failure is visible and the report is readable. Running them here would need a Docker daemon
@@ -51,7 +58,7 @@ RUN ./mvnw -B -q package -DskipTests
 # Copied into the runtime image in that order, a rebuild after a code edit pushes ~200 KB instead
 # of 64 MB. (`-Djarmode=layertools` was the Boot 2/3 spelling; Boot 3.3 replaced it with
 # `jarmode=tools`, which this project uses.)
-RUN java -Djarmode=tools -jar target/*.jar extract --layers --launcher --destination extracted
+RUN java -Djarmode=tools -jar ecomdemo-app/target/*.jar extract --layers --launcher --destination extracted
 
 # ---------------------------------------------------------------------------------------------
 # Stage 2: runtime

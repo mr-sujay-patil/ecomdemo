@@ -1,0 +1,33 @@
+@startuml
+set separator none
+title Order
+
+top to bottom direction
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Order, "Order", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Metrics, "Metrics", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Customer, "Customer", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Inventory, "Inventory", $techn="Module", $descr="", $tags="", $link="")
+}
+
+Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Customer, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Customer, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Inventory, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Cart, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Customer, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Inventory, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Messaging, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Metrics, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+@enduml

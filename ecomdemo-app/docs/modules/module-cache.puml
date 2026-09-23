@@ -1,0 +1,22 @@
+@startuml
+set separator none
+title Cache
+
+top to bottom direction
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Catalog, "Catalog", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Cache, "Cache", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Inventory, "Inventory", $techn="Module", $descr="", $tags="", $link="")
+}
+
+Rel(EcomdemoApplication.EcomdemoApplication.Cache, EcomdemoApplication.EcomdemoApplication.Catalog, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Cache, EcomdemoApplication.EcomdemoApplication.Inventory, "listens to", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Catalog, EcomdemoApplication.EcomdemoApplication.Inventory, "uses", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+@enduml

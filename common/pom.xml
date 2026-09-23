@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.ecomdemo</groupId>
+		<artifactId>ecomdemo-parent</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+	<artifactId>ecomdemo-common</artifactId>
+	<name>ecomdemo-common</name>
+	<description>What every service shares: the API error shape, the domain exceptions, the correlation ID, the meter names</description>
+
+	<!--
+		A LIBRARY, and the dependency list is where that is enforced.
+
+		It names what it needs and nothing else, which is the difference between a shared module
+		and a drawer. The application's Kafka, Batch, Redis and JPA starters are deliberately
+		absent: a service that needs them declares them, and a library that dragged them in would
+		make every service pay for the heaviest one.
+
+		There is also NO spring-boot-maven-plugin here. The parent keeps it in <pluginManagement>
+		precisely so this module does not inherit it - repackaging is what turns a jar into an
+		executable application, and this jar has no main class to be executable with.
+	-->
+	<dependencies>
+		<!-- @RestControllerAdvice, ResponseEntity, the servlet filters. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+
+		<!-- GlobalExceptionHandler translates MethodArgumentNotValidException. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!--
+			The handler answers AccessDeniedException and reads the SecurityContextHolder to tell
+			an anonymous caller (401) from an authenticated one without the right role (403).
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
+		<!-- TokenClaims names JwtClaimNames.SUB rather than the string "sub". -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+		</dependency>
+
+		<!--
+			OptimisticLockingFailureException, which the handler turns into a 409. It comes from
+			spring-tx rather than from JPA: the library needs the EXCEPTION, not persistence.
+		-->
+		<dependency>
+			<groupId>org.springframework</groupId>
+			<artifactId>spring-tx</artifactId>
+		</dependency>
+
+		<!-- OpenApiConfig: the document every service publishes. -->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+			<version>${springdoc.version}</version>
+		</dependency>
+
+		<!-- MetricsConfig tags every meter with the application name. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
+		<!--
+			The Modulith annotations. These packages still carry @ApplicationModule declaring what
+			they may depend on - nothing, in all three cases - and an annotation on a package needs
+			the annotation on the compile classpath even when nothing reads it here.
+
+			Worth keeping rather than deleting with the move: `common` being a Maven module now
+			makes its boundary a build-time fact, but ModularityTest is what states WHY the
+			boundary is where it is, and it still verifies these three from the application side.
+		-->
+		<dependency>
+			<groupId>org.springframework.modulith</groupId>
+			<artifactId>spring-modulith-api</artifactId>
+			<version>${spring-modulith.version}</version>
+		</dependency>
+	</dependencies>
+</project>

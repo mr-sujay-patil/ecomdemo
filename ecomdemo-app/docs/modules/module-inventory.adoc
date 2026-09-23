@@ -1,0 +1,11 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.inventory`
+|Spring components
+|_Services_
+
+* `c.e.i.InventoryService`
+|Aggregate roots
+|* `c.e.i.ProductStock`
+|===
