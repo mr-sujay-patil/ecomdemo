@@ -2,7 +2,6 @@ package com.ecomdemo.inventory;
 
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
-import com.ecomdemo.catalog.Product;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -10,59 +9,51 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * The boundary the type system cannot hold.
+ * Who may change how much of a product there is — now answered by ONE module.
  *
- * <p>{@code catalog} and {@code inventory} share one entity: {@link Product} owns the
- * {@code stock_quantity} column, and its {@code reduceStock} and {@code setStockQuantity} are
- * public methods on a type every module is allowed to see. So nothing in Java stops {@code order},
- * {@code cart} or {@code batch} from changing stock directly — and before this phase,
- * {@code order} and {@code batch} both did.
+ * <h2>What this test used to have to say, and no longer does</h2>
  *
- * <p>{@code ModularityTest} cannot catch it either. Modulith checks which PACKAGES reach into
- * which; this is one exposed type being used two different ways by two different modules, which is
- * legal at every level Modulith inspects.
+ * <p>In Phase 19 this rule had to permit <strong>two</strong> modules, {@code inventory} and
+ * {@code catalog}, and the test said so at length and with some embarrassment. Stock was a column
+ * on {@code Product}, {@code catalog} owned that entity, and an entity's owner cannot be denied
+ * access to one of its own columns. The admin endpoint {@code PUT /api/products/{id}} wrote stock
+ * directly, and routing it through {@code InventoryService} would have formed a cycle — because
+ * {@code inventory} depended on {@code catalog} to save the product it had just mutated.
  *
- * <p>So the rule is written out. It is the honest price of the decision recorded in
- * {@code InventoryService} and in {@code docs/decisions.md}: the behaviour was separated and the
- * table was not, and this test is what makes that separation real rather than aspirational. A
- * boundary a test enforces is weaker than one the compiler enforces and enormously stronger than
- * one a comment requests — and if Phase 20 does split the table, this test is the list of every
- * place that has to change.
+ * <p>That test closed by naming the condition under which it could be tightened:
  *
- * <p>Verified by mutation while it was written: putting {@code product.reduceStock(...)} back into
- * {@code OrderPlacementService} fails it, which is the only way to know a rule like this is
- * actually wired to anything.
+ * <blockquote>Splitting {@code product} and {@code product_stock} is what would let the rule name a
+ * single module, and Phase 20 is where that question belongs.</blockquote>
  *
- * <h2>Why {@code catalog} is exempt, stated plainly rather than quietly</h2>
+ * <p>Phase 20 split the table, and this is that tightening. The rule now names {@code inventory}
+ * and nothing else. The exemption is gone, along with the paragraph explaining it.
  *
- * <p>The rule permits two modules, not one: {@code inventory} and {@code catalog}. The admin
- * endpoint {@code PUT /api/products/{id}} replaces a product wholesale, stock included, and that
- * is {@code ProductService.update}.
+ * <h2>Why the split also reversed a dependency</h2>
  *
- * <p>It cannot be routed through {@code InventoryService}, and the reason is structural rather
- * than lazy. {@code inventory} already depends on {@code catalog} — it holds a {@link Product} and
- * saves through {@code ProductService} — so {@code catalog} calling back into {@code inventory}
- * would form precisely the dependency cycle this phase spent its first commit removing.
- * {@code ModularityTest} would fail, and rightly.
+ * <p>The cycle that forced the old exemption disappeared for the same reason the exemption did.
+ * {@code InventoryService} deals in product <em>ids</em> now — it never holds a {@code Product},
+ * never saves through the catalogue, and does not know what a catalogue is. So {@code catalog} can
+ * call it freely, which is what {@code ProductService} does to put a quantity in a
+ * {@code ProductResponse}.
  *
- * <p>So this is the COST of the decision recorded in {@code docs/decisions.md} — separate the
- * behaviour, leave the table alone — showing up where costs usually show up, one layer down from
- * where the decision was made. Two modules sharing an entity means the module that owns the entity
- * keeps access to all of it; no arrangement of tests changes that. Splitting {@code product} and
- * {@code product_stock} is what would let the rule name a single module, and Phase 20 is where
- * that question belongs.
+ * <p>That is the shape the services must have: an inventory-service will not have a catalogue to
+ * depend on. Splitting the table is what made the code admit it.
  *
- * <p>What the rule still buys is the part that matters: {@code order}, {@code cart} and
- * {@code batch} — the CONSUMERS — cannot touch stock. Before this phase, {@code order} and
- * {@code batch} both did.
+ * <h2>Why this is still a test and not a compiler guarantee</h2>
+ *
+ * <p>{@link ProductStock}'s mutators are package-private, so within one deployable the compiler
+ * already does most of this work. The rule remains because package-private is a property of the
+ * <em>package</em>, not of the module: anything else placed in {@code com.ecomdemo.inventory}
+ * would have the same access, and "do not add a class here that writes stock behind the service"
+ * is exactly the sort of thing a hurried edit does. It costs one test to say it out loud.
  */
 @DisplayName("Stock mutation rules")
 class StockMutationRulesTest {
 
     /**
      * Production classes only. {@code DO_NOT_INCLUDE_TESTS} matters here: tests legitimately build
-     * products with arbitrary stock to set up a scenario, and a rule that forbade that would be
-     * answered by weakening the rule rather than by fixing anything.
+     * stock rows with arbitrary quantities to set up a scenario, and a rule that forbade that
+     * would be answered by weakening the rule rather than by fixing anything.
      */
     private static final JavaClasses PRODUCTION_CODE =
             new ClassFileImporter()
@@ -70,52 +61,48 @@ class StockMutationRulesTest {
                     .importPackages("com.ecomdemo");
 
     @Test
-    @DisplayName("no module outside catalog and inventory may take stock out")
+    @DisplayName("only the inventory module may take stock out")
     void onlyInventoryReducesStock() {
         noClasses()
                 .that()
-                .resideOutsideOfPackages("com.ecomdemo.inventory..", "com.ecomdemo.catalog..")
+                .resideOutsideOfPackage("com.ecomdemo.inventory..")
                 .should()
-                .callMethod(Product.class, "reduceStock", int.class)
+                .callMethod(ProductStock.class, "reduce", int.class)
                 .because(
                         "taking stock out is the inventory module's job; going around it skips the "
                                 + "availability check, the InsufficientStockException a shopper should "
-                                + "see, and the cache eviction that follows the save")
+                                + "see, and the ProductStockChangedEvent the catalogue cache needs")
                 .check(PRODUCTION_CODE);
     }
 
     @Test
-    @DisplayName("no module outside catalog and inventory may set a stock level")
+    @DisplayName("only the inventory module may set a stock level")
     void onlyInventorySetsStock() {
-        // The CSV import used to call setStockQuantity directly; it now goes through
-        // InventoryService.setStockLevel. That method is thin to the point of looking pointless -
-        // a setter with a bounds check - and this test is the entire reason it exists.
-        //
-        // catalog is exempt because ProductService.update is the admin's full replace; see the
-        // class comment for why that cannot be routed through inventory without a cycle.
+        // Both remaining callers - the catalogue's create/update and the CSV import - go through
+        // InventoryService.setStockLevel. In Phase 19 the catalogue had to be exempted from this
+        // rule; it is not exempted now, because it no longer has a field to write.
         noClasses()
                 .that()
-                .resideOutsideOfPackages("com.ecomdemo.inventory..", "com.ecomdemo.catalog..")
+                .resideOutsideOfPackage("com.ecomdemo.inventory..")
                 .should()
-                .callMethod(Product.class, "setStockQuantity", int.class)
+                .callMethod(ProductStock.class, "setQuantity", int.class)
                 .because(
-                        "every write to stock from a consumer module goes through InventoryService, "
-                                + "so 'what can change this number?' is answered by the two modules "
-                                + "that share the entity rather than by anything that imports it")
+                        "every write to stock goes through InventoryService, so 'what can change "
+                                + "this number?' finally has exactly one answer")
                 .check(PRODUCTION_CODE);
     }
 
     @Test
-    @DisplayName("reading stock stays open to everyone")
+    @DisplayName("reading stock stays open to everyone, through the service")
     void readingStockIsNotRestricted() {
         // Stated as a test so the intent is not mistaken for an oversight. Availability is a fact
-        // about the catalogue that any module may read - the product listing shows it, the cart
-        // checks it, the smoke test asserts on it. It is WRITING that needs an owner. A rule that
-        // locked reads down too would push callers into working around it, which is how boundaries
-        // acquire the reputation of being obstacles.
-        Product product = new Product("Rule Lamp", "a lamp", new java.math.BigDecimal("1.00"), 5);
+        // any module may read - the product listing shows it, the cart checks it, the smoke test
+        // asserts on it. It is WRITING that needs an owner. A rule that locked reads down too
+        // would push callers into working around it, which is how boundaries acquire the
+        // reputation of being obstacles.
+        ProductStock stock = new ProductStock(1L, 5);
 
-        org.assertj.core.api.Assertions.assertThat(product.hasStockFor(5)).isTrue();
-        org.assertj.core.api.Assertions.assertThat(product.getStockQuantity()).isEqualTo(5);
+        org.assertj.core.api.Assertions.assertThat(stock.has(5)).isTrue();
+        org.assertj.core.api.Assertions.assertThat(stock.getQuantity()).isEqualTo(5);
     }
 }

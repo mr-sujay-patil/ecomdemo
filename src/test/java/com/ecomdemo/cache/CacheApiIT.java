@@ -48,6 +48,15 @@ class CacheApiIT extends IntegrationTest {
     @Autowired
     private com.ecomdemo.catalog.ProductService productService;
 
+    /**
+     * Since Phase 20 the stock-changed event is published by the INVENTORY module, with the column
+     * it describes. These two tests care only that the AFTER_COMMIT listener fires on a commit and
+     * not on a rollback, so what matters is that something publishes the event inside a
+     * transaction - a reservation now does.
+     */
+    @Autowired
+    private com.ecomdemo.inventory.InventoryService inventoryService;
+
     @Autowired
     private TransactionTemplate transactions;
 
@@ -171,9 +180,15 @@ class CacheApiIT extends IntegrationTest {
 
         // A product inserted behind the cache's back is invisible until the listing expires or is
         // evicted — the cost of caching a collection under a single key.
+        // Two inserts since Phase 20, because stock lives in its own table. The listing only
+        // needs the product row to exist for this assertion, but the stock row is written anyway
+        // so the smuggled product behaves like any other once the cache does notice it.
         jdbc.update(
-                "INSERT INTO product (name, description, price, stock_quantity, category, version) "
-                        + "VALUES ('Smuggled In', 'inserted with SQL', 1.00, 1, 'CACHE', 0)");
+                "INSERT INTO product (name, description, price, category, version) "
+                        + "VALUES ('Smuggled In', 'inserted with SQL', 1.00, 'CACHE', 0)");
+        jdbc.update(
+                "INSERT INTO product_stock (product_id, quantity, version) "
+                        + "SELECT id, 1, 0 FROM product WHERE name = 'Smuggled In'");
         try {
             assertThat(rest.getForObject("/api/products", ProductResponse[].class))
                     .as("the cached listing has not noticed the new row")
@@ -275,7 +290,7 @@ class CacheApiIT extends IntegrationTest {
         assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
                         .stockQuantity())
                 .isEqualTo(3);
-        jdbc.update("UPDATE product SET stock_quantity = 1 WHERE id = ?", product.id());
+        jdbc.update("UPDATE product_stock SET quantity = 1 WHERE product_id = ?", product.id());
 
         // The catalogue is now knowingly stale — that is the accepted trade.
         assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
@@ -291,7 +306,8 @@ class CacheApiIT extends IntegrationTest {
 
         // ...and the database must now hold 0, not 2. A cached read of "3" would have left 2.
         Integer stock = jdbc.queryForObject(
-                "SELECT stock_quantity FROM product WHERE id = ?", Integer.class, product.id());
+                "SELECT quantity FROM product_stock WHERE product_id = ?", Integer.class,
+                product.id());
         assertThat(stock)
                 .as("checkout decremented the LIVE value (1 -> 0), not the cached one (3 -> 2)")
                 .isZero();
@@ -349,7 +365,7 @@ class CacheApiIT extends IntegrationTest {
         changePriceBehindTheCache(product.id(), "4242.00");
 
         transactions.execute(status -> {
-            productService.save(productService.requireProduct(product.id()));
+            inventoryService.reserve(product.id(), "cache test", 1);
             status.setRollbackOnly();
             return null;
         });
@@ -370,7 +386,7 @@ class CacheApiIT extends IntegrationTest {
         changePriceBehindTheCache(product.id(), "4242.00");
 
         transactions.execute(status -> {
-            productService.save(productService.requireProduct(product.id()));
+            inventoryService.reserve(product.id(), "cache test", 1);
             return null;
         });
 

@@ -9,5 +9,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Inventory",
-        allowedDependencies = {"catalog", "shared"})
+        allowedDependencies = {"shared"})
 package com.ecomdemo.inventory;

@@ -2,6 +2,7 @@ package com.ecomdemo.batch;
 
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.inventory.InventoryService;
 import java.nio.file.Path;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.Job;
@@ -90,7 +91,7 @@ class ProductImportJobConfig {
                 // chunk(size, transactionManager): that overload builds the pre-6.0
                 // implementation, which Spring Batch 6 deprecates and 7 removes. It still works,
                 // and it announces itself in the log on every startup.
-                .<ProductCsvRow, Product>chunk(properties.chunkSize())
+                .<ProductCsvRow, ImportedProduct>chunk(properties.chunkSize())
                 .transactionManager(transactionManager)
                 .reader(productCsvReader)
                 .processor(processor)
@@ -131,9 +132,9 @@ class ProductImportJobConfig {
 
     @Bean
     @StepScope
-    ProductUpsertWriter productUpsertWriter(ProductService catalogue,
+    ProductUpsertWriter productUpsertWriter(ProductService catalogue, InventoryService inventory,
             CacheManager cacheManager) {
-        return new ProductUpsertWriter(catalogue, cacheManager);
+        return new ProductUpsertWriter(catalogue, inventory, cacheManager);
     }
 
     /**

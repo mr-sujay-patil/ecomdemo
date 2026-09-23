@@ -11,5 +11,5 @@ _Others_
 
 * `c.e.c.CacheConfig`
 |Events listened to
-|* `c.e.c.ProductStockChangedEvent` 
+|* `c.e.i.ProductStockChangedEvent` 
 |===

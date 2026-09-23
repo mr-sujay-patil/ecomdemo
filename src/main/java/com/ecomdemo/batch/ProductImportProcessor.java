@@ -1,7 +1,6 @@
 package com.ecomdemo.batch;
 
 import com.ecomdemo.catalog.Product;
-import com.ecomdemo.inventory.InventoryService;
 import com.ecomdemo.catalog.ProductService;
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -42,7 +41,7 @@ import org.springframework.stereotype.Component;
  * import comes to disagree with its source without anybody noticing.
  */
 @Component
-class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
+class ProductImportProcessor implements ItemProcessor<ProductCsvRow, ImportedProduct> {
 
     private static final int MAX_NAME = 255;
     private static final int MAX_DESCRIPTION = 1000;
@@ -56,15 +55,12 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
      * other write to that number. The alternative - calling {@code setStockQuantity} directly -
      * would be a hole in the boundary exactly wide enough to make the boundary meaningless.
      */
-    private final InventoryService inventory;
-
-    ProductImportProcessor(ProductService catalogue, InventoryService inventory) {
+    ProductImportProcessor(ProductService catalogue) {
         this.catalogue = catalogue;
-        this.inventory = inventory;
     }
 
     @Override
-    public Product process(ProductCsvRow row) {
+    public ImportedProduct process(ProductCsvRow row) {
         String name = trimToNull(row.name());
         if (name == null) {
             throw new InvalidProductRowException(row, "name is required");
@@ -93,13 +89,16 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, Product> {
         // these setters are enough on their own - the writer's save() is what makes the intent
         // explicit rather than what makes it happen.
         Product product = catalogue.findFirstByName(name)
-                .orElseGet(() -> new Product(name, description, price, stock, category));
+                .orElseGet(() -> new Product(name, description, price, category));
         product.setName(name);
         product.setDescription(description);
         product.setPrice(price);
-        inventory.setStockLevel(product, stock);
         product.setCategory(category);
-        return product;
+
+        // Stock is NOT set here, and the reason is the whole of Phase 20 in one line: it lives in
+        // another table now, and shortly in another database, so it is not a field on this object.
+        // It travels to the writer, which runs after the save and has an id to key on.
+        return new ImportedProduct(product, stock);
     }
 
     private BigDecimal price(ProductCsvRow row) {

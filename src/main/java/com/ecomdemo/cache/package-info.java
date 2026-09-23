@@ -11,5 +11,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Cache",
-        allowedDependencies = {"catalog", "catalog :: dto"})
+        allowedDependencies = {"catalog :: dto", "inventory"})
 package com.ecomdemo.cache;

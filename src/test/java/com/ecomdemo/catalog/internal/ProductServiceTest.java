@@ -1,12 +1,12 @@
 package com.ecomdemo.catalog.internal;
 
-import com.ecomdemo.catalog.ProductStockChangedEvent;
 import com.ecomdemo.catalog.ProductService;
 import com.ecomdemo.catalog.Product;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -47,8 +47,13 @@ class ProductServiceTest {
     @Mock
     private ProductRepository productRepository;
 
+    /**
+     * Since Phase 20 the catalogue does not hold stock; it tells inventory what the level should
+     * be. Mocked because what this class is responsible for is making that call correctly - the
+     * arithmetic behind it is {@code InventoryServiceTest}'s, against a database.
+     */
     @Mock
-    private org.springframework.context.ApplicationEventPublisher events;
+    private com.ecomdemo.inventory.InventoryService inventory;
 
     @InjectMocks
     private ProductService productService;
@@ -100,6 +105,11 @@ class ProductServiceTest {
             when(productRepository.findById(7L))
                     .thenReturn(Optional.of(TestData.product(7L, "Monitor", "24999.50", 5)));
 
+            // The quantity comes from inventory since Phase 20, not from the product row. The API
+            // shape is unchanged, which is the point of asserting it here: a client cannot tell
+            // that the number now comes from somewhere else.
+            when(inventory.quantityFor(7L)).thenReturn(5);
+
             // When
             ProductResponse found = productService.findById(7L);
 
@@ -140,7 +150,10 @@ class ProductServiceTest {
             assertThat(saved.getName()).isEqualTo("Desk Mat");
             assertThat(saved.getDescription()).isEqualTo("Stitched-edge felt mat");
             assertThat(saved.getPrice()).isEqualByComparingTo("1299.00");
-            assertThat(saved.getStockQuantity()).isEqualTo(12);
+
+            // Stock is not on the entity since Phase 20. What the catalogue is responsible for is
+            // telling inventory the level the request asked for, once the product has an id.
+            verify(inventory).setStockLevel(any(), eq(12));
         }
 
         @Test
@@ -176,7 +189,7 @@ class ProductServiceTest {
             assertThat(existing.getName()).isEqualTo("Desk Mat");
             assertThat(existing.getDescription()).isEqualTo("Stitched-edge felt mat");
             assertThat(existing.getPrice()).isEqualByComparingTo("1299.00");
-            assertThat(existing.getStockQuantity()).isEqualTo(12);
+            verify(inventory).setStockLevel(3L, 12);
             assertThat(updated.id()).isEqualTo(3L);
             verify(productRepository).save(existing);
         }
@@ -252,36 +265,6 @@ class ProductServiceTest {
                     .hasMessage("Product 404 not found");
         }
 
-        @Test
-        void save_whenCalled_delegatesToTheRepositoryAndNothingElse() {
-            // Given
-            Product product = TestData.product(3L, "Keyboard", "8999.00", 20);
-
-            // When
-            productService.save(product);
-
-            // Then
-            verify(productRepository).save(product);
-            verifyNoMoreInteractions(productRepository);
-        }
-
-        @Test
-        void save_whenCalled_announcesThatTheStockChanged() {
-            // The checkout write path is the only caller, and this event is what lets the cache
-            // be evicted AFTER the transaction commits rather than during it. Published here
-            // rather than from OrderPlacementService so that ordering carries no knowledge of
-            // caching; asserted here because nothing else in the unit suite can see it.
-            Product product = TestData.product(3L, "Keyboard", "8999.00", 20);
-
-            productService.save(product);
-
-            verify(events).publishEvent(new ProductStockChangedEvent(3L));
-            // ...and nothing else. Announcing is all save() is allowed to do about the cache: it
-            // runs once per line inside a transaction that may still roll back, so the eviction
-            // itself has to wait for the commit. That timing is proven in CacheApiIT, where it is
-            // observable; here the point is only that this method does not try to do it.
-            verifyNoMoreInteractions(events);
-        }
 
     }
 

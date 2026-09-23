@@ -145,6 +145,6 @@ class CartRepositoryTest {
 
     private Product persistProduct(String name, String price, int stock) {
         return entityManager.persistAndFlush(
-                new Product(name, name + " description", new BigDecimal(price), stock));
+                new Product(name, name + " description", new BigDecimal(price)));
     }
 }

@@ -7,7 +7,6 @@ import static org.mockito.Mockito.when;
 
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.catalog.ProductService;
-import com.ecomdemo.inventory.InventoryService;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,8 +44,7 @@ class ProductImportProcessorTest {
 
     @BeforeEach
     void setUp() {
-        processor = new ProductImportProcessor(
-                productService, new InventoryService(productService));
+        processor = new ProductImportProcessor(productService);
     }
 
     private static ProductCsvRow row(String name, String price, String stock) {
@@ -62,29 +60,29 @@ class ProductImportProcessorTest {
         void createsWhenTheNameIsNew() {
             when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
-            Product product = processor.process(row("Widget", "12.50", "4"));
+            ImportedProduct imported = processor.process(row("Widget", "12.50", "4"));
 
-            assertThat(product.getId()).as("a new product has no id yet").isNull();
-            assertThat(product.getName()).isEqualTo("Widget");
-            assertThat(product.getPrice()).isEqualByComparingTo("12.50");
-            assertThat(product.getStockQuantity()).isEqualTo(4);
-            assertThat(product.getCategory()).isEqualTo("TEST");
+            assertThat(imported.product().getId()).as("a new product has no id yet").isNull();
+            assertThat(imported.product().getName()).isEqualTo("Widget");
+            assertThat(imported.product().getPrice()).isEqualByComparingTo("12.50");
+            assertThat(imported.stockQuantity()).isEqualTo(4);
+            assertThat(imported.product().getCategory()).isEqualTo("TEST");
         }
 
         @Test
         @DisplayName("updates the existing product of that name, so a re-import is idempotent")
         void updatesWhenTheNameExists() {
-            Product existing = new Product("Widget", "old", new BigDecimal("1.00"), 1, "OLD");
+            Product existing = new Product("Widget", "old", new BigDecimal("1.00"), "OLD");
             when(productService.findFirstByName("Widget"))
                     .thenReturn(Optional.of(existing));
 
-            Product product = processor.process(row("Widget", "12.50", "4"));
+            ImportedProduct imported = processor.process(row("Widget", "12.50", "4"));
 
             // The SAME object comes back, mutated. That is what makes a restart safe: the rows of
             // a rolled-back chunk are read again, and processing them twice changes nothing.
-            assertThat(product).isSameAs(existing);
-            assertThat(product.getPrice()).isEqualByComparingTo("12.50");
-            assertThat(product.getStockQuantity()).isEqualTo(4);
+            assertThat(imported.product()).isSameAs(existing);
+            assertThat(imported.product().getPrice()).isEqualByComparingTo("12.50");
+            assertThat(imported.stockQuantity()).isEqualTo(4);
         }
 
         @Test
@@ -92,13 +90,13 @@ class ProductImportProcessorTest {
         void trimsAndNullsOutBlanks() {
             when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
-            Product product = processor.process(
+            ImportedProduct imported = processor.process(
                     new ProductCsvRow(1, "raw", "  Widget  ", "   ", " 12.50 ", " 4 ", ""));
 
-            assertThat(product.getName()).isEqualTo("Widget");
-            assertThat(product.getDescription()).isNull();
-            assertThat(product.getCategory()).isNull();
-            assertThat(product.getStockQuantity()).isEqualTo(4);
+            assertThat(imported.product().getName()).isEqualTo("Widget");
+            assertThat(imported.product().getDescription()).isNull();
+            assertThat(imported.product().getCategory()).isNull();
+            assertThat(imported.stockQuantity()).isEqualTo(4);
         }
 
         @Test
@@ -106,10 +104,10 @@ class ProductImportProcessorTest {
         void normalisesThePriceScale() {
             when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
-            Product product = processor.process(row("Widget", "12.5", "4"));
+            ImportedProduct imported = processor.process(row("Widget", "12.5", "4"));
 
-            assertThat(product.getPrice().scale()).isEqualTo(2);
-            assertThat(product.getPrice()).isEqualByComparingTo("12.50");
+            assertThat(imported.product().getPrice().scale()).isEqualTo(2);
+            assertThat(imported.product().getPrice()).isEqualByComparingTo("12.50");
         }
     }
 

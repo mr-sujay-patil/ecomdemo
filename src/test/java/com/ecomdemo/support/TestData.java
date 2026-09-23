@@ -26,8 +26,18 @@ public final class TestData {
     }
 
     /** A product with a fixed id, as if it had already been saved. */
+    /**
+     * A catalogue product with a fixed id.
+     *
+     * <p><strong>The stock argument is kept and ignored since Phase 20</strong>, deliberately.
+     * Stock left {@code Product} for {@code product_stock}, so there is no field here to set - but
+     * dozens of tests read as "a lamp, nine in stock", and rewriting every call site to drop the
+     * number would lose the only readable statement of what the scenario is about. Tests that
+     * actually depend on the quantity stub {@code InventoryService} for it; the rest are
+     * documenting intent, which this parameter still does.
+     */
     public static Product product(long id, String name, String price, int stockQuantity) {
-        Product product = new Product(name, name + " description", new BigDecimal(price), stockQuantity);
+        Product product = new Product(name, name + " description", new BigDecimal(price));
         ReflectionTestUtils.setField(product, "id", id);
         return product;
     }

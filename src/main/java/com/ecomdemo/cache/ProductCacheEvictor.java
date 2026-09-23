@@ -1,6 +1,6 @@
 package com.ecomdemo.cache;
 
-import com.ecomdemo.catalog.ProductStockChangedEvent;
+import com.ecomdemo.inventory.ProductStockChangedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;

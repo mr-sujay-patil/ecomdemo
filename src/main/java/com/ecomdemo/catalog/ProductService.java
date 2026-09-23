@@ -1,17 +1,18 @@
 package com.ecomdemo.catalog;
 
 import com.ecomdemo.catalog.internal.ProductRepository;
+import com.ecomdemo.inventory.InventoryService;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,15 +62,17 @@ public class ProductService {
      * domain logic and make this class harder to test for reasons having nothing to do with
      * products.
      */
-    private final ApplicationEventPublisher events;
 
     /**
      * Constructor injection: the dependency is final, the object cannot exist in a half-built
      * state, and the class can be instantiated in a plain unit test with {@code new}.
      */
-    public ProductService(ProductRepository productRepository, ApplicationEventPublisher events) {
+    private final InventoryService inventory;
+
+    public ProductService(ProductRepository productRepository,
+            InventoryService inventory) {
+        this.inventory = inventory;
         this.productRepository = productRepository;
-        this.events = events;
     }
 
     /**
@@ -81,7 +84,19 @@ public class ProductService {
      */
     @Cacheable(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'")
     public List<ProductResponse> findAll() {
-        return productRepository.findAll().stream().map(ProductResponse::from).toList();
+        List<Product> products = productRepository.findAll();
+
+        // ONE stock lookup for the whole listing, not one per product. This is the N+1 problem
+        // that the JOIN FETCH queries elsewhere in this application exist to avoid - and here it
+        // matters more than usual, because when inventory becomes a separate service this line
+        // becomes a single HTTP call rather than one per row.
+        Map<Long, Integer> quantities =
+                inventory.quantitiesFor(products.stream().map(Product::getId).toList());
+
+        return products.stream()
+                .map(product -> ProductResponse.from(
+                        product, quantities.getOrDefault(product.getId(), 0)))
+                .toList();
     }
 
     /**
@@ -93,7 +108,8 @@ public class ProductService {
      */
     @Cacheable(cacheNames = CacheNames.PRODUCT, key = "#id")
     public ProductResponse findById(Long id) {
-        return ProductResponse.from(requireProduct(id));
+        Product product = requireProduct(id);
+        return ProductResponse.from(product, inventory.quantityFor(id));
     }
 
     /**
@@ -104,9 +120,16 @@ public class ProductService {
     @Transactional
     public ProductResponse create(ProductRequest request) {
         Product product = new Product(
-                request.name(), request.description(), request.price(), request.stockQuantity(),
-                request.category());
-        return ProductResponse.from(productRepository.save(product));
+                request.name(), request.description(), request.price(), request.category());
+        Product saved = productRepository.save(product);
+
+        // The stock row is created here, by the code that creates the product, because there is
+        // no foreign key to do it - see the V11 migration for why adding one would be a liability
+        // rather than a guarantee. Inside one transaction today; two calls across a service
+        // boundary shortly, which is exactly the distributed write this phase has to face.
+        inventory.setStockLevel(saved.getId(), request.stockQuantity());
+
+        return ProductResponse.from(saved, request.stockQuantity());
     }
 
     /**
@@ -131,9 +154,12 @@ public class ProductService {
         product.setName(request.name());
         product.setDescription(request.description());
         product.setPrice(request.price());
-        product.setStockQuantity(request.stockQuantity());
         product.setCategory(request.category());
-        return ProductResponse.from(productRepository.save(product));
+        Product saved = productRepository.save(product);
+
+        inventory.setStockLevel(id, request.stockQuantity());
+
+        return ProductResponse.from(saved, request.stockQuantity());
     }
 
     /** A delete has to remove both: the entry for this id, and the listing that contained it. */
@@ -143,6 +169,7 @@ public class ProductService {
     @Transactional
     public void delete(Long id) {
         productRepository.delete(requireProduct(id));
+        inventory.forget(id);
     }
 
     /**
@@ -201,21 +228,13 @@ public class ProductService {
     /**
      * Saves many products at once, for the batch import.
      *
-     * <p>Separate from {@link #save(Product)} on purpose: that one publishes
-     * {@code ProductStockChangedEvent} because it is the checkout's stock path, and doing so per
-     * row here would fire one cache eviction per imported product — thousands of them for a large
-     * feed, to invalidate a cache that the import's own scale has already made useless. The
-     * import's blunt instrument is the right one: it changes the catalogue wholesale, and the
-     * entries expire on their TTL.
+     * <p>Bulk rather than one-by-one, and deliberately without any cache eviction of its own: the
+     * import changes the catalogue wholesale and {@code ProductUpsertWriter} evicts once at the
+     * end of the step. Firing an eviction per row would be thousands of them to invalidate a cache
+     * that the import's scale has already made useless.
      */
     @Transactional
     public void saveAll(Iterable<? extends Product> products) {
         productRepository.saveAll(products);
-    }
-
-    @Transactional
-    public void save(Product product) {
-        productRepository.save(product);
-        events.publishEvent(new ProductStockChangedEvent(product.getId()));
     }
 }

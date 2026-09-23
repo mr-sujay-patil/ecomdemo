@@ -7,8 +7,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -69,8 +74,17 @@ class OrderPlacementServiceTest {
     @Mock
     private CartService cartService;
 
+    /**
+     * Mocked since Phase 20, where {@code TestData.product} was real.
+     *
+     * <p>Stock left {@code Product} for {@code product_stock}, so there is no field on the entity
+     * for a real {@code InventoryService} to change and nothing for an assertion to read back. The
+     * arithmetic those assertions used to make now belongs to {@code InventoryServiceTest}, which
+     * tests it against a database. What is left here is this class's own share: that checkout asks
+     * for every line to be checked before any line is reserved, and reserves each exactly once.
+     */
     @Mock
-    private ProductService productService;
+    private InventoryService inventory;
 
     @Mock
     private OrderAuditService orderAuditService;
@@ -105,7 +119,7 @@ class OrderPlacementServiceTest {
                 new OrderPlacementService(
                         orderRepository,
                         cartService,
-                        new InventoryService(productService),
+                        inventory,
                         orderAuditService,
                         currentUser,
                         outbox);
@@ -137,10 +151,11 @@ class OrderPlacementServiceTest {
         assertThat(placed.items())
                 .extracting(OrderItemResponse::productId, OrderItemResponse::quantity)
                 .containsExactly(tuple(10L, 2), tuple(11L, 3));
-        assertThat(lamp.getStockQuantity()).isEqualTo(7);
-        assertThat(cable.getStockQuantity()).isEqualTo(1);
-        verify(productService).save(lamp);
-        verify(productService).save(cable);
+        // The arithmetic moved to InventoryServiceTest with the column. What checkout is
+        // responsible for is asking for the right reservation for each line - the id, the name the
+        // error message would need, and the quantity - and asking exactly once per line.
+        verify(inventory).reserve(10L, "Lamp", 2);
+        verify(inventory).reserve(11L, "Cable", 3);
         verify(cartService).clearCart(cart);
     }
 
@@ -184,12 +199,16 @@ class OrderPlacementServiceTest {
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 3));
 
+        // Inventory owns the shortfall and the message since Phase 20. What checkout owns is
+        // letting it out unchanged, and writing nothing once it has been thrown.
+        doThrow(new InsufficientStockException("Lamp", 3, 2))
+                .when(inventory).requireAvailable(10L, "Lamp", 3);
+
         // When / Then
         assertThatThrownBy(() -> placementService.placeOnce())
                 .isInstanceOf(InsufficientStockException.class)
                 .isInstanceOf(ConflictException.class)
                 .hasMessage("Insufficient stock for 'Lamp': requested 3, available 2");
-        assertThat(lamp.getStockQuantity()).isEqualTo(2);
         verify(orderRepository, never()).save(any());
         verify(cartService, never()).clearCart(any());
     }
@@ -204,13 +223,20 @@ class OrderPlacementServiceTest {
         cart.addItem(lamp, 2);
         cart.addItem(cable, 3);
         when(cartService.currentCart()).thenReturn(cart);
+        // Both lines stated explicitly: the first passes its check, the second does not. Mockito's
+        // strict stubbing insists on it, and the test is clearer for it - the scenario IS "line one
+        // is fine, line two is short".
+        doNothing().when(inventory).requireAvailable(10L, "Lamp", 2);
+        doThrow(new InsufficientStockException("Cable", 3, 1))
+                .when(inventory).requireAvailable(11L, "Cable", 3);
 
         // When / Then
         assertThatThrownBy(() -> placementService.placeOnce())
                 .isInstanceOf(InsufficientStockException.class);
-        assertThat(lamp.getStockQuantity()).isEqualTo(9);
-        assertThat(cable.getStockQuantity()).isEqualTo(1);
-        verify(productService, never()).save(any());
+
+        // The point of the test, restated for the split: checking every line BEFORE reserving any
+        // is what stops a short cart leaving a partial reduction behind. Nothing was reserved.
+        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
     }
 
     @Test
@@ -225,7 +251,6 @@ class OrderPlacementServiceTest {
         OrderResponse placed = placementService.placeOnce();
 
         // Then
-        assertThat(lamp.getStockQuantity()).isZero();
         assertThat(placed.totalAmount()).isEqualByComparingTo("3000.00");
     }
 
@@ -250,6 +275,11 @@ class OrderPlacementServiceTest {
         // Given
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 3));
+
+        // Inventory owns the shortfall and the message since Phase 20. What checkout owns is
+        // letting it out unchanged, and writing nothing once it has been thrown.
+        doThrow(new InsufficientStockException("Lamp", 3, 2))
+                .when(inventory).requireAvailable(10L, "Lamp", 3);
 
         // When / Then
         assertThatThrownBy(() -> placementService.placeOnce())

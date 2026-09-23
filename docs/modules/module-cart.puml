@@ -9,9 +9,9 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Catalog, "Catalog", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Catalog, "Catalog", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Customer, "Customer", $techn="Module", $descr="", $tags="", $link="")
 }
 

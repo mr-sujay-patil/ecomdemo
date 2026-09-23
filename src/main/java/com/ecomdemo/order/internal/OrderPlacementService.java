@@ -93,7 +93,9 @@ class OrderPlacementService {
 
             List<CartItem> lines = cart.getItems();
             for (CartItem line : lines) {
-                inventory.requireAvailable(line.getProduct(), line.getQuantity());
+                Product lineProduct = line.getProduct();
+                inventory.requireAvailable(
+                        lineProduct.getId(), lineProduct.getName(), line.getQuantity());
             }
 
             // The cart came from currentCart(), which found it by the authenticated user, so
@@ -105,7 +107,7 @@ class OrderPlacementService {
                 Product product = line.getProduct();
                 order.addItem(
                         product.getId(), product.getName(), product.getPrice(), line.getQuantity());
-                inventory.reserve(product, line.getQuantity());
+                inventory.reserve(product.getId(), product.getName(), line.getQuantity());
             }
 
             Order placed = orderRepository.save(order);

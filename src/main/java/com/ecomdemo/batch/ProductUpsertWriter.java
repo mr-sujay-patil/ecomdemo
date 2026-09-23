@@ -3,7 +3,9 @@ package com.ecomdemo.batch;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.inventory.InventoryService;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -49,27 +51,44 @@ import org.springframework.cache.CacheManager;
  * {@link #updatedIds} belongs to one step execution. A singleton would have two concurrent
  * imports sharing — and clearing — each other's set.
  */
-class ProductUpsertWriter implements ItemWriter<Product>, StepExecutionListener {
+class ProductUpsertWriter implements ItemWriter<ImportedProduct>, StepExecutionListener {
 
     private static final Logger log = LoggerFactory.getLogger(ProductUpsertWriter.class);
 
     private final ProductService catalogue;
+    private final InventoryService inventory;
     private final CacheManager cacheManager;
     private final Set<Long> updatedIds = new LinkedHashSet<>();
 
-    ProductUpsertWriter(ProductService catalogue, CacheManager cacheManager) {
+    ProductUpsertWriter(ProductService catalogue, InventoryService inventory,
+            CacheManager cacheManager) {
         this.catalogue = catalogue;
+        this.inventory = inventory;
         this.cacheManager = cacheManager;
     }
 
     @Override
-    public void write(Chunk<? extends Product> chunk) {
-        for (Product product : chunk) {
+    public void write(Chunk<? extends ImportedProduct> chunk) {
+        List<Product> products = chunk.getItems().stream().map(ImportedProduct::product).toList();
+
+        for (Product product : products) {
             if (product.getId() != null) {
                 updatedIds.add(product.getId());
             }
         }
-        catalogue.saveAll(chunk.getItems());
+
+        // The products first, because an insert has no id until it is saved and stock is keyed by
+        // product id. Both writes are in this chunk's transaction, so a failure rolls the pair
+        // back together - which is the LAST time that will be true. Once the catalogue and the
+        // inventory are separate services these become two calls to two databases with no shared
+        // transaction, and the partial-failure window is recorded as a known gap rather than
+        // pretended away.
+        catalogue.saveAll(products);
+
+        for (ImportedProduct imported : chunk) {
+            inventory.setStockLevel(imported.product().getId(), imported.stockQuantity());
+            updatedIds.add(imported.product().getId());
+        }
     }
 
     @Override

@@ -6,6 +6,6 @@
 |_Services_
 
 * `c.e.i.InventoryService`
-|Bean references
-|* `c.e.c.ProductService` (in Catalog)
+|Aggregate roots
+|* `c.e.i.ProductStock`
 |===

@@ -33,13 +33,27 @@ public record ProductResponse(
                 example = "PERIPHERALS", nullable = true)
         String category) {
 
-    public static ProductResponse from(Product product) {
+    /**
+     * Builds the response from a product and the stock somebody else supplied.
+     *
+     * <p><strong>The quantity is a parameter since Phase 20</strong>, because the catalogue no
+     * longer holds it — {@code product_stock} is the inventory module's table, and shortly the
+     * inventory service's database. The API shape is unchanged, which is deliberate: this is an
+     * internal split, and no client should be able to tell that the number now comes from
+     * somewhere else.
+     *
+     * <p>Taking it as a parameter rather than looking it up here is what keeps that lookup
+     * BATCHED. A listing of forty products asks inventory once; a version of this method that
+     * fetched its own number would ask forty times, which is N+1 today and forty HTTP round trips
+     * once the services are apart.
+     */
+    public static ProductResponse from(Product product, int stockQuantity) {
         return new ProductResponse(
                 product.getId(),
                 product.getName(),
                 product.getDescription(),
                 product.getPrice(),
-                product.getStockQuantity(),
+                stockQuantity,
                 product.getCategory());
     }
 }

@@ -37,9 +37,6 @@ public class Product {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal price;
 
-    @Column(name = "stock_quantity", nullable = false)
-    private int stockQuantity;
-
     /**
      * Optional catalogue category, added by Flyway migration V3.
      *
@@ -53,6 +50,12 @@ public class Product {
 
     /**
      * The optimistic lock, maintained by Hibernate and never touched by application code.
+     *
+     * <p><strong>Since Phase 20 this guards the catalogue only.</strong> Stock moved to
+     * {@code product_stock}, which carries a version of its own, so the contention that used to
+     * collide here — two checkouts racing for the last unit — collides there instead. What is left
+     * on this row is the rarer kind: two administrators editing the same product. The two no
+     * longer interfere, which they did while one column on this row changed on every sale.
      *
      * <p>Every UPDATE of a product carries {@code AND version = ?} and raises the counter. If two
      * checkouts read the same product and both reduce its stock, the second UPDATE matches no row
@@ -77,36 +80,15 @@ public class Product {
         // required by JPA
     }
 
-    public Product(String name, String description, BigDecimal price, int stockQuantity) {
-        this(name, description, price, stockQuantity, null);
+    public Product(String name, String description, BigDecimal price) {
+        this(name, description, price, null);
     }
 
-    public Product(String name, String description, BigDecimal price, int stockQuantity,
-            String category) {
+    public Product(String name, String description, BigDecimal price, String category) {
         this.name = name;
         this.description = description;
         this.price = price;
-        this.stockQuantity = stockQuantity;
         this.category = category;
-    }
-
-    /**
-     * Reduces stock by {@code quantity}.
-     *
-     * @throws IllegalArgumentException if the reduction would make stock negative; callers are
-     *     expected to have checked availability first
-     */
-    public void reduceStock(int quantity) {
-        if (quantity > stockQuantity) {
-            throw new IllegalArgumentException(
-                    "Cannot reduce stock of '%s' by %d: only %d available"
-                            .formatted(name, quantity, stockQuantity));
-        }
-        this.stockQuantity -= quantity;
-    }
-
-    public boolean hasStockFor(int quantity) {
-        return stockQuantity >= quantity;
     }
 
     public Long getId() {
@@ -135,14 +117,6 @@ public class Product {
 
     public void setPrice(BigDecimal price) {
         this.price = price;
-    }
-
-    public int getStockQuantity() {
-        return stockQuantity;
-    }
-
-    public void setStockQuantity(int stockQuantity) {
-        this.stockQuantity = stockQuantity;
     }
 
     public String getCategory() {
