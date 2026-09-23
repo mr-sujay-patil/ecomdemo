@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.catalog.Product;
+import com.ecomdemo.support.TestData;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Optional;
@@ -90,17 +91,19 @@ class CartRepositoryTest {
         Product lamp = persistProduct("Lamp", "1500.00", 9);
         Product cable = persistProduct("Cable", "100.50", 4);
         Cart cart = new Cart(owner);
-        cart.addItem(lamp, 2);
-        cart.addItem(cable, 3);
+        TestData.addTo(cart, lamp, 2);
+        TestData.addTo(cart, cable, 3);
         entityManager.persistAndFlush(cart);
         entityManager.clear();
 
         // When
         Cart found = cartRepository.findByUserId(owner.getId()).orElseThrow();
 
-        // Then: the JOIN FETCH has already brought back the items and the products behind them
+        // Then: the JOIN FETCH brings back the items. Since Phase 20 there are no products
+        // BEHIND them - each line remembers the name and price it was added at - so what this
+        // asserts is that the lines came back with the cart, which is what the fetch is for.
         assertThat(found.getItems())
-                .extracting(item -> item.getProduct().getName(), CartItem::getQuantity)
+                .extracting(CartItem::getProductName, CartItem::getQuantity)
                 .containsExactlyInAnyOrder(tuple("Lamp", 2), tuple("Cable", 3));
         assertThat(found.total()).isEqualByComparingTo("3301.50");
     }
@@ -110,9 +113,9 @@ class CartRepositoryTest {
         // Given: a collection join multiplies the parent row by the number of children, which is
         // what the "distinct" in the query is there to collapse
         Cart cart = new Cart(owner);
-        cart.addItem(persistProduct("Lamp", "1500.00", 9), 1);
-        cart.addItem(persistProduct("Cable", "100.50", 4), 1);
-        cart.addItem(persistProduct("Mouse", "3499.00", 7), 1);
+        TestData.addTo(cart, persistProduct("Lamp", "1500.00", 9), 1);
+        TestData.addTo(cart, persistProduct("Cable", "100.50", 4), 1);
+        TestData.addTo(cart, persistProduct("Mouse", "3499.00", 7), 1);
         entityManager.persistAndFlush(cart);
         entityManager.clear();
 
@@ -131,7 +134,7 @@ class CartRepositoryTest {
         User other = entityManager.persistAndFlush(
                 new User("other", "{not-a-real-hash}", "Other", Role.CUSTOMER, Instant.now()));
         Cart theirs = new Cart(other);
-        theirs.addItem(persistProduct("Lamp", "1500.00", 9), 1);
+        TestData.addTo(theirs, persistProduct("Lamp", "1500.00", 9), 1);
         entityManager.persistAndFlush(theirs);
         entityManager.clear();
 

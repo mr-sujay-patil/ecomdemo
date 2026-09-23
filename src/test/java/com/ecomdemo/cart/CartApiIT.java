@@ -77,6 +77,47 @@ class CartApiIT extends IntegrationTest {
     }
 
     @Test
+    @DisplayName("a cart line keeps the price it was added at, even after the catalogue changes")
+    void aLineKeepsThePriceItWasAddedAt() {
+        // THE BEHAVIOUR CHANGE OF PHASE 20, pinned so it cannot silently revert.
+        //
+        // Before this phase a cart line held @ManyToOne Product and priced itself from the live
+        // row, so editing a price repriced every existing cart. The cart is going to order-service
+        // and the product to catalog-service, with a database each, so that association cannot
+        // survive - a line now remembers the name and price it was added at.
+        //
+        // That is a real change and it is not strictly better; it is the trade a distributed
+        // system makes. A cart that repriced itself would need a call to the catalogue on every
+        // read of the hottest path there is. It is also arguably the more honest behaviour: the
+        // price a shopper was shown is the price they expect at checkout.
+        ProductResponse lamp = product("IT Repricing Lamp", "100.00", 10);
+        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(lamp.id(), 2),
+                CartResponse.class);
+
+        // The catalogue changes underneath the cart.
+        admin.put("/api/products/" + lamp.id(),
+                new ProductRequest("IT Repricing Lamp", "repriced", new BigDecimal("999.00"), 10,
+                        "IT"));
+        assertThat(admin.getForObject("/api/products/" + lamp.id(), ProductResponse.class).price())
+                .as("the catalogue really did change")
+                .isEqualByComparingTo("999.00");
+
+        // The cart did not follow it.
+        CartResponse reloaded = cart();
+        assertThat(reloaded.items())
+                .singleElement()
+                .satisfies(item -> {
+                    assertThat(item.unitPrice())
+                            .as("the line keeps the price it was added at")
+                            .isEqualByComparingTo("100.00");
+                    assertThat(item.productName()).isEqualTo("IT Repricing Lamp");
+                });
+        assertThat(reloaded.totalAmount())
+                .as("and so does the total: 2 x 100.00, not 2 x 999.00")
+                .isEqualByComparingTo("200.00");
+    }
+
+    @Test
     @DisplayName("an item added over HTTP is still there on the next request")
     void addItemPersists() {
         ProductResponse mouse = product("IT Mouse", "25.00", 10);

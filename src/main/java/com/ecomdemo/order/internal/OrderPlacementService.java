@@ -8,7 +8,6 @@ import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.Product;
 import com.ecomdemo.inventory.InventoryService;
 import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
@@ -93,9 +92,8 @@ class OrderPlacementService {
 
             List<CartItem> lines = cart.getItems();
             for (CartItem line : lines) {
-                Product lineProduct = line.getProduct();
                 inventory.requireAvailable(
-                        lineProduct.getId(), lineProduct.getName(), line.getQuantity());
+                        line.getProductId(), line.getProductName(), line.getQuantity());
             }
 
             // The cart came from currentCart(), which found it by the authenticated user, so
@@ -104,10 +102,15 @@ class OrderPlacementService {
             // somebody else's name, because neither is ever named in a request.
             Order order = new Order(Instant.now(), currentUser.require());
             for (CartItem line : lines) {
-                Product product = line.getProduct();
+                // Both the order line and the reservation are built from the CART's snapshot, not
+                // from the catalogue. Checkout no longer reads a product at all - which is what
+                // lets order-service place an order without calling catalog-service, and is worth
+                // noticing: the price charged is the price the shopper was shown.
                 order.addItem(
-                        product.getId(), product.getName(), product.getPrice(), line.getQuantity());
-                inventory.reserve(product.getId(), product.getName(), line.getQuantity());
+                        line.getProductId(), line.getProductName(), line.getUnitPrice(),
+                        line.getQuantity());
+                inventory.reserve(
+                        line.getProductId(), line.getProductName(), line.getQuantity());
             }
 
             Order placed = orderRepository.save(order);

@@ -80,11 +80,23 @@ public final class TestData {
         return cart;
     }
 
-    /** A cart holding one line: {@code quantity} of {@code product}. */
+    /**
+     * A cart holding one line: {@code quantity} of {@code product}.
+     *
+     * <p>Still takes a {@code Product} for readability at the call sites, and snapshots it the way
+     * {@code CartService} does. Since Phase 20 the cart stores remembered values rather than an
+     * association, so what a test builds here is a line that will NOT follow a later price change
+     * - which is the behaviour under test in {@code CartServiceTest}.
+     */
     public static Cart cartWith(long id, Product product, int quantity) {
         Cart cart = cart(id);
-        cart.addItem(product, quantity);
+        addTo(cart, product, quantity);
         return cart;
+    }
+
+    /** Adds a product to a cart the way {@code CartService} does: as a snapshot. */
+    public static void addTo(Cart cart, Product product, int quantity) {
+        cart.addItem(product.getId(), product.getName(), product.getPrice(), quantity);
     }
 
     /** An order with a fixed id, placed now by {@link #customer()}. */

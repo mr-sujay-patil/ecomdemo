@@ -2,7 +2,6 @@ package com.ecomdemo.cart;
 
 import com.ecomdemo.cart.internal.CartRepository;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.catalog.Product;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -68,11 +67,23 @@ public class Cart {
     }
 
     /** Adds the quantity to an existing line for this product, or creates a new line. */
-    public void addItem(Product product, int quantity) {
-        findItem(product.getId())
+    /**
+     * Adds a line, or increases the one already there.
+     *
+     * <p>Takes the product's values rather than a {@code Product} since Phase 20: this entity no
+     * longer holds an association to the catalogue, and passing one in would only put it back.
+     * {@code CartService} does the lookup and hands over what it found.
+     *
+     * <p>Note what increasing an existing line does NOT do: it does not refresh the remembered
+     * price. Adding a second unit of something already in the cart keeps the price the first unit
+     * was added at, which is the same rule the rest of this change follows.
+     */
+    public void addItem(Long productId, String productName, BigDecimal unitPrice, int quantity) {
+        findItem(productId)
                 .ifPresentOrElse(
                         item -> item.increaseQuantity(quantity),
-                        () -> items.add(new CartItem(this, product, quantity)));
+                        () -> items.add(
+                                new CartItem(this, productId, productName, unitPrice, quantity)));
     }
 
     public void updateQuantity(CartItem item, int quantity) {
@@ -89,7 +100,7 @@ public class Cart {
 
     public Optional<CartItem> findItem(Long productId) {
         return items.stream()
-                .filter(item -> item.getProduct().getId().equals(productId))
+                .filter(item -> item.getProductId().equals(productId))
                 .findFirst();
     }
 

@@ -81,8 +81,8 @@ class CartServiceTest {
         void view_whenTheCartHasLines_returnsThemWithAServerCalculatedTotal() {
             // Given: 2 x 1500.00 plus 3 x 100.50
             Cart cart = TestData.cart(1L);
-            cart.addItem(TestData.product(10L, "Lamp", "1500.00", 9), 2);
-            cart.addItem(TestData.product(11L, "Cable", "100.50", 9), 3);
+            TestData.addTo(cart, TestData.product(10L, "Lamp", "1500.00", 9), 2);
+            TestData.addTo(cart, TestData.product(11L, "Cable", "100.50", 9), 3);
             givenTheCallersCartIs(cart);
 
             // When
@@ -206,8 +206,8 @@ class CartServiceTest {
         void removeItem_whenTheLineExists_dropsItAndLeavesTheOthers() {
             // Given
             Cart cart = TestData.cart(1L);
-            cart.addItem(TestData.product(10L, "Lamp", "1500.00", 9), 2);
-            cart.addItem(TestData.product(11L, "Cable", "100.50", 9), 3);
+            TestData.addTo(cart, TestData.product(10L, "Lamp", "1500.00", 9), 2);
+            TestData.addTo(cart, TestData.product(11L, "Cable", "100.50", 9), 3);
             givenTheCallersCartIs(cart);
 
             // When

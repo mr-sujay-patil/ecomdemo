@@ -66,8 +66,11 @@ public class CartService {
     /** Adding a product already in the cart increases that line rather than duplicating it. */
     public CartResponse addItem(AddCartItemRequest request) {
         Cart cart = currentCart();
+        // The catalogue lookup stays here, and it is the line that becomes an HTTP call when the
+        // two are separate services. What it produces is a SNAPSHOT handed to the cart, so
+        // everything downstream of this point works on remembered values.
         Product product = productService.requireProduct(request.productId());
-        cart.addItem(product, request.quantity());
+        cart.addItem(product.getId(), product.getName(), product.getPrice(), request.quantity());
         return saveAndView(cart);
     }
 

@@ -24,9 +24,9 @@ public record CartItemResponse(
 
     public static CartItemResponse from(CartItem item) {
         return new CartItemResponse(
-                item.getProduct().getId(),
-                item.getProduct().getName(),
-                item.getProduct().getPrice(),
+                item.getProductId(),
+                item.getProductName(),
+                item.getUnitPrice(),
                 item.getQuantity(),
                 item.lineTotal());
     }

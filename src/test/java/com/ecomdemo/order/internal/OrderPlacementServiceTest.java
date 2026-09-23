@@ -136,8 +136,8 @@ class OrderPlacementServiceTest {
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
         Product cable = TestData.product(11L, "Cable", "100.50", 4);
         Cart cart = TestData.cart(1L);
-        cart.addItem(lamp, 2);
-        cart.addItem(cable, 3);
+        TestData.addTo(cart, lamp, 2);
+        TestData.addTo(cart, cable, 3);
         when(cartService.currentCart()).thenReturn(cart);
         when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
@@ -220,8 +220,8 @@ class OrderPlacementServiceTest {
         Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
         Product cable = TestData.product(11L, "Cable", "100.50", 1);
         Cart cart = TestData.cart(1L);
-        cart.addItem(lamp, 2);
-        cart.addItem(cable, 3);
+        TestData.addTo(cart, lamp, 2);
+        TestData.addTo(cart, cable, 3);
         when(cartService.currentCart()).thenReturn(cart);
         // Both lines stated explicitly: the first passes its check, the second does not. Mockito's
         // strict stubbing insists on it, and the test is clearer for it - the scenario IS "line one
