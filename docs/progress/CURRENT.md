@@ -5,11 +5,10 @@
 - **Updated:** 2026-09-23
 - **Phase:** 20: Microservices Split (multi-service architecture)
 - **Branch:** feature/phase-20-microservices
-- **Step:** PLANNING
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES — the user asked for `plan first`. The plan is
-  `docs/phases/phase-20-plan.md`. DO NOT WRITE CODE until they approve it.
+- **Waiting for user:** NO — the plan (`docs/phases/phase-20-plan.md`) was APPROVED 2026-09-23.
 
 ## Phase 19 merge verification (PASSED 2026-09-23)
 PR #24 merged as 6e96292, then follow-up PR #25 as ddc86f9 (parents 6e96292 + 672721d) for the two
@@ -55,8 +54,9 @@ Both are planned to happen INSIDE the monolith first (plan steps 2 and 3), while
 270-check smoke test still applies end to end.
 
 ## Last test run
-- 2026-09-23 (on `main`, Phase 19 merge verification): `./mvnw clean verify` -> 319 + 82, 0
-  failures, 0 skipped, 1m31s. `scripts/smoke-test.sh` -> 270 passed, 0 failed, 0 skipped.
+- 2026-09-23 (step 2 complete): `./mvnw clean verify` -> **334 + 82**, 0 failures, 0 skipped,
+  1m23s. `scripts/smoke-test.sh` -> **270 passed, 0 failed, 0 skipped - UNCHANGED**, which is the
+  whole point of doing the data split inside the monolith.
 
 ## Open issues / blockers
 - The Phase 15 manual check (Grafana render, Kafka UI) is CLOSED - verified by the user on
@@ -70,18 +70,47 @@ Both are planned to happen INSIDE the monolith first (plan steps 2 and 3), while
   `docker compose up -d --force-recreate grafana`; (b) the admin password persists on the
   `grafana-data` volume and repeated 401s trip a 5-minute brute-force lockout.
 
-## Decisions this phase
-- (none yet — the plan is not approved)
+## Progress against the plan's §8 order
+NOTE: steps 2 and 3 are being done BEFORE step 1, stated to the user and agreed. The Maven
+restructure buys nothing for the two data changes, and doing them while the build is untouched
+keeps the 270-check net at its most trustworthy.
+
+- [x] **Step 2 - split product_stock out of product.** V11 migration, no foreign key (the tables
+      are about to be in different databases), missing row reads as zero. THE DEPENDENCY INVERTED:
+      InventoryService deals in product ids and never sees a Product, so `inventory -> catalog` is
+      gone and `catalog -> inventory` replaces it. The optimistic lock moved with the column.
+      StockMutationRulesTest now names ONE module, which is exactly what Phase 19 predicted.
+      The CSV import gained `ImportedProduct` because a processor cannot set stock on an unsaved
+      product. `./mvnw clean verify` -> 334 + 82, 0 failures. Smoke -> **270 passed, unchanged**.
+- [ ] **Step 3 - CartItem drops its FK to product**, snapshots name and price like OrderItem.
+- [ ] Step 1 - Maven multi-module skeleton (parent + common).
+- [ ] Steps 4-7 - extract the five services, compose, rebuild the smoke test per service.
+
+## Decisions this phase (to be copied into docs/decisions.md)
+- product_stock is a separate table with NO foreign key to product, because the two are about to
+  be in different databases; a missing row means zero.
+- The optimistic lock moved to product_stock, which sharpens it: it used to make a checkout
+  collide with an administrator editing a description.
+- InventoryService takes the product NAME as a parameter for its error message, because it can no
+  longer look one up. The first small tax of the split, and the honest one to pay.
+- ProductResponse takes stock as a PARAMETER so the lookup stays batched - one call for a listing,
+  not one per row, which becomes N+1 HTTP round trips after the split.
+- @MockitoBean does NOT work for ApplicationEventPublisher (Spring resolves it as the context
+  itself, not a bean). @RecordApplicationEvents is the right tool and tests the real publication.
 
 ## Environment left behind
-Docker Desktop running; the compose stack is **DOWN**. Named volumes intact, schema **V10**.
+Docker Desktop running; the compose stack is **UP** (nine containers), schema now **V11**.
 The SonarQube stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-STOPPED, awaiting approval of `docs/phases/phase-20-plan.md`.
-- If they approve -> step 5 (IMPLEMENTING), working the plan's §8 order. Steps 2 and 3 of that
-  order (the product/product_stock split and CartItem dropping its FK) happen INSIDE the monolith
-  BEFORE any service is extracted, deliberately, so the riskiest data changes land while the
-  270-check smoke test still covers them end to end.
-- If they want changes -> revise the plan, stay in PLANNING.
-- Do NOT write code before approval.
+Step 3: `CartItem` drops `@ManyToOne Product` and the `fk_cart_item_product` foreign key, and
+snapshots productName and unitPrice the way `OrderItem` already does. A migration is needed to add
+the columns and drop the constraint.
+
+BEHAVIOUR CHANGE to state in the PR and the test report: the cart currently reflects TODAY's
+catalogue because it joins to the live product on every load. Afterwards it reflects the catalogue
+as at add-to-cart time. That is eventual consistency arriving where it always arrives first - in a
+read that used to be a join. The smoke test asserts cart totals, so watch for checks that assume a
+price change is picked up by an existing cart.
+
+Then step 1 (Maven multi-module), then the extractions.
