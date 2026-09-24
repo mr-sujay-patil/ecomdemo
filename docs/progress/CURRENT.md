@@ -128,20 +128,29 @@ keeps the 270-check net at its most trustworthy.
   itself, not a bean). @RecordApplicationEvents is the right tool and tests the real publication.
 
 ## Environment left behind
-Docker Desktop running; the compose stack is **UP** (nine containers), schema now **V11**.
-The SonarQube stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
+Docker Desktop is RUNNING but the compose stack is **DOWN** - Docker Desktop had quit entirely at
+one point (`./mvnw verify` failed with "Could not find a valid Docker environment", which is
+Testcontainers having no daemon rather than a code failure) and was restarted with `open -a Docker`.
+Named volumes are intact; schema on them is **V12**. The SonarQube stack is stopped. `.env` holds
+a real JWT_SECRET and is gitignored.
+
+Also worth knowing: this machine briefly denied access to the whole project directory mid-session
+(macOS TCC on ~/Documents - `ls` and reads returned "Operation not permitted" while writes to new
+files still worked). It cleared on its own. If it recurs, it is a Files-and-Folders permission for
+the terminal app, not anything in the repo.
 
 ## Next action
-ALL 20a WORK AND DOCUMENTATION IS COMMITTED. What is left before the PR:
+STOPPED at the mandatory post-PR stop point for **20a**. PR #26 is open and CI is green.
+- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, and
+  **NO TAG** - see the split note at the top. Then cut `feature/phase-20b-microservices` from the
+  new `main` and work plan §8 steps 4-8.
+- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
+- Do NOT merge unless they say so explicitly.
+- The smoke test needs the stack: `docker compose up -d --build --wait`, then
+  `docker compose up -d --force-recreate grafana` (the branch-checkout inode trap from Phase 16).
 
-1. Re-run the testing protocol in full on this branch, because the docs commit is the only thing
-   that has landed since the last green run - `./mvnw clean verify` (expect **334 + 83**) and
-   `scripts/smoke-test.sh` (expect **270 passed**, with the stack up).
-2. `git push` and `gh pr create --base main`. PR title: **`Phase 20a: Preparing the microservices
-   split`** - NOT the phase file's `Phase 20: Microservices Split`, because this is half of it.
-3. STOP at the post-PR stop point.
-
-Delivered in 20a (all green at the last run): V11 splits product_stock (inventory stopped
+Delivered in 20a (all green: `./mvnw clean verify` -> **334 + 83**, `scripts/smoke-test.sh` ->
+**270 passed, unchanged**): V11 splits product_stock (inventory stopped
 depending on catalog - `catalog -> inventory` now), V12 makes cart_item snapshot the product
 (`order -> catalog` disappeared entirely, and a cart now keeps the price it was added at), and the
 build is a reactor (parent + `common` library + `ecomdemo-app`). Report:
