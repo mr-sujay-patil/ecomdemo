@@ -105,6 +105,23 @@
 		</dependency>
 
 		<!--
+			A real PostgreSQL for ConcurrentReservationTest. The optimistic lock on product_stock is
+			the reason stock got its own row in Phase 20a, and a lock is not something H2 in
+			PostgreSQL-compatibility mode can be trusted to reproduce - the same judgement Phase 7
+			made when it put the checkout race on a container.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
 			For StockMutationRulesTest, which asserts that nothing inside this service writes stock
 			behind InventoryService. Declared directly rather than inherited through Spring
 			Modulith: this service has one module and no use for the rest of what Modulith does.

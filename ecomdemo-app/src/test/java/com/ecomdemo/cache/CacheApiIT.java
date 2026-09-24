@@ -49,13 +49,24 @@ class CacheApiIT extends IntegrationTest {
     private com.ecomdemo.catalog.ProductService productService;
 
     /**
-     * Since Phase 20 the stock-changed event is published by the INVENTORY module, with the column
-     * it describes. These two tests care only that the AFTER_COMMIT listener fires on a commit and
-     * not on a rollback, so what matters is that something publishes the event inside a
-     * transaction - a reservation now does.
+     * <strong>Phase 20b changed what these two tests can prove, and the change is worth reading.</strong>
+     *
+     * <p>They used to reserve stock inside a transaction and assert that the cache was evicted on
+     * a commit and untouched on a rollback. Reserving is an HTTP call to inventory-service now, so
+     * that setup would need a second application running — and the thing under test was never the
+     * reservation. It was the LISTENER's timing.
+     *
+     * <p>That timing has moved out of this application altogether: the AFTER_COMMIT guarantee is
+     * enforced at the publisher in inventory-service, which holds the Kafka send until its own
+     * transaction commits. It is asserted there, in {@code InventoryServiceTest}, where the
+     * transaction actually is.
+     *
+     * <p>What is left here is the eviction itself — given the message, the entries go. The
+     * evictor is driven directly, which is honest about what this test now covers rather than
+     * keeping a transaction around it that no longer means anything.
      */
     @Autowired
-    private com.ecomdemo.inventory.InventoryService inventoryService;
+    private ProductCacheEvictor evictor;
 
     @Autowired
     private TransactionTemplate transactions;
@@ -365,7 +376,7 @@ class CacheApiIT extends IntegrationTest {
         changePriceBehindTheCache(product.id(), "4242.00");
 
         transactions.execute(status -> {
-            inventoryService.reserve(product.id(), "cache test", 1);
+            evictor.onStockChanged(new ProductCacheEvictor.ProductStockChanged(product.id()));
             status.setRollbackOnly();
             return null;
         });
@@ -386,7 +397,7 @@ class CacheApiIT extends IntegrationTest {
         changePriceBehindTheCache(product.id(), "4242.00");
 
         transactions.execute(status -> {
-            inventoryService.reserve(product.id(), "cache test", 1);
+            evictor.onStockChanged(new ProductCacheEvictor.ProductStockChanged(product.id()));
             return null;
         });
 

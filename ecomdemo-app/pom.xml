@@ -317,10 +317,16 @@
 			`ClassNotFoundException: org.springframework.boot.restclient.RestTemplateBuilder`.
 			Test scope, because it is the test client that needs it and not the application.
 		-->
+		<!--
+			COMPILE scope since Phase 20b, and the change is the split becoming visible in the
+			build. The comment above described this as a TEST dependency because "this application
+			never makes an outbound HTTP call" - which stopped being true the moment inventory
+			became a service. InventoryClient needs the auto-configured RestClient.Builder at
+			runtime, not just in tests.
+		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-restclient</artifactId>
-			<scope>test</scope>
 		</dependency>
 
 		<!--

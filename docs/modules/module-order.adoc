@@ -4,7 +4,7 @@
 |`com.ecomdemo.order`
 |Bean references
 |* `c.e.c.CartService` (in Cart)
-* `c.e.i.InventoryService` (in Inventory)
+* `c.e.i.InventoryClient` (in Inventory (client))
 * `c.e.c.CurrentUser` (in Customer)
 * `c.e.m.OutboxWriter` (in Messaging)
 * `c.e.m.CheckoutMetrics` (in Metrics)

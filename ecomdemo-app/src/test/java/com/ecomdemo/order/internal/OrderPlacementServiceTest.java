@@ -30,7 +30,7 @@ import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.catalog.ProductService;
-import com.ecomdemo.inventory.InventoryService;
+import com.ecomdemo.inventory.InventoryClient;
 import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import org.junit.jupiter.api.BeforeEach;
@@ -57,7 +57,7 @@ import org.mockito.stubbing.Answer;
  * {@code reduceStock} mutates the object the cart holds, so checking the object proves the
  * arithmetic, while {@code verify(productService).save(...)} proves the change was persisted.
  *
- * <p><strong>{@link InventoryService} is REAL here, and that is deliberate (Phase 19).</strong>
+ * <p><strong>{@link InventoryClient} is REAL here, and that is deliberate (Phase 19).</strong>
  * Stock moved out of this class into the inventory module, and a mocked inventory would turn every
  * assertion below about stock arithmetic and about {@code InsufficientStockException} into an
  * assertion that a mock was called — the tests would pass while the behaviour they describe had
@@ -78,13 +78,13 @@ class OrderPlacementServiceTest {
      * Mocked since Phase 20, where {@code TestData.product} was real.
      *
      * <p>Stock left {@code Product} for {@code product_stock}, so there is no field on the entity
-     * for a real {@code InventoryService} to change and nothing for an assertion to read back. The
+     * for a real {@code InventoryClient} to change and nothing for an assertion to read back. The
      * arithmetic those assertions used to make now belongs to {@code InventoryServiceTest}, which
      * tests it against a database. What is left here is this class's own share: that checkout asks
      * for every line to be checked before any line is reserved, and reserves each exactly once.
      */
     @Mock
-    private InventoryService inventory;
+    private InventoryClient inventory;
 
     @Mock
     private OrderAuditService orderAuditService;
