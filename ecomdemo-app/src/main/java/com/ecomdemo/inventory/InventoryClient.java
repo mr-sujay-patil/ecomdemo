@@ -41,8 +41,8 @@ public class InventoryClient implements InventoryGateway {
 
     private final RestClient rest;
 
-    InventoryClient(RestClient.Builder builder, InventoryProperties properties) {
-        this.rest = builder.baseUrl(properties.baseUrl()).build();
+    InventoryClient(RestClient inventoryRestClient) {
+        this.rest = inventoryRestClient;
     }
 
     /** How many of one product are available. Zero if it has no stock row. */

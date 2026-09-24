@@ -7,7 +7,7 @@ import com.ecomdemo.auth.dto.TokenResponse;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;
-import com.ecomdemo.security.JwtProperties;
+import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.support.TestData;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.nio.charset.StandardCharsets;

@@ -13,5 +13,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Inventory (client)",
-        allowedDependencies = {"shared"})
+        allowedDependencies = {"jwt", "shared"})
 package com.ecomdemo.inventory;

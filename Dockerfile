@@ -17,7 +17,20 @@
 # ---------------------------------------------------------------------------------------------
 # Stage 1: build
 # ---------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------
+# ONE Dockerfile, several services (Phase 20b)
+# ---------------------------------------------------------------------------------------------
+# MODULE says which module of the reactor to package. Every service here is the same shape - a
+# Spring Boot jar on a JRE, layered the same way, with the same JVM flags and the same non-root
+# user - and five near-identical Dockerfiles would be five places to forget a change.
+#
+# What is NOT parameterised is the build: `./mvnw package` builds the whole reactor, because the
+# services share `common` and Maven has to resolve it from the same run. Only the EXTRACTION of a
+# jar is per-module, which is also the only part that differs.
+ARG MODULE=ecomdemo-app
+
 FROM eclipse-temurin:21-jdk-alpine AS build
+ARG MODULE
 WORKDIR /build
 
 # LAYER CACHING is the reason this is not a single COPY. Docker caches each instruction's result
@@ -32,10 +45,12 @@ WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY common/pom.xml common/
+COPY inventory-service/pom.xml inventory-service/
 COPY ecomdemo-app/pom.xml ecomdemo-app/
 RUN ./mvnw -B -q dependency:go-offline
 
 COPY common/src/ common/src/
+COPY inventory-service/src/ inventory-service/src/
 COPY ecomdemo-app/src/ ecomdemo-app/src/
 
 # -DskipTests, deliberately. Tests run in the build (`./mvnw clean verify`) and in CI, where a
@@ -58,7 +73,7 @@ RUN ./mvnw -B -q package -DskipTests
 # Copied into the runtime image in that order, a rebuild after a code edit pushes ~200 KB instead
 # of 64 MB. (`-Djarmode=layertools` was the Boot 2/3 spelling; Boot 3.3 replaced it with
 # `jarmode=tools`, which this project uses.)
-RUN java -Djarmode=tools -jar ecomdemo-app/target/*.jar extract --layers --launcher --destination extracted
+RUN java -Djarmode=tools -jar ${MODULE}/target/*.jar extract --layers --launcher --destination extracted
 
 # ---------------------------------------------------------------------------------------------
 # Stage 2: runtime

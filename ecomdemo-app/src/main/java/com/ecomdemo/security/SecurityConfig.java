@@ -1,6 +1,5 @@
 package com.ecomdemo.security;
 
-import com.ecomdemo.shared.TokenClaims;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,8 +10,8 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import com.ecomdemo.jwt.JwtAuthorities;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -232,15 +231,13 @@ public class SecurityConfig {
      * {@code roles} and prefixes with {@code ROLE_} — which is what makes the untouched
      * {@code hasRole("ADMIN")} rules above keep working, and what lets the token itself stay
      * free of a framework convention.
+     *
+     * <p>The body moved to {@link JwtAuthorities} in Phase 20b: inventory-service has to read the
+     * same claim into the same authorities, and a second copy of these three lines is a 403 in
+     * waiting the day one of them changes.
      */
     private JwtAuthenticationConverter jwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName(TokenClaims.ROLES);
-        authorities.setAuthorityPrefix(AppUserDetails.ROLE_PREFIX);
-
-        JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(authorities);
-        return converter;
+        return JwtAuthorities.converter();
     }
 
     /**
