@@ -3,7 +3,7 @@ package com.ecomdemo.batch;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.catalog.ProductService;
-import com.ecomdemo.inventory.InventoryClient;
+import com.ecomdemo.inventory.InventoryGateway;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -56,11 +56,11 @@ class ProductUpsertWriter implements ItemWriter<ImportedProduct>, StepExecutionL
     private static final Logger log = LoggerFactory.getLogger(ProductUpsertWriter.class);
 
     private final ProductService catalogue;
-    private final InventoryClient inventory;
+    private final InventoryGateway inventory;
     private final CacheManager cacheManager;
     private final Set<Long> updatedIds = new LinkedHashSet<>();
 
-    ProductUpsertWriter(ProductService catalogue, InventoryClient inventory,
+    ProductUpsertWriter(ProductService catalogue, InventoryGateway inventory,
             CacheManager cacheManager) {
         this.catalogue = catalogue;
         this.inventory = inventory;

@@ -7,7 +7,7 @@
 
 * `c.e.c.ProductService`
 |Bean references
-|* `c.e.i.InventoryClient` (in Inventory (client))
+|* `c.e.i.InventoryGateway` (in Inventory (client))
 |Aggregate roots
 |* `c.e.c.Product`
 |===

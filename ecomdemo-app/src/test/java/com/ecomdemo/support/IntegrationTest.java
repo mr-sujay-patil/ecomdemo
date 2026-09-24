@@ -58,10 +58,18 @@ import org.springframework.test.context.ActiveProfiles;
  *
  * <p>{@link #rest} stays unauthenticated so that the "anonymous callers are refused" cases can
  * still be written.
+ *
+ * <p><strong>{@code InMemoryInventoryConfig} joined the imports in Phase 20b.</strong> Inventory is
+ * a separate service now, so creating a product and checking out both cross a network — and these
+ * tests are about carts, orders, caching and metrics, not about that network. The fake BEHAVES
+ * like inventory so their assertions keep meaning what they meant; what it cannot prove, and does
+ * not pretend to, is that the HTTP client speaks the protocol the real service serves. That is the
+ * smoke test's job once Compose runs both.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
-@Import({PostgresContainerConfig.class, RedisContainerConfig.class, KafkaContainerConfig.class})
+@Import({PostgresContainerConfig.class, RedisContainerConfig.class, KafkaContainerConfig.class,
+        InMemoryInventoryConfig.class})
 @ActiveProfiles("it")
 public abstract class IntegrationTest {
 

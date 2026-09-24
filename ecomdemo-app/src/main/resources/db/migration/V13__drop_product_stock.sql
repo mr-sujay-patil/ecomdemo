@@ -1,0 +1,16 @@
+-- This database does not own stock any more.
+--
+-- V11 created `product_stock` here, and Phase 20b moved it to inventory-service, which builds it
+-- from its own V1. Leaving the table behind would be worse than untidy: it would be a table that
+-- looks authoritative, can be joined against, and is permanently empty - the exact shape of a bug
+-- that takes a day to find, because every query against it succeeds and returns nothing.
+--
+-- Dropping it is also what makes the boundary real in the only place that can enforce it. An
+-- application can be told not to read another service's data; a schema that does not contain it
+-- cannot be talked round.
+--
+-- The rows are not migrated by this migration. inventory_db starts empty and is populated by the
+-- application - the catalogue sets a level when a product is created, and the CSV import sets one
+-- per row. A real cutover would copy the table across first and this file would run after that;
+-- saying so here is more useful than pretending the question does not arise.
+DROP TABLE IF EXISTS product_stock;

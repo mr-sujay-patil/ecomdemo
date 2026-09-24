@@ -35,7 +35,7 @@ import org.springframework.web.client.RestClient;
  * a transaction and is not.
  */
 @Component
-public class InventoryClient {
+public class InventoryClient implements InventoryGateway {
 
     private static final Logger log = LoggerFactory.getLogger(InventoryClient.class);
 
@@ -46,6 +46,7 @@ public class InventoryClient {
     }
 
     /** How many of one product are available. Zero if it has no stock row. */
+    @Override
     public int quantityFor(Long productId) {
         StockView view = rest.get()
                 .uri("/api/inventory/{productId}", productId)
@@ -61,6 +62,7 @@ public class InventoryClient {
      * forty products is forty HTTP requests, where before it was forty queries. The N+1 problem
      * does not disappear at a service boundary, it gets three orders of magnitude more expensive.
      */
+    @Override
     public Map<Long, Integer> quantitiesFor(Collection<Long> productIds) {
         if (productIds.isEmpty()) {
             return Map.of();
@@ -77,6 +79,7 @@ public class InventoryClient {
     }
 
     /** Checks availability, raising the same 409 a shopper saw when this was a method call. */
+    @Override
     public void requireAvailable(Long productId, String productName, int quantity) {
         int available = quantityFor(productId);
         if (available < quantity) {
@@ -92,6 +95,7 @@ public class InventoryClient {
      * error escape is what keeps the split invisible from the outside — and it is the one place a
      * client like this earns its existence beyond forwarding arguments.
      */
+    @Override
     public void reserve(Long productId, String productName, int quantity) {
         rest.post()
                 .uri("/api/inventory/{productId}/reserve", productId)
@@ -112,6 +116,7 @@ public class InventoryClient {
      * order that never existed, until something reconciles it. Nothing does yet, and the test
      * report says so.
      */
+    @Override
     public void release(Long productId, int quantity) {
         try {
             rest.post()
@@ -129,6 +134,7 @@ public class InventoryClient {
     }
 
     /** Sets an absolute level: the catalogue on create and update, and the CSV import. */
+    @Override
     public void setStockLevel(Long productId, int quantity) {
         rest.put()
                 .uri("/api/inventory/{productId}", productId)
@@ -138,6 +144,7 @@ public class InventoryClient {
     }
 
     /** Forgets a product's stock, for when the catalogue deletes the product. */
+    @Override
     public void forget(Long productId) {
         rest.delete()
                 .uri("/api/inventory/{productId}", productId)

@@ -8,7 +8,7 @@ import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.inventory.InventoryClient;
+import com.ecomdemo.inventory.InventoryGateway;
 import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -39,7 +39,7 @@ class OrderPlacementService {
 
     private final OrderRepository orderRepository;
     private final CartService cartService;
-    private final InventoryClient inventory;
+    private final InventoryGateway inventory;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
     private final OutboxWriter outbox;
@@ -47,7 +47,7 @@ class OrderPlacementService {
     OrderPlacementService(
             OrderRepository orderRepository,
             CartService cartService,
-            InventoryClient inventory,
+            InventoryGateway inventory,
             OrderAuditService orderAuditService,
             CurrentUser currentUser,
             OutboxWriter outbox) {
@@ -72,7 +72,7 @@ class OrderPlacementService {
      * to break first, and it spares the database work it would only have to throw away.
      *
      * <p><strong>Since Phase 19 the stock itself belongs to somebody else.</strong> This method
-     * asks {@code InventoryClient} to check and to reserve; it no longer calls
+     * asks {@code InventoryGateway} to check and to reserve; it no longer calls
      * {@code reduceStock} or saves the product, and it does not know that either happens. What it
      * kept is the SEQUENCE — check every line, then write — because that is an ordering concern,
      * about the message a shopper gets when a cart cannot be fulfilled. What it gave up is the
