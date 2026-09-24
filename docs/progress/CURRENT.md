@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-24
 - **Phase:** 20b: Microservices Split - EXTRACTION (the second half of Phase 20)
 - **Branch:** feature/phase-20b-microservices
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES — review the PR, and decide the scope question in §8 of the test report
 
 ## ⚠️ Phase 20 ships in TWO PRs — 20a is merged, this is the second
 The plan is `docs/phases/phase-20-plan.md`, approved and still current; 20b is its **§8 steps
@@ -51,9 +51,10 @@ CLEAN afterwards (the Phase 19 diagram-determinism fix still holding). `scripts/
       has its own `SecurityConfig`, and the app calls it as ITSELF with a SERVICE token.
 - [x] **Compose** - `inventory-db` + `inventory-service` up and healthy, 384M limit, `kafka-ui`
       behind the `tools` profile, Prometheus scraping both services as one job.
-- [ ] Smoke test rebuilt against per-service ports, full flow still end to end  <- NEXT
-- [ ] Testing protocol in full + `docs/test-reports/phase-20b.md`
-- [ ] README, docs/decisions.md, RECENT rotation (Phase 19 archived), tracker
+- [x] **Smoke test valid again across two services** — 270 passed, 0 failed, run TWICE. Two checks
+      changed meaning, one changed how it measures; none added, removed or weakened.
+- [x] **Testing protocol in full** + `docs/test-reports/phase-20b.md`
+- [x] **README, docs/decisions.md, RECENT rotation (Phase 19 archived), tracker**
 - [ ] PR raised, and ONLY after it merges and verifies: tag `phase-20-complete`
 
 ## The constraint that shapes this, MEASURED
@@ -64,24 +65,25 @@ database with a schema per service would save a rounding error and give up the p
 Projection ~2.0-2.4 GB. **A stack that will not start means no smoke verification at all** - this
 is the open risk of 20b.
 
-## Last test run
-- 2026-09-24 (on `main`, 20a merge verification): `./mvnw clean verify` -> 334 + 83, 0 failures.
-  `scripts/smoke-test.sh` -> 270 passed, 0 failed.
-- 2026-09-24 (this branch, after the security work): `./mvnw clean verify` running, see below.
-  The stack builds and comes up healthy: 11 containers including inventory-db and
-  inventory-service. The smoke test has NOT passed yet on this branch - see "Next action".
+## Last test run (2026-09-24, this branch, FINAL)
+- `./mvnw clean verify` -> **5 + 34 + 317 + 81**, 0 failures, 0 errors, 0 skipped, BUILD SUCCESS.
+  The working tree stayed CLEAN afterwards, so the Phase 19 diagram determinism still holds.
+- `scripts/smoke-test.sh` -> **270 passed, 0 failed, 0 skipped**, run TWICE against 11 healthy
+  containers. Cache eviction converges on the first poll (`took 0ms`).
+- Every new test was MUTATION-CHECKED: broken deliberately, observed to fail, restored.
 
 ## Next action
-Rebuild `scripts/smoke-test.sh` for two services. It currently fails at its first check, and for a
-reason that is no longer a bug: the script's Flyway assertions, its stock checks and its outbox
-section all assume one application and one database. What has to change:
-- Stock now lives in `inventory_db` on port 5433, not in `ecomdemo` - every `product_stock` query
-  in the script points at the wrong database.
-- `/api/inventory/**` requires a token, so a direct curl at port 8082 gets 401 unless it mints one.
-  Checking through the app's own endpoints is the better test anyway: it proves the hop works.
-- The outbox section stops and starts the Kafka container; inventory-service also publishes to
-  Kafka now, so it has to tolerate the same outage.
-Bring the stack up with `docker compose up -d --wait` (images are already built).
+**WAIT FOR THE USER.** The PR is open and the phase is at a stop point. Do not start the next
+extraction, and DO NOT TAG `phase-20-complete` - Phase 20 is not complete.
+
+There is a scope decision for the user, set out in `docs/test-reports/phase-20b.md` §8: this PR
+extracts ONE of five services, and the recommendation is one service per PR from here. The evidence
+is that extracting the first produced FOUR failures that `./mvnw clean verify` could not see, each
+found only by running the stack. Three of the four are now build failures for the next service,
+which is most of the value of having paid for them once.
+
+If the user approves that split, the roadmap already has a `20c` row for the remaining services.
+If the user wants all four in this phase instead, the branch continues from here.
 
 ## Open issues / blockers
 - KNOWN DEFECT from Phase 19, not fixed: two `EcomDemo Overview` stat panels mislead - `Orders
@@ -89,6 +91,20 @@ Bring the stack up with `docker compose up -d --wait` (images are already built)
   value because its ratio goes NaN and `lastNotNull` skips nulls but not zeros. Agreed: its own
   `fix/dashboard-stat-reducers` branch. Full entry in `docs/decisions.md`.
 - The Phase 15 manual check (Grafana render, Kafka UI) is CLOSED. Do not re-raise.
+
+## What got past `./mvnw clean verify` this phase (read before extracting the next service)
+Four failures, none of them logic errors, each a configuration correct for one service and silently
+wrong for two. All four now have tests; three of those tests fail automatically for the NEXT
+service, which is the point.
+1. **No filter chain** -> Boot secured everything with a generated password. The service reported
+   itself HEALTHY throughout, because the health probe is the one path the fallback leaves open.
+2. **The new database was empty.** The extraction moved the table and left the DATA behind, and a
+   missing stock row reads as zero BY DESIGN - so ten products silently showed zero stock.
+3. **A GLOBAL `spring.json.value.default.type`** made the stock event deserialise as an
+   OrderPlacedEvent. **The consumer group showed ZERO LAG the whole time** - consumed, failed,
+   retried, exhausted, dropped, offset advancing exactly as it does when healthy.
+4. **Alloy shipped no logs** for the new containers; its keep rule named `app` only. A service that
+   ships no logs and one that does not exist look identical from Loki.
 
 ## Machine-level traps that have already cost time here
 - **Docker Desktop quitting.** Testcontainers then fails with "Could not find a valid Docker
@@ -99,6 +115,13 @@ Bring the stack up with `docker compose up -d --wait` (images are already built)
   inode; fix with `docker compose up -d --force-recreate grafana`.
 - **`mvn test-compile` can report success against STALE test classes.** Use `clean` after any
   signature change.
+- **Do not `docker compose up --build` while the stack is running.** Two Maven builds inside a
+  3.8 GB Docker VM starve it: Kafka, Grafana and Prometheus all went unhealthy and the build hung
+  for twenty minutes. `docker compose down` first, or `build` then `up`.
+- **`./mvnw compile` alone now fails** on ecomdemo-app: it needs `common`'s test-jar, which is
+  produced at the `package` phase. `test-compile`, `test` and `verify` are all fine.
+- **A freshly restarted app makes the Prometheus smoke check flake once**: `rate(...[5m])` needs
+  two samples, and a counter series created seconds ago has one. Re-run; it is not a regression.
 
 ## Decisions taken while implementing (not in the plan, recorded in docs/decisions.md)
 - **The app calls inventory-service as ITSELF, not as the shopper.** Token relay cannot work for

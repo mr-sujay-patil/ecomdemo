@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import com.tngtech.archunit.core.domain.JavaClass;
 import org.springframework.modulith.core.ApplicationModules;
 import org.springframework.modulith.docs.Documenter;
 
@@ -45,7 +46,22 @@ import org.springframework.modulith.docs.Documenter;
 @DisplayName("Module boundaries")
 class ModularityTest {
 
-    static final ApplicationModules MODULES = ApplicationModules.of(EcomdemoApplication.class);
+    /**
+     * The application's modules — with shared TEST support excluded.
+     *
+     * <p>{@code com.ecomdemo.support} holds {@code ProjectRoot}, which since Phase 20b lives in
+     * {@code common} and is published as a test-jar so every extracted service can use it. That
+     * jar is on the test classpath, and Modulith scans the classpath: without this exclusion it
+     * discovers the package and reports "Support" as an application module, which then appears in
+     * the generated architecture diagrams as though it were part of the system being described.
+     *
+     * <p>It is excluded rather than renamed because the problem is not the name. Anything on the
+     * test classpath under the application's base package would do the same, and a test helper is
+     * not an application module however it is spelled.
+     */
+    static final ApplicationModules MODULES = ApplicationModules.of(
+            EcomdemoApplication.class,
+            JavaClass.Predicates.resideInAPackage("com.ecomdemo.support.."));
 
     @Test
     @DisplayName("no module reaches into another module's internals")
