@@ -107,14 +107,26 @@ Docker Desktop running, the compose stack **UP** (nine containers), schema **V12
 stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-**FINISH THE inventory-service EXTRACTION**: `ecomdemo-app`'s tests do not compile yet. Six files
-reference types that moved or changed:
+`ecomdemo-app`'s tests COMPILE now and four of its @SpringBootTest classes FAIL, all with
+`ConnectException` to localhost:8082 - they create products, which PUTs stock to a service that is
+not running. `./mvnw -pl common,inventory-service -am test` is green (21 tests).
 
-    cache/ProductCacheEvictorTest       the evictor is a Kafka listener now, not an event listener
-    cache/CacheApiIT                    called inventoryService.reserve() to trigger an eviction
-    catalog/internal/ProductServiceTest mocked InventoryService; it is InventoryClient now
-    order/internal/OrderPlacementServiceTest  same, plus the saga compensation is new behaviour
-                                        that deserves a test: a rollback must call release()
+**The remaining work is a judgement call per test, not a mechanical fix**, because two of them
+assert something that has CHANGED MEANING rather than merely moved:
+
+1. `ConcurrentCheckoutTest.twoThreadsBuyingTheLastUnit` - MOVED already to
+   `ConcurrentReservationTest` in inventory-service. DELETE it here with a pointer comment; do not
+   leave a weakened copy.
+2. `ConcurrentCheckoutTest.theLosingCheckoutLeavesNoPartialData` - asserts the loser's stock
+   reduction "rolls back with the rest of its transaction". **That is no longer what happens.**
+   The reservation committed in another process; what un-does it is the saga's release() call. The
+   test should assert the COMPENSATION: a rolled-back checkout calls release for every line it had
+   already reserved. That is new behaviour with nothing covering it, and it is the single most
+   valuable test to add in this phase.
+3. `aRejectedCheckoutStillLeavesAnAuditRow`, `aSuccessfulCheckoutIsAuditedAgainstItsOrder`,
+   `PlaceOrderFlowTest` - these are about ordering and auditing, not stock. `@MockitoBean
+   InventoryClient` is the right answer: it lets them test what they still cover, and the stock
+   half is covered in inventory-service.
 
 Then `./mvnw clean verify` across the reactor, and only then move on to catalog-service.
 
