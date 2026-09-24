@@ -655,7 +655,14 @@ PROBE_DB_ID=""
 # persistence: the probe really is gone, because it was in a different database. Recording the
 # identity lets the script tell "the data did not survive a restart" (a real failure) apart from
 # "this is a different database" (a first run).
-CURRENT_DB_ID="$(psql_query "SELECT system_identifier FROM pg_control_system();" 2>/dev/null | tr -d '\r ')"
+# CATALOG-DB, not the application's. The probe is a PRODUCT, and products moved to catalog_db in
+# Phase 20c - so the identity that matters is the one belonging to the database the probe is stored
+# in. Watching the application's database instead would report "the data did not survive a restart"
+# every time the catalogue was re-provisioned, which is the exact confusion this identifier exists
+# to prevent.
+CURRENT_DB_ID="$(docker exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+    psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
+    -c "SELECT system_identifier FROM pg_control_system();" 2>/dev/null | tr -d '\r ')"
 
 if [ -f "$STATE_FILE" ]; then
     # shellcheck disable=SC1090
@@ -720,27 +727,46 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V13, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V14, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
     check "no migration is recorded as failed" "0" "$PENDING"
 
-    CATEGORY_INDEX="$(psql_query \
-        "SELECT count(*) FROM pg_indexes \
-         WHERE schemaname = 'public' AND indexname = 'idx_product_category';" | tr -d '\r ')"
-    check "V3's idx_product_category index exists" "1" "$CATEGORY_INDEX"
+    # V3's idx_product_category is no longer in THIS database: Phase 20c moved `product` to
+    # catalog-service, and V14 dropped the application's copy. The index is asserted in
+    # catalog-service's own CatalogSchemaTest, against catalog_db.
+    #
+    # What is checked here instead is the thing V14 is FOR. A leftover copy of another service's
+    # table would still answer queries, with rows frozen at the moment of the split - so "the table
+    # is gone" is a stronger statement than "the index is present" ever was.
+    PRODUCT_TABLE="$(psql_query \
+        "SELECT count(*) FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_name = 'product';" | tr -d '\r ')"
+    check "V14 dropped product - the catalogue belongs to catalog-service now" "0" "$PRODUCT_TABLE"
 
     AUDIT_TABLE="$(psql_query \
         "SELECT count(*) FROM information_schema.tables \
          WHERE table_schema = 'public' AND table_name = 'order_audit';" | tr -d '\r ')"
     check "V4's order_audit table exists" "1" "$AUDIT_TABLE"
 
-    VERSION_COLUMN="$(psql_query \
-        "SELECT count(*) FROM information_schema.columns \
-         WHERE table_name = 'product' AND column_name = 'version';" | tr -d '\r ')"
-    check "V4's product.version column exists" "1" "$VERSION_COLUMN"
+    # Against CATALOG_DB, because that is where `product` lives since Phase 20c. The application's
+    # V4 did add this column, and its V14 dropped the whole table when catalog-service took it;
+    # catalog_db's own V1 recreates it with the same shape. Pointing this check at the application's
+    # database would assert that a table it deliberately dropped is still there.
+    VERSION_COLUMN="$(docker exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+        psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
+        -c "SELECT count(*) FROM information_schema.columns \
+            WHERE table_name = 'product' AND column_name = 'version';" 2>/dev/null | tr -d '\r ')"
+    check "catalog_db has the product.version column, the optimistic lock" "1" "$VERSION_COLUMN"
+
+    CATALOG_SEED="$(docker exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+        psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
+        -c "SELECT count(*) FROM product WHERE id BETWEEN 1 AND 10;" 2>/dev/null | tr -d '\r ')"
+    # The check Phase 20b learned to make: moving a table moves its DDL, and the DATA has to be
+    # carried over separately. inventory_db's seed is keyed to these ten ids.
+    check "catalog_db carries the ten seeded products" "10" "$CATALOG_SEED"
 
     ADMIN_ROW="$(psql_query \
         "SELECT count(*) FROM users WHERE username = 'admin' AND role = 'ADMIN';" | tr -d '\r ')"
@@ -775,10 +801,10 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V8, all successful" \
+    skip "flyway_schema_history shows V1-V14, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
-    skip "V3's idx_product_category index exists" "same as above"
+    skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
     skip "V4's order_audit table exists" "same as above"
     skip "V4's product.version column exists" "same as above"
     skip "V5 seeded exactly one administrator" "same as above"
@@ -829,6 +855,12 @@ pass "the two category probe products are cleaned up"
 # have two separate carts and could not collide over the same cart at all.
 section "Transactions and concurrency"
 
+# The highest order id before the race, so the count below can ignore everything that came before
+# it. See the comment on that check for why this became necessary in Phase 20c.
+as_customer
+request GET /api/orders >/dev/null
+ORDERS_BEFORE_RACE="$(jget "max([o['id'] for o in d], default=0)")"
+
 as_admin
 STATUS="$(request POST /api/products \
     '{"name":"Race Probe","description":"one unit, two buyers","price":25.00,"stockQuantity":1,"category":"TEST"}')"
@@ -855,9 +887,19 @@ check "two simultaneous checkouts return exactly one 201 and one 409" "201,409" 
 request GET "/api/products/$RACE_ID" >/dev/null
 check "the one unit was sold once, so stock is 0" "0" "$(jget "d['stockQuantity']")"
 
+# Counted over the orders placed SINCE THIS SECTION STARTED, not over every order the account has
+# ever had. Phase 20c made that distinction matter: product ids are assigned by catalog_db now, and
+# that database was created fresh while the application's orders persisted - so an order from an
+# earlier run can hold the same product id as today's race probe and be counted twice. The check
+# then fails for a reason that has nothing to do with the race it is testing.
+#
+# This is a real consequence of splitting a database, not a quirk of the test: ids are only unique
+# within the service that issues them, and anything holding a foreign id across a re-provision has
+# to cope with it. The application is fine - an order snapshots the name and price it charged, so
+# nothing it shows a customer is wrong - but a test that counts by id has to scope the window.
 request GET /api/orders >/dev/null
 check "exactly one order holds that product" "1" \
-    "$(jget "sum(1 for o in d for i in o['items'] if i['productId'] == $RACE_ID)")"
+    "$(jget "sum(1 for o in d for i in o['items'] if i['productId'] == $RACE_ID and o['id'] > $ORDERS_BEFORE_RACE)")"
 
 request GET /api/cart >/dev/null
 check "the cart is empty after the race" "0" "$(jget "len(d['items'])")"
