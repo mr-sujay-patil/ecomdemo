@@ -16,5 +16,5 @@ _Others_
 
 * `c.e.a.AuthenticationManagerConfig`
 |Bean references
-|* `c.e.s.JwtProperties` (in Security)
+|* `c.e.j.JwtProperties` (in JWT keys)
 |===

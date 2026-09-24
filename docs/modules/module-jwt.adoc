@@ -1,0 +1,13 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.jwt`
+|Spring components
+|_Configuration properties_
+
+* `c.e.j.JwtProperties`
+
+_Others_
+
+* `c.e.j.JwtKeyConfig`
+|===

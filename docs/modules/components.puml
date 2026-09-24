@@ -9,6 +9,7 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Notification, "Notification", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Catalog, "Catalog", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Security, "Security", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Auth, "Auth", $techn="Module", $descr="", $tags="", $link="")
@@ -16,15 +17,16 @@ Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "Ecomdemo
   Component(EcomdemoApplication.EcomdemoApplication.Cache, "Cache", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Order, "Order", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.JWTkeys, "JWT keys", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Metrics, "Metrics", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Customer, "Customer", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Inventoryclient, "Inventory (client)", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Notification, "Notification", $techn="Module", $descr="", $tags="", $link="")
 }
 
-Rel(EcomdemoApplication.EcomdemoApplication.Auth, EcomdemoApplication.EcomdemoApplication.Security, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Auth, EcomdemoApplication.EcomdemoApplication.JWTkeys, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Auth, EcomdemoApplication.EcomdemoApplication.Security, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Auth, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoApplication.Catalog, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoApplication.Inventoryclient, "uses", $techn="", $tags="", $link="")
@@ -36,6 +38,7 @@ Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoAp
 Rel(EcomdemoApplication.EcomdemoApplication.Catalog, EcomdemoApplication.EcomdemoApplication.Inventoryclient, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Catalog, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Customer, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Inventoryclient, EcomdemoApplication.EcomdemoApplication.JWTkeys, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Inventoryclient, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Notification, EcomdemoApplication.EcomdemoApplication.Messaging, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Cart, "uses", $techn="", $tags="", $link="")
@@ -45,6 +48,7 @@ Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoA
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Metrics, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Security, EcomdemoApplication.EcomdemoApplication.Customer, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Security, EcomdemoApplication.EcomdemoApplication.JWTkeys, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Security, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)

@@ -46,9 +46,12 @@ CLEAN afterwards (the Phase 19 diagram-determinism fix still holding). `scripts/
 - [ ] A database per service, each with its own Flyway history starting at V1
 - [ ] `RestClient` where the answer is needed now; Kafka where it is not. The outbox stays in
       order-service ONLY
-- [ ] JWT VALIDATION in every service (decoder config into `common`); issuing stays in customer
-- [ ] Compose: ~14 containers, **384M limit per service**, `kafka-ui` behind a `tools` profile
-- [ ] Smoke test rebuilt against per-service ports, full flow still end to end
+- [x] **JWT VALIDATION in every service** - DONE (f46172d). `com.ecomdemo.jwt` in `common` holds
+      the key, the decoder and the roles converter; the encoder stayed in the app. inventory-service
+      has its own `SecurityConfig`, and the app calls it as ITSELF with a SERVICE token.
+- [x] **Compose** - `inventory-db` + `inventory-service` up and healthy, 384M limit, `kafka-ui`
+      behind the `tools` profile, Prometheus scraping both services as one job.
+- [ ] Smoke test rebuilt against per-service ports, full flow still end to end  <- NEXT
 - [ ] Testing protocol in full + `docs/test-reports/phase-20b.md`
 - [ ] README, docs/decisions.md, RECENT rotation (Phase 19 archived), tracker
 - [ ] PR raised, and ONLY after it merges and verifies: tag `phase-20-complete`
@@ -64,6 +67,21 @@ is the open risk of 20b.
 ## Last test run
 - 2026-09-24 (on `main`, 20a merge verification): `./mvnw clean verify` -> 334 + 83, 0 failures.
   `scripts/smoke-test.sh` -> 270 passed, 0 failed.
+- 2026-09-24 (this branch, after the security work): `./mvnw clean verify` running, see below.
+  The stack builds and comes up healthy: 11 containers including inventory-db and
+  inventory-service. The smoke test has NOT passed yet on this branch - see "Next action".
+
+## Next action
+Rebuild `scripts/smoke-test.sh` for two services. It currently fails at its first check, and for a
+reason that is no longer a bug: the script's Flyway assertions, its stock checks and its outbox
+section all assume one application and one database. What has to change:
+- Stock now lives in `inventory_db` on port 5433, not in `ecomdemo` - every `product_stock` query
+  in the script points at the wrong database.
+- `/api/inventory/**` requires a token, so a direct curl at port 8082 gets 401 unless it mints one.
+  Checking through the app's own endpoints is the better test anyway: it proves the hop works.
+- The outbox section stops and starts the Kafka container; inventory-service also publishes to
+  Kafka now, so it has to tolerate the same outage.
+Bring the stack up with `docker compose up -d --wait` (images are already built).
 
 ## Open issues / blockers
 - KNOWN DEFECT from Phase 19, not fixed: two `EcomDemo Overview` stat panels mislead - `Orders
@@ -81,6 +99,15 @@ is the open risk of 20b.
   inode; fix with `docker compose up -d --force-recreate grafana`.
 - **`mvn test-compile` can report success against STALE test classes.** Use `clean` after any
   signature change.
+
+## Decisions taken while implementing (not in the plan, recorded in docs/decisions.md)
+- **The app calls inventory-service as ITSELF, not as the shopper.** Token relay cannot work for
+  two callers: the anonymous product listing has no token, and the CSV import runs on a background
+  thread with no SecurityContext. The cost is that inventory-service cannot tell an administrator
+  from a shopper, so AUTHORISATION stays at the edge - which is why two `@PreAuthorize` rules were
+  removed from `InventoryController` rather than translated.
+- **HS256 with a shared secret is KEPT, knowingly.** Every service now holds a key that can mint as
+  well as verify. The fix is asymmetric keys plus a JWKS endpoint, which is a phase of its own.
 
 ## Decisions this phase — APPROVED, and now IMPLEMENTED for inventory
 1. **Checkout reserves stock as a SAGA.** `OrderPlacementService.reserve` is
