@@ -54,6 +54,12 @@ scrape_configs:
         labels:
           service: inventory-service
 
+      # catalog-service, added in Phase 20c. Same job, third target - see the note above on why a
+      # job per service would make every dashboard panel grow a line with each extraction.
+      - targets: ["catalog-service:8081"]
+        labels:
+          service: catalog-service
+
   # --- Prometheus itself ----------------------------------------------------------------------
   # A monitoring system that does not monitor itself cannot tell you that it stopped working.
   # This is one line and it is the difference between "no alerts, everything is fine" and "no

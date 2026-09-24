@@ -153,6 +153,7 @@ services:
       # application.properties is localhost:8082, which is right for running both from an IDE and
       # wrong inside a container, where localhost is this container.
       INVENTORY_BASE_URL: http://inventory-service:8082
+      CATALOG_BASE_URL: http://catalog-service:8081
 
       # Structured logging (Phase 16). Empty everywhere else, so `./mvnw spring-boot:run` on a
       # laptop keeps the readable pattern layout; `ecs` here because this container's stdout is
@@ -211,6 +212,93 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # catalog-service's database (Phase 20c)
+  # -------------------------------------------------------------------------------------------
+  catalog-db:
+    image: postgres:18-alpine
+    container_name: ecomdemo-catalog-db
+    environment:
+      POSTGRES_DB: ${CATALOG_DB_NAME:-catalog}
+      POSTGRES_USER: ${CATALOG_DB_USER:-catalog}
+      POSTGRES_PASSWORD: ${CATALOG_DB_PASSWORD:-catalog}
+    ports:
+      # 5434: 5432 is the application's, 5433 is inventory's. Inside the network all three are
+      # 5432 - a container gets its own address, so they only collide on the host.
+      - "${CATALOG_DB_PORT:-5434}:5432"
+    volumes:
+      # /var/lib/postgresql, NOT /var/lib/postgresql/data - see the note on inventory-db above.
+      - catalog-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CATALOG_DB_USER:-catalog} -d ${CATALOG_DB_NAME:-catalog}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # catalog-service (Phase 20c) - the catalogue, and the Redis cache that serves it
+  # -------------------------------------------------------------------------------------------
+  catalog-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: catalog-service
+    image: ecomdemo-catalog:latest
+    container_name: ecomdemo-catalog-service
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      cache:
+        # It serves the catalogue from Redis, so a cold start against a missing cache would work
+        # but would log a stream of connection failures on the first request of every kind.
+        condition: service_healthy
+      kafka:
+        # It CONSUMES `inventory.stock-changed` - the mirror image of inventory-service, which
+        # publishes it. Without the broker the cache would never learn that a sale happened and
+        # would serve a stale figure until the TTL rescued it.
+        condition: service_healthy
+      inventory-service:
+        # A product listing shows stock, which is an HTTP call to inventory-service. Not strictly
+        # required - the listing degrades rather than fails - but starting in dependency order
+        # keeps the first `docker compose up` free of errors that mean nothing.
+        condition: service_healthy
+    environment:
+      CATALOG_DB_HOST: catalog-db
+      CATALOG_DB_PORT: 5432
+      CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
+      CATALOG_DB_USER: ${CATALOG_DB_USER:-catalog}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:-catalog}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      SPRING_DATA_REDIS_HOST: cache
+      SPRING_DATA_REDIS_PORT: 6379
+      INVENTORY_BASE_URL: http://inventory-service:8082
+
+      # The same secret every other service holds, because HMAC verifies with the key it signs
+      # with. That is the honest argument for asymmetric signing in a real deployment, and it is
+      # recorded in docs/decisions.md rather than pretended away.
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - "${CATALOG_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          # 384M, the same cap inventory-service gets. MEASURED rather than guessed: with two
+          # services running, inventory-service idled at 185 MiB against this limit and the whole
+          # stack at 1.4 GB against a 3.8 GB ceiling. A third service costs about 205 MiB with its
+          # database, which is why the memory risk 20a called "the open risk" is not the binding
+          # constraint it looked like.
+          memory: ${CATALOG_MEMORY_LIMIT:-384M}
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -538,6 +626,7 @@ services:
 volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
+  catalog-data:
   inventory-data:
 
   postgres-data:
