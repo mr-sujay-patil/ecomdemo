@@ -1,13 +1,16 @@
 package com.ecomdemo.catalog;
 
 import com.ecomdemo.catalog.internal.ProductRepository;
-import com.ecomdemo.inventory.InventoryGateway;
+import com.ecomdemo.clients.inventory.InventoryGateway;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import java.util.List;
 import java.util.Map;
+import com.ecomdemo.cache.CacheNames;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.ProductUpsert;
 import java.util.Optional;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
@@ -237,4 +240,72 @@ public class ProductService {
     public void saveAll(Iterable<? extends Product> products) {
         productRepository.saveAll(products);
     }
+
+    /**
+     * Creates or updates many products in one call, for the CSV import in another service.
+     *
+     * <p>This replaced a caller that held {@code Product} ENTITIES, mutated them and handed them to
+     * {@link #saveAll}. It could do that while the import and the catalogue were one deployable;
+     * across a network it cannot, because an entity is bound to a persistence context and a
+     * database that belong to this service. So the wire carries values, and the mapping from value
+     * to entity happens here, where the entity lives.
+     *
+     * <p>A null id means create, a set id means update — the same distinction the import already
+     * made, but now stated in the data rather than left to whether Hibernate thought an object was
+     * transient.
+     *
+     * <p><strong>{@code allEntries = true}, not an eviction per row.</strong> An import changes the
+     * catalogue wholesale; firing thousands of evictions to invalidate a cache the import has
+     * already made useless is work for nothing. Clearing both caches once is cheaper and strictly
+     * more correct — it cannot miss a product.
+     *
+     * <p>Declarative, rather than reaching for a {@code CacheManager}: this class deliberately does
+     * not know cache mechanics, as the comment on its constructor says. The import USED to evict by
+     * hand from another module, because it wrote through the repository and went round this
+     * service. It writes over HTTP now, through this method, so the annotation is enough — and one
+     * fewer thing for a caller to remember is the good kind of consequence.
+     */
+    @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.PRODUCT, allEntries = true),
+            @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, allEntries = true)})
+    public List<ProductSnapshot> upsertAll(List<ProductUpsert> products) {
+        List<Product> entities = products.stream().map(this::toEntity).toList();
+        List<Product> saved = productRepository.saveAll(entities);
+        return saved.stream()
+                // stockQuantity is null, deliberately: the import sets stock through its OWN call
+                // to inventory-service, and a number invented here would be a guess about another
+                // service's data. A null says "not asked", which is the truth.
+                .map(p -> new ProductSnapshot(
+                        p.getId(), p.getName(), p.getDescription(), p.getPrice(), p.getCategory(), null))
+                .toList();
+    }
+
+    /**
+     * Resolves one upsert to an entity — BY NAME when it has no id.
+     *
+     * <p>That resolution deliberately happens here rather than in the caller, and it is worth
+     * saying why, because the obvious design is worse. The CSV import used to look each row's
+     * product up by name and then save it; doing the same across a network would be one HTTP call
+     * PER ROW to find the id, plus one per chunk to save — an N+1 over the network, on a job whose
+     * whole point is to handle ten thousand rows.
+     *
+     * <p>Sending the name and letting the catalogue resolve it keeps the import to one round trip
+     * per chunk, and it puts the "oldest first" rule where it already lives. The API has allowed
+     * two products to share a name since Phase 1, so a name that matches twice updates the first
+     * rather than failing or guessing — the same behaviour as before, now decided by the service
+     * that owns the rule instead of by a caller that had to know to ask for it.
+     */
+    private Product toEntity(ProductUpsert upsert) {
+        Product product = upsert.id() == null
+                ? findFirstByName(upsert.name())
+                        .orElseGet(() -> new Product(upsert.name(), upsert.description(), upsert.price()))
+                : requireProduct(upsert.id());
+        product.setName(upsert.name());
+        product.setDescription(upsert.description());
+        product.setPrice(upsert.price());
+        product.setCategory(upsert.category());
+        return product;
+    }
+
 }

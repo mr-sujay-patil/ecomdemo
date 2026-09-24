@@ -69,7 +69,7 @@ import org.springframework.test.context.ActiveProfiles;
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Import({PostgresContainerConfig.class, RedisContainerConfig.class, KafkaContainerConfig.class,
-        InMemoryInventoryConfig.class})
+        InMemoryInventoryConfig.class, InMemoryCatalogConfig.class})
 @ActiveProfiles("it")
 public abstract class IntegrationTest {
 

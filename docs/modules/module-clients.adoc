@@ -1,0 +1,16 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.clients`
+|Spring components
+|_Configuration properties_
+
+* `c.e.c.catalog.CatalogProperties`
+* `c.e.c.inventory.InventoryProperties`
+
+_Others_
+
+* `c.e.c.ServiceIdentityConfig`
+* `c.e.c.catalog.CatalogGateway` (via `c.e.c.catalog.CatalogClient`)
+* `c.e.c.inventory.InventoryGateway` (via `c.e.c.inventory.InventoryClient`)
+|===

@@ -3,6 +3,8 @@ package com.ecomdemo.catalog.internal;
 import com.ecomdemo.catalog.ProductService;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.ProductUpsert;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -59,6 +61,27 @@ public class ProductController {
     public ProductResponse get(
             @Parameter(description = "Id of the product", example = "1") @PathVariable Long id) {
         return productService.findById(id);
+    }
+
+    /**
+     * Bulk create-or-update, for the CSV import that lives in another service now.
+     *
+     * <p>Deliberately NOT the single {@code POST} in a loop. A ten-thousand-row import would be ten
+     * thousand HTTP round trips, each with its own transaction and its own service token check —
+     * and the chunk-oriented import would lose the thing that makes it restartable, which is that a
+     * chunk succeeds or fails as a unit.
+     *
+     * <p>It is under {@code /batch} rather than at the collection root because the root already
+     * means "create one and return 201 with a Location". This returns a list and no Location; two
+     * different operations should not share a URI and differ only by the shape of the body.
+     */
+    @PostMapping("/batch")
+    @SecurityRequirement(name = "bearerAuth")
+    @Operation(
+            summary = "Create or update many products",
+            description = "A null id creates; a set id updates. Used by the CSV import.")
+    List<ProductSnapshot> upsertAll(@Valid @RequestBody List<ProductUpsert> products) {
+        return productService.upsertAll(products);
     }
 
     /** 201 with a Location header, as a resource-creating POST should. */

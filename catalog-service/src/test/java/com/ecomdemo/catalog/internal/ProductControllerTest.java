@@ -322,62 +322,35 @@ class ProductControllerTest {
     @DisplayName("access rules")
     class Access {
 
+        // WHAT THIS BLOCK ASSERTS CHANGED COMPLETELY IN PHASE 20c, and the old version is worth
+        // describing because its absence would otherwise look like lost coverage.
+        //
+        // It used to assert the SHOP WINDOW rules: anonymous browsing allowed, writes 401 without
+        // a token and 403 for a customer, with the standard error body. Those rules have not gone
+        // away — they have moved to the edge, onto the application's own /api/products, which is
+        // where a human's token actually arrives. They are asserted there, in
+        // ProductProxyAccessTest.
+        //
+        // They could not stay here, because they are no longer TRUE here. This service's only
+        // caller is another service presenting a SERVICE token; it cannot tell an administrator
+        // from a shopper and has no anonymous callers to admit. Leaving the old assertions in
+        // place, passing against a permissive slice, would have been the worst outcome: a green
+        // test describing a rule nothing enforces.
+
         @Test
         @WithAnonymousUser
-        void browsing_whenAnonymous_isAllowed() {
-            // Given
-            when(productService.findAll()).thenReturn(List.of(KEYBOARD));
-
-            // Then: the catalogue is the shop window — no account needed to look at it
-            assertThat(mvc.get().uri("/api/products")).hasStatus(OK);
-            assertThat(mvc.get().uri("/api/products/1")).hasStatus(OK);
-        }
-
-        @Test
-        @WithAnonymousUser
-        void writing_whenAnonymous_returns401() {
+        void everyPathNeedsAToken_includingTheReads() {
+            // The whole difference in one test. The catalogue was the shop window; it is now an
+            // internal API, and "open because of who happens to call it" is not a boundary.
+            assertThat(mvc.get().uri("/api/products")).hasStatus(UNAUTHORIZED);
+            assertThat(mvc.get().uri("/api/products/1")).hasStatus(UNAUTHORIZED);
             assertThat(mvc.post().uri("/api/products").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
-                    .hasStatus(UNAUTHORIZED);
-            assertThat(mvc.put().uri("/api/products/1").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
                     .hasStatus(UNAUTHORIZED);
             assertThat(mvc.delete().uri("/api/products/1")).hasStatus(UNAUTHORIZED);
+
+            verify(productService, never()).findAll();
             verify(productService, never()).create(any());
-            verify(productService, never()).update(any(), any());
             verify(productService, never()).delete(any());
-        }
-
-        @Test
-        @WithMockUser(username = "shopper", roles = "CUSTOMER")
-        void writing_whenAuthenticatedAsACustomer_returns403() {
-            // A customer is authenticated and still refused: this is authorization, not
-            // authentication, and sending the same credentials again will never help.
-            assertThat(mvc.post().uri("/api/products").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
-                    .hasStatus(FORBIDDEN);
-            assertThat(mvc.put().uri("/api/products/1").contentType(MediaType.APPLICATION_JSON).content(VALID_BODY))
-                    .hasStatus(FORBIDDEN);
-            assertThat(mvc.delete().uri("/api/products/1")).hasStatus(FORBIDDEN);
-            verify(productService, never()).create(any());
-        }
-
-        @Test
-        @WithMockUser(username = "shopper", roles = "CUSTOMER")
-        void browsing_whenAuthenticatedAsACustomer_isStillAllowed() {
-            // Given
-            when(productService.findAll()).thenReturn(List.of(KEYBOARD));
-
-            // Then: opening the writes to ADMIN must not have closed the reads to everyone else
-            assertThat(mvc.get().uri("/api/products")).hasStatus(OK);
-        }
-
-        @Test
-        @WithMockUser(username = "shopper", roles = "CUSTOMER")
-        void refusedWrite_returnsTheStandardErrorShape() {
-            assertThat(mvc.delete().uri("/api/products/1"))
-                    .hasStatus(FORBIDDEN)
-                    .bodyJson()
-                    .isLenientlyEqualTo("""
-                            {"status":403,"message":"Your account does not have permission to perform this action."}
-                            """);
         }
     }
 }

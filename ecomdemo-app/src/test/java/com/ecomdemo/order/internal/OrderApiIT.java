@@ -8,8 +8,8 @@ import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -76,18 +76,18 @@ class OrderApiIT extends IntegrationTest {
         return body;
     }
 
-    private ProductResponse product(String name, String price, int stock) {
-        ProductResponse created = admin.postForObject(
+    private ProductSnapshot product(String name, String price, int stock) {
+        ProductSnapshot created = admin.postForObject(
                 "/api/products",
-                new ProductRequest(name, name + " description", new BigDecimal(price), stock, "IT"),
-                ProductResponse.class);
+                new ProductWrite(name, name + " description", new BigDecimal(price), stock, "IT"),
+                ProductSnapshot.class);
         assertThat(created).isNotNull();
         createdIds.add(created.id());
         return created;
     }
 
     private int stockOf(long productId) {
-        ProductResponse current = rest.getForObject("/api/products/" + productId, ProductResponse.class);
+        ProductSnapshot current = rest.getForObject("/api/products/" + productId, ProductSnapshot.class);
         assertThat(current).isNotNull();
         return current.stockQuantity();
     }
@@ -95,7 +95,7 @@ class OrderApiIT extends IntegrationTest {
     @Test
     @DisplayName("a checkout creates the order, empties the cart and reduces the stock")
     void placeOrderEndToEnd() {
-        ProductResponse headset = product("IT Headset", "89.00", 5);
+        ProductSnapshot headset = product("IT Headset", "89.00", 5);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(headset.id(), 2), CartResponse.class);
 
         ResponseEntity<OrderResponse> response = shopper.postForEntity("/api/orders", null, OrderResponse.class);
@@ -127,8 +127,8 @@ class OrderApiIT extends IntegrationTest {
     @Test
     @DisplayName("a checkout that exceeds stock is a 409 and changes nothing at all")
     void insufficientStockRollsEverythingBack() {
-        ProductResponse plenty = product("IT Webcam", "70.00", 10);
-        ProductResponse scarce = product("IT Tripod", "30.00", 1);
+        ProductSnapshot plenty = product("IT Webcam", "70.00", 10);
+        ProductSnapshot scarce = product("IT Tripod", "30.00", 1);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(plenty.id(), 2), CartResponse.class);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(scarce.id(), 3), CartResponse.class);
 
@@ -157,7 +157,7 @@ class OrderApiIT extends IntegrationTest {
     @Test
     @DisplayName("two simultaneous checkouts for the last unit end as one 201 and one 409")
     void theLastUnitIsSoldExactlyOnce() throws Exception {
-        ProductResponse lastOne = product("IT Rare Lens", "999.00", 1);
+        ProductSnapshot lastOne = product("IT Rare Lens", "999.00", 1);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(lastOne.id(), 1), CartResponse.class);
 
         // Two real HTTP requests on two threads, released together by the latch so they overlap
@@ -204,7 +204,7 @@ class OrderApiIT extends IntegrationTest {
     @DisplayName("one customer cannot read another customer's order, even knowing its id")
     void anotherCustomersOrderIsNotReadable() {
         // Given: our shopper places an order
-        ProductResponse book = product("IT Notebook", "12.00", 5);
+        ProductSnapshot book = product("IT Notebook", "12.00", 5);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(book.id(), 1), CartResponse.class);
         OrderResponse mine = shopper.postForEntity("/api/orders", null, OrderResponse.class).getBody();
         assertThat(mine).isNotNull();
@@ -249,7 +249,7 @@ class OrderApiIT extends IntegrationTest {
     @Test
     @DisplayName("an order records the account that placed it")
     void anOrderKnowsWhoPlacedIt() {
-        ProductResponse pen = product("IT Pen", "3.00", 10);
+        ProductSnapshot pen = product("IT Pen", "3.00", 10);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(pen.id(), 1), CartResponse.class);
 
         OrderResponse placed = shopper.postForEntity("/api/orders", null, OrderResponse.class).getBody();

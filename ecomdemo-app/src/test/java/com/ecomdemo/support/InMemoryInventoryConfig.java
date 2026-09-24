@@ -1,6 +1,6 @@
 package com.ecomdemo.support;
 
-import com.ecomdemo.inventory.InventoryGateway;
+import com.ecomdemo.clients.inventory.InventoryGateway;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;

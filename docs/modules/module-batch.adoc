@@ -19,6 +19,6 @@ _Others_
 
 * `c.e.b.BatchConfig`
 |Bean references
-|* `c.e.c.ProductService` (in Catalog)
-* `c.e.i.InventoryGateway` (in Inventory (client))
+|* `c.e.c.catalog.CatalogGateway` (in Service clients)
+* `c.e.c.inventory.InventoryGateway` (in Service clients)
 |===

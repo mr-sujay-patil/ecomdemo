@@ -16,8 +16,8 @@ import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.catalog.Product;
-import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.CatalogGateway;
 import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import java.util.Optional;
@@ -33,7 +33,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
  * Unit tests for {@link CartService}.
  *
  * <p>Two collaborators are mocked here, and they are mocked for different reasons.
- * {@code CartRepository} is replaced to keep the database out; {@code ProductService} is
+ * {@code CartRepository} is replaced to keep the database out; {@code CatalogGateway} is
  * replaced because this test is about cart rules, and a real product lookup would drag its own
  * repository in with it. Mocking at the service boundary is what keeps a failure here pointing
  * at {@code CartService} and nothing else.
@@ -54,7 +54,7 @@ class CartServiceTest {
     private CartRepository cartRepository;
 
     @Mock
-    private ProductService productService;
+    private CatalogGateway catalogue;
 
     @Mock
     private CurrentUser currentUser;
@@ -81,8 +81,8 @@ class CartServiceTest {
         void view_whenTheCartHasLines_returnsThemWithAServerCalculatedTotal() {
             // Given: 2 x 1500.00 plus 3 x 100.50
             Cart cart = TestData.cart(1L);
-            TestData.addTo(cart, TestData.product(10L, "Lamp", "1500.00", 9), 2);
-            TestData.addTo(cart, TestData.product(11L, "Cable", "100.50", 9), 3);
+            TestData.addTo(cart, TestData.product(10L, "Lamp", "1500.00"), 2);
+            TestData.addTo(cart, TestData.product(11L, "Cable", "100.50"), 3);
             givenTheCallersCartIs(cart);
 
             // When
@@ -118,9 +118,9 @@ class CartServiceTest {
         void addItem_whenTheProductIsNotYetInTheCart_addsANewLine() {
             // Given
             Cart cart = TestData.cart(1L);
-            Product product = TestData.product(10L, "Lamp", "1500.00", 9);
+            ProductSnapshot product = TestData.product(10L, "Lamp", "1500.00");
             givenTheCallersCartIs(cart);
-            when(productService.requireProduct(10L)).thenReturn(product);
+            when(catalogue.requireProduct(10L)).thenReturn(product);
 
             // When
             CartResponse view = cartService.addItem(new AddCartItemRequest(10L, 2));
@@ -135,10 +135,10 @@ class CartServiceTest {
         @Test
         void addItem_whenTheProductIsAlreadyInTheCart_increasesThatLineInsteadOfDuplicatingIt() {
             // Given: the cart already holds 2 of product 10
-            Product product = TestData.product(10L, "Lamp", "1500.00", 9);
+            ProductSnapshot product = TestData.product(10L, "Lamp", "1500.00");
             Cart cart = TestData.cartWith(1L, product, 2);
             givenTheCallersCartIs(cart);
-            when(productService.requireProduct(10L)).thenReturn(product);
+            when(catalogue.requireProduct(10L)).thenReturn(product);
 
             // When
             CartResponse view = cartService.addItem(new AddCartItemRequest(10L, 3));
@@ -153,7 +153,7 @@ class CartServiceTest {
         void addItem_whenTheProductDoesNotExist_throwsNotFoundAndSavesNothing() {
             // Given
             givenTheCallersCartIs(TestData.cart(1L));
-            when(productService.requireProduct(404L)).thenThrow(NotFoundException.product(404L));
+            when(catalogue.requireProduct(404L)).thenThrow(NotFoundException.product(404L));
 
             // When / Then
             AddCartItemRequest request = new AddCartItemRequest(404L, 1);
@@ -171,7 +171,7 @@ class CartServiceTest {
         @Test
         void updateItem_whenTheLineExists_replacesTheQuantity() {
             // Given
-            Product product = TestData.product(10L, "Lamp", "1500.00", 9);
+            ProductSnapshot product = TestData.product(10L, "Lamp", "1500.00");
             Cart cart = TestData.cartWith(1L, product, 2);
             givenTheCallersCartIs(cart);
 
@@ -206,8 +206,8 @@ class CartServiceTest {
         void removeItem_whenTheLineExists_dropsItAndLeavesTheOthers() {
             // Given
             Cart cart = TestData.cart(1L);
-            TestData.addTo(cart, TestData.product(10L, "Lamp", "1500.00", 9), 2);
-            TestData.addTo(cart, TestData.product(11L, "Cable", "100.50", 9), 3);
+            TestData.addTo(cart, TestData.product(10L, "Lamp", "1500.00"), 2);
+            TestData.addTo(cart, TestData.product(11L, "Cable", "100.50"), 3);
             givenTheCallersCartIs(cart);
 
             // When
@@ -272,7 +272,7 @@ class CartServiceTest {
         @Test
         void clearCart_whenCalled_emptiesTheCartAndSavesIt() {
             // Given
-            Cart cart = TestData.cartWith(1L, TestData.product(10L, "Lamp", "1500.00", 9), 2);
+            Cart cart = TestData.cartWith(1L, TestData.product(10L, "Lamp", "1500.00"), 2);
 
             // When
             cartService.clearCart(cart);

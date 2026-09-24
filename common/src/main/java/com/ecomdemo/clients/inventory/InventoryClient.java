@@ -1,4 +1,4 @@
-package com.ecomdemo.inventory;
+package com.ecomdemo.clients.inventory;
 
 import com.ecomdemo.shared.InsufficientStockException;
 import java.util.Collection;

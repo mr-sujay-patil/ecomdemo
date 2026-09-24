@@ -1,8 +1,0 @@
-[%autowidth.stretch, cols="h,a"]
-|===
-|Base package
-|`com.ecomdemo.cache`
-|Spring components
-|* `c.e.c.CacheConfig`
-* `c.e.c.ProductCacheEvictor`
-|===

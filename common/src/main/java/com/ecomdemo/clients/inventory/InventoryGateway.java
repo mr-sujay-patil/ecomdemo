@@ -1,4 +1,4 @@
-package com.ecomdemo.inventory;
+package com.ecomdemo.clients.inventory;
 
 import java.util.Collection;
 import java.util.Map;

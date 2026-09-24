@@ -28,9 +28,9 @@ import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.catalog.Product;
-import com.ecomdemo.catalog.ProductService;
-import com.ecomdemo.inventory.InventoryClient;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.CatalogGateway;
+import com.ecomdemo.clients.inventory.InventoryClient;
 import com.ecomdemo.customer.CurrentUser;
 import com.ecomdemo.support.TestData;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,16 +53,16 @@ import org.mockito.stubbing.Answer;
  * run against a real context and a real database, which is the only place atomicity and
  * rollback can honestly be proven.
  *
- * <p>Stock is asserted on the {@link Product} entities themselves rather than through the mocks:
+ * <p>Stock is asserted on the {@link ProductSnapshot} entities themselves rather than through the mocks:
  * {@code reduceStock} mutates the object the cart holds, so checking the object proves the
- * arithmetic, while {@code verify(productService).save(...)} proves the change was persisted.
+ * arithmetic, while {@code verify(catalogue).save(...)} proves the change was persisted.
  *
  * <p><strong>{@link InventoryClient} is REAL here, and that is deliberate (Phase 19).</strong>
  * Stock moved out of this class into the inventory module, and a mocked inventory would turn every
  * assertion below about stock arithmetic and about {@code InsufficientStockException} into an
  * assertion that a mock was called — the tests would pass while the behaviour they describe had
  * been deleted. Only the catalogue's persistence is mocked, which keeps
- * {@code verify(productService).save(...)} meaning what it meant before the split: the change was
+ * {@code verify(catalogue).save(...)} meaning what it meant before the split: the change was
  * handed to the catalogue to persist.
  */
 @ExtendWith(MockitoExtension.class)
@@ -77,7 +77,7 @@ class OrderPlacementServiceTest {
     /**
      * Mocked since Phase 20, where {@code TestData.product} was real.
      *
-     * <p>Stock left {@code Product} for {@code product_stock}, so there is no field on the entity
+     * <p>Stock left {@code ProductSnapshot} for {@code product_stock}, so there is no field on the entity
      * for a real {@code InventoryClient} to change and nothing for an assertion to read back. The
      * arithmetic those assertions used to make now belongs to {@code InventoryServiceTest}, which
      * tests it against a database. What is left here is this class's own share: that checkout asks
@@ -133,8 +133,8 @@ class OrderPlacementServiceTest {
     @Test
     void placeOnce_whenEveryLineIsInStock_savesTheOrderReducesStockAndEmptiesTheCart() {
         // Given: 2 x 1500.00 plus 3 x 100.50
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
-        Product cable = TestData.product(11L, "Cable", "100.50", 4);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
+        ProductSnapshot cable = TestData.product(11L, "Cable", "100.50");
         Cart cart = TestData.cart(1L);
         TestData.addTo(cart, lamp, 2);
         TestData.addTo(cart, cable, 3);
@@ -162,7 +162,7 @@ class OrderPlacementServiceTest {
     @Test
     void placeOnce_whenCalled_snapshotsTheNameAndPriceOfEachLine() {
         // Given
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
         when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
@@ -196,7 +196,7 @@ class OrderPlacementServiceTest {
     @Test
     void placeOnce_whenALineExceedsStock_throwsInsufficientStockNamingTheShortfall() {
         // Given: 3 wanted, only 2 available
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 3));
 
         // Inventory owns the shortfall and the message since Phase 20. What checkout owns is
@@ -217,8 +217,8 @@ class OrderPlacementServiceTest {
     void placeOnce_whenALaterLineExceedsStock_leavesTheEarlierLinesStockUntouched() {
         // Given: line 1 is fine, line 2 is short. Every line is checked before any stock is
         // written, so a partial reduction must not happen.
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
-        Product cable = TestData.product(11L, "Cable", "100.50", 1);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
+        ProductSnapshot cable = TestData.product(11L, "Cable", "100.50");
         Cart cart = TestData.cart(1L);
         TestData.addTo(cart, lamp, 2);
         TestData.addTo(cart, cable, 3);
@@ -242,7 +242,7 @@ class OrderPlacementServiceTest {
     @Test
     void placeOnce_whenALineTakesTheLastUnit_succeedsAndLeavesZeroStock() {
         // Given: the boundary — requesting exactly what is available is allowed
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
         when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
@@ -273,7 +273,7 @@ class OrderPlacementServiceTest {
     @Test
     void placeOnce_whenALineExceedsStock_auditsTheRejectionWithTheShortfall() {
         // Given
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 2);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 3));
 
         // Inventory owns the shortfall and the message since Phase 20. What checkout owns is
@@ -294,7 +294,7 @@ class OrderPlacementServiceTest {
     @Test
     void placeOnce_whenTheOrderSucceeds_writesNoRejectionAudit() {
         // Given
-        Product lamp = TestData.product(10L, "Lamp", "1500.00", 9);
+        ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
         when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
@@ -317,7 +317,7 @@ class OrderPlacementServiceTest {
         // about what was recorded and not about Kafka. The event id is generated here, once, and
         // travels with the message - which is what lets the consumer recognise a redelivery (see
         // NotificationServiceTest), and what lets the relay republish a row safely.
-        Product product = TestData.product(1L, "Desk Lamp", "1200.00", 5);
+        ProductSnapshot product = TestData.product(1L, "Desk Lamp", "1200.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, product, 2));
         when(currentUser.require()).thenReturn(SHOPPER);
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));

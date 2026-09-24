@@ -2,12 +2,6 @@
 |===
 |Base package
 |`com.ecomdemo.catalog`
-|Spring components
-|_Services_
-
-* `c.e.c.ProductService`
 |Bean references
-|* `c.e.i.InventoryGateway` (in Inventory (client))
-|Aggregate roots
-|* `c.e.c.Product`
+|* `c.e.c.catalog.CatalogGateway` (in Service clients)
 |===

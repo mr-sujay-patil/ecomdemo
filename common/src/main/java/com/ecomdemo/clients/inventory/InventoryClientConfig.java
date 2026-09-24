@@ -1,13 +1,9 @@
-package com.ecomdemo.inventory;
+package com.ecomdemo.clients.inventory;
 
-import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.jwt.ServiceTokenProvider;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpHeaders;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -22,19 +18,6 @@ import org.springframework.web.client.RestClient;
 @Configuration
 @EnableConfigurationProperties(InventoryProperties.class)
 class InventoryClientConfig {
-
-    /**
-     * The name this application presents to inventory-service. It is what shows up in that
-     * service's request log, so the field is worth a constant rather than a literal at the call
-     * site — when order-service is the one making these calls, this is the single line that
-     * changes.
-     */
-    private static final String CALLER = "ecomdemo-app";
-
-    @Bean
-    ServiceTokenProvider inventoryServiceTokenProvider(JwtEncoder encoder, JwtProperties properties) {
-        return new ServiceTokenProvider(encoder, properties, CALLER);
-    }
 
     /**
      * A builder of our own, deliberately not the auto-configured {@code RestClient.Builder}.

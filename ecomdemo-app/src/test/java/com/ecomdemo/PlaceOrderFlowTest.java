@@ -13,11 +13,12 @@ import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.order.internal.OrderService;
 import com.ecomdemo.order.OrderStatus;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
-import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.CatalogGateway;
+import com.ecomdemo.support.InMemoryCatalogConfig;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import com.ecomdemo.inventory.InventoryClient;
+import com.ecomdemo.clients.inventory.InventoryClient;
 import com.ecomdemo.support.TestAuthentication;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.AfterEach;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 
 /**
  * The one integration test of this phase: the whole place-order flow against a real Spring
@@ -39,10 +41,11 @@ import org.springframework.boot.test.context.SpringBootTest;
  * {@link TestAuthentication} for why {@code @WithMockUser} is not enough here.
  */
 @SpringBootTest
+@Import(InMemoryCatalogConfig.class)
 class PlaceOrderFlowTest {
 
     @Autowired
-    private ProductService productService;
+    private CatalogGateway catalogue;
 
     @Autowired
     private CartService cartService;
@@ -77,8 +80,8 @@ class PlaceOrderFlowTest {
     @Test
     void placingAnOrderChargesTheCartTotalReservesStockAndEmptiesTheCart() {
         // A product of our own, so the test does not depend on the seeded catalogue.
-        ProductResponse product = productService.create(
-                new ProductRequest("Test Widget", "Created by the flow test", new BigDecimal("19.99"), 10, "ACCESSORIES"));
+        ProductSnapshot product = catalogue.create(
+                new ProductWrite("Test Widget", "Created by the flow test", new BigDecimal("19.99"), 10, "ACCESSORIES"));
 
         CartResponse cart = cartService.addItem(new AddCartItemRequest(product.id(), 3));
         assertThat(cart.items()).hasSize(1);

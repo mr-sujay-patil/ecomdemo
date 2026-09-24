@@ -3,7 +3,7 @@ package com.ecomdemo.batch;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.batch.dto.ProductImportResponse;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +17,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
-import org.springframework.cache.CacheManager;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -49,9 +48,6 @@ class ProductImportJobIT extends IntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
-    @Autowired
-    private CacheManager cacheManager;
-
     private TestRestTemplate admin;
 
     private final List<Path> writtenFiles = new ArrayList<>();
@@ -79,15 +75,12 @@ class ProductImportJobIT extends IntegrationTest {
         jdbc.update("DELETE FROM product WHERE name LIKE ?", PREFIX + "%");
         // The listing cache would otherwise keep serving the products this class just deleted to
         // whichever test class runs next.
-        evictTheCatalogueListing();
+        // THE MANUAL CACHE EVICTION THAT WAS HERE IS GONE. The catalogue's cache is in
+        // catalog-service now, and this test cannot reach it — which is the right answer rather
+        // than a limitation: the import writes through catalog-service, which evicts its own
+        // caches as part of the same call, so there is nothing left for a caller to remember.
     }
 
-    private void evictTheCatalogueListing() {
-        var listing = cacheManager.getCache(com.ecomdemo.cache.CacheNames.PRODUCT_LIST);
-        if (listing != null) {
-            listing.evict("all");
-        }
-    }
 
     @Test
     @DisplayName("ten thousand rows import, the invalid ones are skipped and listed in the error file")
@@ -113,7 +106,7 @@ class ProductImportJobIT extends IntegrationTest {
 
         // Prime the listing cache, so the assertion at the end is about eviction and not about a
         // cache that happened to be empty.
-        admin.getForEntity("/api/products", ProductResponse[].class);
+        admin.getForEntity("/api/products", ProductSnapshot[].class);
 
         ProductImportResponse response = upload(csv.toString());
 
@@ -153,8 +146,8 @@ class ProductImportJobIT extends IntegrationTest {
 
         // And the catalogue the API serves is the one the import produced, not the cached one
         // from before it.
-        ResponseEntity<ProductResponse[]> listing =
-                admin.getForEntity("/api/products", ProductResponse[].class);
+        ResponseEntity<ProductSnapshot[]> listing =
+                admin.getForEntity("/api/products", ProductSnapshot[].class);
         assertThat(listing.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listing.getBody())
                 .anyMatch(product -> (PREFIX + "00001").equals(product.name()));

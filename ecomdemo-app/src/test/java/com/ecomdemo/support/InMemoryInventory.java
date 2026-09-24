@@ -1,6 +1,6 @@
 package com.ecomdemo.support;
 
-import com.ecomdemo.inventory.InventoryGateway;
+import com.ecomdemo.clients.inventory.InventoryGateway;
 import com.ecomdemo.shared.InsufficientStockException;
 import java.util.Collection;
 import java.util.Map;

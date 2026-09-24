@@ -2,7 +2,10 @@ package com.ecomdemo.catalog.internal;
 
 import com.ecomdemo.catalog.ProductService;
 import com.ecomdemo.catalog.Product;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.ProductUpsert;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,7 +56,7 @@ class ProductServiceTest {
      * arithmetic behind it is {@code InventoryServiceTest}'s, against a database.
      */
     @Mock
-    private com.ecomdemo.inventory.InventoryClient inventory;
+    private com.ecomdemo.clients.inventory.InventoryClient inventory;
 
     @InjectMocks
     private ProductService productService;
@@ -70,8 +73,8 @@ class ProductServiceTest {
             // Given
             when(productRepository.findAll())
                     .thenReturn(List.of(
-                            TestData.product(1L, "Keyboard", "8999.00", 25),
-                            TestData.product(2L, "Mouse", "3499.00", 40)));
+                            TestData.product(1L, "Keyboard", "8999.00"),
+                            TestData.product(2L, "Mouse", "3499.00")));
 
             // When
             List<ProductResponse> found = productService.findAll();
@@ -103,7 +106,7 @@ class ProductServiceTest {
         void findById_whenProductExists_returnsEveryField() {
             // Given
             when(productRepository.findById(7L))
-                    .thenReturn(Optional.of(TestData.product(7L, "Monitor", "24999.50", 5)));
+                    .thenReturn(Optional.of(TestData.product(7L, "Monitor", "24999.50")));
 
             // The quantity comes from inventory since Phase 20, not from the product row. The API
             // shape is unchanged, which is the point of asserting it here: a client cannot tell
@@ -161,7 +164,7 @@ class ProductServiceTest {
             // Given: the database assigns the id, so the response must be built from whatever
             // save() returned, never from the instance the service constructed
             when(productRepository.save(any(Product.class)))
-                    .thenReturn(TestData.product(99L, "Desk Mat", "1299.00", 12));
+                    .thenReturn(TestData.product(99L, "Desk Mat", "1299.00"));
 
             // When
             ProductResponse created = productService.create(VALID_REQUEST);
@@ -178,7 +181,7 @@ class ProductServiceTest {
         @Test
         void update_whenProductExists_overwritesEveryFieldAndSaves() {
             // Given
-            Product existing = TestData.product(3L, "Old name", "10.00", 1);
+            Product existing = TestData.product(3L, "Old name", "10.00");
             when(productRepository.findById(3L)).thenReturn(Optional.of(existing));
             when(productRepository.save(existing)).thenAnswer(saveReturnsItsArgument());
 
@@ -214,7 +217,7 @@ class ProductServiceTest {
         @Test
         void delete_whenProductExists_deletesThatEntity() {
             // Given
-            Product existing = TestData.product(3L, "Keyboard", "8999.00", 25);
+            Product existing = TestData.product(3L, "Keyboard", "8999.00");
             when(productRepository.findById(3L)).thenReturn(Optional.of(existing));
 
             // When
@@ -244,7 +247,7 @@ class ProductServiceTest {
         @Test
         void requireProduct_whenProductExists_returnsTheEntityItself() {
             // Given
-            Product existing = TestData.product(3L, "Keyboard", "8999.00", 25);
+            Product existing = TestData.product(3L, "Keyboard", "8999.00");
             when(productRepository.findById(3L)).thenReturn(Optional.of(existing));
 
             // When
@@ -272,4 +275,66 @@ class ProductServiceTest {
     private static Answer<Product> saveReturnsItsArgument() {
         return invocation -> invocation.getArgument(0);
     }
+
+    @Nested
+    @DisplayName("bulk upsert, for the CSV import in another service")
+    class UpsertAll {
+
+        /**
+         * THIS TEST CAME FROM ANOTHER MODULE. It used to live in {@code ProductImportProcessorTest}
+         * in the application, where the import looked a product up by name before saving it. Doing
+         * that across a network would be one HTTP call per ROW, so the resolution moved here — and
+         * the test that guards it had to move with the behaviour, or the idempotency of a re-import
+         * would have quietly stopped being covered by anything.
+         */
+        @Test
+        @DisplayName("a null id resolves by name, so a re-import updates rather than duplicates")
+        void nullIdResolvesByName() {
+            Product existing = TestData.product(3L, "Widget", "1.00");
+            when(productRepository.findFirstByNameOrderByIdAsc("Widget"))
+                    .thenReturn(Optional.of(existing));
+            when(productRepository.saveAll(anyList())).thenAnswer(call -> call.getArgument(0));
+
+            List<ProductSnapshot> saved = productService.upsertAll(List.of(
+                    new ProductUpsert(null, "Widget", "new description", new BigDecimal("12.50"), "TEST")));
+
+            assertThat(saved).singleElement().satisfies(product -> {
+                assertThat(product.id()).as("the existing product, not a second one").isEqualTo(3L);
+                assertThat(product.description()).isEqualTo("new description");
+                assertThat(product.price()).isEqualByComparingTo("12.50");
+            });
+        }
+
+        @Test
+        @DisplayName("a name nothing matches becomes a new product with no id yet")
+        void unknownNameCreates() {
+            when(productRepository.findFirstByNameOrderByIdAsc("Fresh")).thenReturn(Optional.empty());
+            when(productRepository.saveAll(anyList())).thenAnswer(call -> call.getArgument(0));
+
+            List<ProductSnapshot> saved = productService.upsertAll(List.of(
+                    new ProductUpsert(null, "Fresh", "brand new", new BigDecimal("9.99"), "TEST")));
+
+            assertThat(saved).singleElement().satisfies(product -> {
+                assertThat(product.id()).as("the database assigns it on flush").isNull();
+                assertThat(product.name()).isEqualTo("Fresh");
+            });
+        }
+
+        @Test
+        @DisplayName("stockQuantity comes back null, because the catalogue was never asked")
+        void doesNotInventAStockNumber() {
+            when(productRepository.findFirstByNameOrderByIdAsc("Fresh")).thenReturn(Optional.empty());
+            when(productRepository.saveAll(anyList())).thenAnswer(call -> call.getArgument(0));
+
+            List<ProductSnapshot> saved = productService.upsertAll(List.of(
+                    new ProductUpsert(null, "Fresh", "brand new", new BigDecimal("9.99"), "TEST")));
+
+            // The import sets stock through its OWN call to inventory-service. A number invented
+            // here would be a guess about another service's data; null says "not asked".
+            assertThat(saved).singleElement()
+                    .extracting(ProductSnapshot::stockQuantity)
+                    .isNull();
+        }
+    }
+
 }

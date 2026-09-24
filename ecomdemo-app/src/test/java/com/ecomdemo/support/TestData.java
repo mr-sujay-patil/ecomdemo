@@ -4,7 +4,7 @@ import com.ecomdemo.cart.Cart;
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
 import com.ecomdemo.order.Order;
-import com.ecomdemo.catalog.Product;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -25,21 +25,27 @@ public final class TestData {
     private TestData() {
     }
 
-    /** A product with a fixed id, as if it had already been saved. */
+    /**
+     * A product with a fixed id, as if the catalogue had returned it.
+     *
+     * <p>It is a {@code ProductSnapshot} rather than a {@code ProductSnapshot} entity, and the
+     * {@code stockQuantity} parameter is gone. Both changes are Phase 20c: the entity belongs to
+     * catalog-service now, and this module can only ever hold what a catalogue call returns. The
+     * quantity had already stopped meaning anything in 20a and was still being passed — a
+     * parameter that documents intent and changes nothing reads like a setup step.
+     */
     /**
      * A catalogue product with a fixed id.
      *
      * <p><strong>The stock argument is kept and ignored since Phase 20</strong>, deliberately.
-     * Stock left {@code Product} for {@code product_stock}, so there is no field here to set - but
+     * Stock left {@code ProductSnapshot} for {@code product_stock}, so there is no field here to set - but
      * dozens of tests read as "a lamp, nine in stock", and rewriting every call site to drop the
      * number would lose the only readable statement of what the scenario is about. Tests that
      * actually depend on the quantity stub {@code InventoryService} for it; the rest are
      * documenting intent, which this parameter still does.
      */
-    public static Product product(long id, String name, String price, int stockQuantity) {
-        Product product = new Product(name, name + " description", new BigDecimal(price));
-        ReflectionTestUtils.setField(product, "id", id);
-        return product;
+    public static ProductSnapshot product(long id, String name, String price) {
+        return new ProductSnapshot(id, name, name + " description", new BigDecimal(price), null, 0);
     }
 
     /**
@@ -83,20 +89,20 @@ public final class TestData {
     /**
      * A cart holding one line: {@code quantity} of {@code product}.
      *
-     * <p>Still takes a {@code Product} for readability at the call sites, and snapshots it the way
+     * <p>Still takes a {@code ProductSnapshot} for readability at the call sites, and snapshots it the way
      * {@code CartService} does. Since Phase 20 the cart stores remembered values rather than an
      * association, so what a test builds here is a line that will NOT follow a later price change
      * - which is the behaviour under test in {@code CartServiceTest}.
      */
-    public static Cart cartWith(long id, Product product, int quantity) {
+    public static Cart cartWith(long id, ProductSnapshot product, int quantity) {
         Cart cart = cart(id);
         addTo(cart, product, quantity);
         return cart;
     }
 
     /** Adds a product to a cart the way {@code CartService} does: as a snapshot. */
-    public static void addTo(Cart cart, Product product, int quantity) {
-        cart.addItem(product.getId(), product.getName(), product.getPrice(), quantity);
+    public static void addTo(Cart cart, ProductSnapshot product, int quantity) {
+        cart.addItem(product.id(), product.name(), product.price(), quantity);
     }
 
     /** An order with a fixed id, placed now by {@link #customer()}. */

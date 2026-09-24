@@ -1,7 +1,6 @@
 package com.ecomdemo.batch;
 
-import com.ecomdemo.catalog.Product;
-import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.clients.catalog.ProductUpsert;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.springframework.batch.infrastructure.item.ItemProcessor;
@@ -48,15 +47,12 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, ImportedPro
     private static final int MAX_CATEGORY = 50;
     private static final int MAX_PRICE_SCALE = 2;
 
-    private final ProductService catalogue;
-
     /**
      * The import sets stock, so since Phase 19 it goes through the inventory module like every
      * other write to that number. The alternative - calling {@code setStockQuantity} directly -
      * would be a hole in the boundary exactly wide enough to make the boundary meaningless.
      */
-    ProductImportProcessor(ProductService catalogue) {
-        this.catalogue = catalogue;
+    ProductImportProcessor() {
     }
 
     @Override
@@ -85,15 +81,14 @@ class ProductImportProcessor implements ItemProcessor<ProductCsvRow, ImportedPro
         BigDecimal price = price(row);
         int stock = stockQuantity(row);
 
-        // The upsert. An existing product is a MANAGED entity inside the chunk's transaction, so
-        // these setters are enough on their own - the writer's save() is what makes the intent
-        // explicit rather than what makes it happen.
-        Product product = catalogue.findFirstByName(name)
-                .orElseGet(() -> new Product(name, description, price, category));
-        product.setName(name);
-        product.setDescription(description);
-        product.setPrice(price);
-        product.setCategory(category);
+        // THE LOOKUP MOVED TO THE OTHER SIDE. This used to find an existing product by name and
+        // mutate it, which worked because the result was a managed entity inside the chunk's
+        // transaction. Across a network that would be one HTTP call per ROW just to learn an id -
+        // an N+1 over the wire, on the one job built to handle ten thousand of them.
+        //
+        // So the row travels as a value with a null id, and catalog-service resolves the name
+        // when it writes the chunk. Same rule, same "oldest first" behaviour, one round trip.
+        ProductUpsert product = new ProductUpsert(null, name, description, price, category);
 
         // Stock is NOT set here, and the reason is the whole of Phase 20 in one line: it lives in
         // another table now, and shortly in another database, so it is not a field on this object.

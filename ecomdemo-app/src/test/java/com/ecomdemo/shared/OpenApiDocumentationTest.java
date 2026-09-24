@@ -142,7 +142,7 @@ class OpenApiDocumentationTest {
     void apiDocs_everyRequestSchemaProperty_carriesAnExample() {
         // Given: the schemas a client has to fill in by hand
         List<String> requestSchemas =
-                List.of("ProductRequest", "AddCartItemRequest", "UpdateCartItemRequest");
+                List.of("ProductWrite", "AddCartItemRequest", "UpdateCartItemRequest");
 
         // When / Then
         requestSchemas.forEach(name -> schema(name).path("properties").properties()
@@ -155,7 +155,7 @@ class OpenApiDocumentationTest {
     void apiDocs_theProductRequestSchema_repeatsTheValidationConstraints() {
         // Given / When: springdoc reads the Bean Validation annotations already on the record,
         // which is why @Schema does not restate them
-        JsonNode productRequest = schema("ProductRequest");
+        JsonNode productRequest = schema("ProductWrite");
 
         // Then
         assertThat(productRequest.path("required").values())

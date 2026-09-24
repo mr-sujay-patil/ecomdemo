@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Import;
  *   <li>{@code com.ecomdemo.cache} — the Redis cache moved in with the catalogue. It is not a
  *       shared facility; it exists to make <em>these</em> reads fast, and 20a showed it cannot live
  *       in {@code common} because it reads catalog's DTOs and listens for inventory's stock event.
- *   <li>{@code com.ecomdemo.inventory} — the client for inventory-service, which moved to
+ *   <li>{@code com.ecomdemo.clients.inventory} — the client for inventory-service, which moved to
  *       {@code common} in this phase so that two services can call one API without two copies of
  *       the error mapping that keeps the split invisible to shoppers.
  * </ul>
@@ -30,7 +30,7 @@ import org.springframework.context.annotation.Import;
 @SpringBootApplication(scanBasePackages = {
         "com.ecomdemo.catalog",
         "com.ecomdemo.cache",
-        "com.ecomdemo.inventory",
+        "com.ecomdemo.clients",
         "com.ecomdemo.jwt",
         "com.ecomdemo.logging",
         "com.ecomdemo.shared"
@@ -38,7 +38,7 @@ import org.springframework.context.annotation.Import;
 @ConfigurationPropertiesScan(basePackages = {
         "com.ecomdemo.catalog",
         "com.ecomdemo.cache",
-        "com.ecomdemo.inventory",
+        "com.ecomdemo.clients",
         "com.ecomdemo.jwt"
 })
 @Import(MetricsConfig.class)

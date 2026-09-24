@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
-import com.ecomdemo.support.IntegrationTest;
+import com.ecomdemo.support.CatalogIntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -33,7 +33,7 @@ import org.springframework.http.ResponseEntity;
  * database. The slice tests assert the same rules with a fabricated principal; this is the only
  * place the rules, a real login and a real signature are exercised together.
  */
-class ProductApiIT extends IntegrationTest {
+class ProductApiIT extends CatalogIntegrationTest {
 
     /** Products created by a test, deleted again afterwards so the next test class starts clean. */
     private final List<Long> createdIds = new ArrayList<>();
@@ -43,8 +43,8 @@ class ProductApiIT extends IntegrationTest {
 
     @BeforeEach
     void signIn() {
-        admin = asAdmin();
-        customer = asCustomer("it-product-shopper");
+        admin = asService();
+        customer = asService();
     }
 
     @AfterEach

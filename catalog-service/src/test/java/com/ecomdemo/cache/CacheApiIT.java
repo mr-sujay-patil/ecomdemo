@@ -2,12 +2,9 @@ package com.ecomdemo.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.ecomdemo.cart.dto.AddCartItemRequest;
-import com.ecomdemo.cart.dto.CartItemResponse;
-import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
-import com.ecomdemo.support.IntegrationTest;
+import com.ecomdemo.support.CatalogIntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +31,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  * old value comes back, the read never reached PostgreSQL. That is unambiguous in a way a timing
  * assertion never is.
  */
-class CacheApiIT extends IntegrationTest {
+class CacheApiIT extends CatalogIntegrationTest {
 
     @Autowired
     private CacheManager cacheManager;
@@ -69,40 +66,32 @@ class CacheApiIT extends IntegrationTest {
     private ProductCacheEvictor evictor;
 
     @Autowired
-    private com.ecomdemo.inventory.InventoryGateway inventory;
+    private com.ecomdemo.clients.inventory.InventoryGateway inventory;
 
     @Autowired
     private TransactionTemplate transactions;
 
     private final List<Long> createdIds = new ArrayList<>();
 
+    /**
+     * One caller, where there used to be two.
+     *
+     * <p>This class had an {@code admin} and a {@code shopper}, and emptied the shopper's cart
+     * between tests so a leftover line could not fail the next checkout. Neither exists here:
+     * catalog-service has no cart and cannot tell an administrator from a shopper — both arrive as
+     * the application's service token. The cart housekeeping went with the three checkout tests
+     * that needed it.
+     */
     private TestRestTemplate admin;
 
-    private TestRestTemplate shopper;
-
     @BeforeEach
-    void signInAndStartFromAnEmptyCacheAndCart() {
-        admin = asAdmin();
-        shopper = asCustomer("it-cache-shopper");
-        // The account persists for the life of the container, so its cart carries whatever the
-        // previous test left in it. A leftover line makes the next checkout fail with 409 for a
-        // reason that has nothing to do with caching.
-        emptyTheCart();
+    void startFromAnEmptyCache() {
+        admin = asService();
         clearCaches();
-    }
-
-    private void emptyTheCart() {
-        CartResponse cart = shopper.getForObject("/api/cart", CartResponse.class);
-        if (cart != null) {
-            cart.items().stream()
-                    .map(CartItemResponse::productId)
-                    .forEach(id -> shopper.delete("/api/cart/items/" + id));
-        }
     }
 
     @AfterEach
     void cleanUp() {
-        emptyTheCart();
         createdIds.forEach(id -> admin.delete("/api/products/" + id));
         createdIds.clear();
         clearCaches();
@@ -290,107 +279,22 @@ class CacheApiIT extends IntegrationTest {
         assertThat(fromCache.price()).isEqualTo(new BigDecimal("42.50"));
     }
 
-    @Test
-    @DisplayName("CHECKOUT NEVER READS THE CACHE — the stock it decides on is always live")
-    void checkoutIgnoresTheCache() {
-        // This is the test the whole phase turns on. Caching the catalogue is harmless; caching
-        // the number a sale is decided against would resurrect the Phase 6 oversell bug in a form
-        // optimistic locking cannot catch, because the version it compares would itself be stale.
-        ProductResponse product = create("Cached Stock", "5.00", 3);
-
-        // Warm the cache, then move the real stock underneath it.
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
-                        .stockQuantity())
-                .isEqualTo(3);
-        inventory.setStockLevel(product.id(), 1);
-
-        // The catalogue is now knowingly stale — that is the accepted trade.
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
-                        .stockQuantity())
-                .as("the browsing view still shows the cached figure")
-                .isEqualTo(3);
-
-        // Buy 1 of the 1 that really exists. Checkout reads through requireProduct(), which is
-        // not cached, so it must see 1 and succeed...
-        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(product.id(), 1), String.class);
-        assertThat(shopper.postForEntity("/api/orders", null, String.class).getStatusCode())
-                .isEqualTo(HttpStatus.CREATED);
-
-        // ...and the database must now hold 0, not 2. A cached read of "3" would have left 2.
-        // Read through the gateway, because this database no longer has a product_stock table -
-        // V13 dropped it when inventory-service took ownership. The fake is what answers here; the
-        // real service answers in the smoke test.
-        int stock = inventory.quantityFor(product.id());
-        assertThat(stock)
-                .as("checkout decremented the LIVE value (1 -> 0), not the cached one (3 -> 2)")
-                .isZero();
-    }
-
-    @Test
-    @DisplayName("after a sale the catalogue is stale until inventory's message arrives, then correct")
-    void aSaleEvictsTheCatalogueWhenTheMessageArrives() {
-        // THE EVENTUAL CONSISTENCY THIS PHASE INTRODUCED, made explicit rather than discovered.
-        //
-        // This test used to say "a committed checkout leaves no stale stock behind", and its
-        // comment said "no sleep and no TTL: the eviction happened as part of finishing the
-        // checkout". That was true while inventory was a module - reducing stock and evicting the
-        // cache were two steps of one transaction in one process.
-        //
-        // It is not true now. The reduction happens in inventory-service, which publishes a
-        // message; this application evicts when the message ARRIVES. Between those two moments the
-        // catalogue advertises stock that has already been sold - a window that did not exist
-        // yesterday and cannot be closed without putting the two back in one process.
-        //
-        // So the test asserts the window and then the correction, because that is what the system
-        // now does. Asserting the old sentence would need inventory-service running; asserting
-        // nothing would let the window widen unnoticed.
-        ProductResponse product = create("Evicted After Sale", "250.00", 5);
-
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
-                        .stockQuantity())
-                .isEqualTo(5);
-        assertThat(listedStockOf(product.id())).isEqualTo(5);
-        assertThat(redis.keys("product::" + product.id())).isNotEmpty();
-
-        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(product.id(), 2), String.class);
-        assertThat(shopper.postForEntity("/api/orders", null, String.class).getStatusCode())
-                .isEqualTo(HttpStatus.CREATED);
-
-        // THE WINDOW. Stock really did move, and the catalogue has not heard.
-        assertThat(inventory.quantityFor(product.id()))
-                .as("the sale reduced stock in inventory")
-                .isEqualTo(3);
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
-                        .stockQuantity())
-                .as("and the cached catalogue is briefly wrong, which is the cost of the split")
-                .isEqualTo(5);
-
-        // THE CORRECTION, exactly as it happens in production: the message arrives and is consumed.
-        evictor.onStockChanged(new ProductCacheEvictor.ProductStockChanged(product.id()));
-
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
-                        .stockQuantity())
-                .as("once the message arrives the product page is correct")
-                .isEqualTo(3);
-        assertThat(listedStockOf(product.id()))
-                .as("and so is the listing, which is one cache entry for all products")
-                .isEqualTo(3);
-    }
-
-    @Test
-    @DisplayName("a second checkout of the last unit is still refused, with the cache warm")
-    void theOversellGuardStillHoldsWithACacheInFront() {
-        ProductResponse product = create("Cached Last One", "99.00", 1);
-        rest.getForObject("/api/products/" + product.id(), ProductResponse.class);
-
-        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(product.id(), 1), String.class);
-        assertThat(shopper.postForEntity("/api/orders", null, String.class).getStatusCode())
-                .isEqualTo(HttpStatus.CREATED);
-
-        // The one unit is gone. With a cached stock figure the second attempt would be allowed
-        // through and oversell; reading live, it is refused.
-        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(product.id(), 1), String.class);
-        assertThat(shopper.postForEntity("/api/orders", null, String.class).getStatusCode())
-                .isEqualTo(HttpStatus.CONFLICT);
-    }
+    // ------------------------------------------------------------------------------------------
+    // THREE TESTS LEFT THIS CLASS IN PHASE 20c, and where they went matters
+    // ------------------------------------------------------------------------------------------
+    // They asserted things that are no longer assertable from inside ONE deployable, because each
+    // needed a cart, an order and a stock reservation, and those now live in two other services:
+    //
+    //   "CHECKOUT NEVER READS THE CACHE"                -> smoke test, "Caching" section
+    //   "after a sale the catalogue is stale, then correct" -> smoke test, the convergence check
+    //   "the oversell guard still holds with the cache warm" -> smoke test, the race probe
+    //
+    // They were NOT dropped to make this module compile. Each claim was checked against the smoke
+    // test BEFORE the move, and two of the three were not in fact covered there: the smoke test
+    // warmed no cache before its oversell probe, and nothing asserted that checkout reads live
+    // stock. Those checks were ADDED to the smoke test in the same commit that removed these
+    // methods, which is the only thing that makes this a relocation rather than a deletion.
+    //
+    // This is the honest cost of the split: a claim that spans three services can only be made
+    // where all three are running, and that is the smoke test, not an integration test.
 }
