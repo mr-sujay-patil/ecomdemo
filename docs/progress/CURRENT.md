@@ -78,19 +78,56 @@ is the open risk of 20b.
 - **`mvn test-compile` can report success against STALE test classes.** Use `clean` after any
   signature change.
 
-## Decisions this phase
-- (none yet)
+## Decisions this phase — APPROVED BY THE USER, not yet implemented
+1. **Checkout reserves stock as a SAGA.** `OrderPlacementService.reserve` is
+   `Propagation.MANDATORY` today precisely so stock cannot commit while the order rolls back. Over
+   HTTP that guarantee is gone. Agreed shape: call reserve, and on failure compensate through an
+   `AFTER_ROLLBACK` hook calling a new RELEASE endpoint. To be documented honestly rather than
+   hidden: the compensating call can itself fail, so a crash between reserve and rollback leaks
+   stock until something reconciles. A reconciliation job is Phase 21+ work, NOT this phase.
+2. **`ProductStockChangedEvent` becomes a Kafka event** on a new `inventory.stock-changed` topic;
+   whoever caches catalogue data subscribes. This is what the event always wanted to be - the
+   Phase 16 comment on it already said "from Phase 17 the same fact is the natural thing to
+   publish to Kafka". Dropping the eviction and relying on the TTL was rejected: that is exactly
+   the defect Phase 16 was written to fix.
+
+## The extraction ORDER was corrected before any code moved
+The 20b housekeeping commit said catalog-service would go first, on the grounds that nothing
+depends on it. That is the wrong test. What matters for an extraction is what the service NEEDS,
+and catalog needs inventory (it asks for stock to fill ProductResponse). **inventory is the true
+leaf** - it depends on nothing but `common` - so it goes first and is the only service that can be
+extracted without writing an HTTP client in the same commit.
 
 ## Environment left behind
 Docker Desktop running, the compose stack **UP** (nine containers), schema **V12**. The SonarQube
 stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-Start step 5 (IMPLEMENTING) on plan §8 step 4: extract `catalog-service` first, because it is the
-one whose dependencies already point outward - 20a removed both edges INTO it from order and
-inventory, so it can leave with `cache` and take nothing else with it. Give it its own module, its
-own database and its own Flyway history, then have `ecomdemo-app` reach it over `RestClient`.
+Start with **inventory-service** (see the ordering correction above). The work is designed and the
+two decisions it depends on are approved; a first attempt was made and DELIBERATELY PARKED rather
+than left half-applied, so this branch is at the green housekeeping commit with a clean tree.
 
-Work one service per commit, running `./mvnw clean verify` after each. The smoke test cannot be
-trusted again until step 7 rebuilds it against per-service ports - that is the known cost of this
-half, recorded in the 20a report.
+The five call sites that have to change, surveyed:
+
+    order/internal/OrderPlacementService   InventoryService  -> HTTP + saga compensation
+    catalog/ProductService                 InventoryService  -> HTTP (batched quantitiesFor)
+    batch/ProductUpsertWriter              InventoryService  -> HTTP
+    batch/ProductImportJobConfig           InventoryService  -> HTTP (wiring only)
+    cache/ProductCacheEvictor              ProductStockChangedEvent -> Kafka consumer
+
+Order of work, each commit leaving `./mvnw clean verify` green:
+1. `inventory-service` module: pom, `InventoryServiceApplication`, move `com.ecomdemo.inventory`,
+   `inventory_db` with its own Flyway history starting at **V1** (the product_stock DDL carried
+   over verbatim from the monolith's V11 - the shape must not change, or the cutover becomes a
+   data change as well as a deployment change).
+2. Its REST API: read (single + BATCH, because a listing must not become N HTTP calls), set level,
+   reserve, release.
+3. An `InventoryClient` in `ecomdemo-app` behind the same method shapes the callers already use,
+   so the five sites change their wiring and not their logic.
+4. `inventory.stock-changed` published by the service, consumed where the cache lives.
+5. Compose: `inventory-db` + `inventory-service`, **384M limit**, health check, `depends_on`.
+
+WHAT IS NOT TRUE YET: no service is extracted, `ecomdemo-app` is still the whole application, and
+the smoke test still passes at 270 because nothing has moved. The moment step 1 lands, the smoke
+test stops being a valid net until step 7 rebuilds it per service - that is the known cost of this
+half and the reason 20a exists.
