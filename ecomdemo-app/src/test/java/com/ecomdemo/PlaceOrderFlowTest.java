@@ -1,6 +1,7 @@
 package com.ecomdemo;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ecomdemo.cart.CartService;
@@ -15,6 +16,8 @@ import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.catalog.ProductService;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import com.ecomdemo.inventory.InventoryClient;
 import com.ecomdemo.support.TestAuthentication;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.AfterEach;
@@ -51,6 +54,15 @@ class PlaceOrderFlowTest {
     private UserRepository userRepository;
 
     /** A shopper of this class's own, so its cart cannot collide with another test class's. */
+    /**
+     * Stock is in inventory-service since Phase 20b, so creating a product and reserving at
+     * checkout are both HTTP calls. Mocked here because this test is about the FLOW - cart to
+     * order to empty cart - and every claim it makes about stock is covered in the service that
+     * owns it.
+     */
+    @MockitoBean
+    private InventoryClient inventory;
+
     @BeforeEach
     void signIn() {
         TestAuthentication.authenticateAs(
@@ -63,7 +75,7 @@ class PlaceOrderFlowTest {
     }
 
     @Test
-    void placingAnOrderChargesTheCartTotalReducesStockAndEmptiesTheCart() {
+    void placingAnOrderChargesTheCartTotalReservesStockAndEmptiesTheCart() {
         // A product of our own, so the test does not depend on the seeded catalogue.
         ProductResponse product = productService.create(
                 new ProductRequest("Test Widget", "Created by the flow test", new BigDecimal("19.99"), 10, "ACCESSORIES"));
@@ -84,8 +96,16 @@ class PlaceOrderFlowTest {
             assertThat(line.quantity()).isEqualTo(3);
         });
 
-        // Stock went down by exactly the ordered quantity...
-        assertThat(productService.findById(product.id()).stockQuantity()).isEqualTo(7);
+        // ...inventory was asked to take exactly the ordered quantity...
+        //
+        // The assertion CHANGED in Phase 20b, and the change is the split in one line. It used to
+        // read the stock back and expect 7: create with 10, order 3. Stock is in another service's
+        // database now, so this test can see the REQUEST and not the result - what actually
+        // happened to the number is asserted in inventory-service, against the row itself.
+        //
+        // Weaker, and honest about being weaker. The alternative was to stand up a second
+        // application to re-assert something already covered where it belongs.
+        verify(inventory).reserve(product.id(), "Test Widget", 3);
 
         // ...the cart is empty again...
         assertThat(cartService.view().items()).isEmpty();

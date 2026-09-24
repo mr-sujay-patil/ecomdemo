@@ -109,6 +109,43 @@ class OrderPlacementService {
             // transaction does not survive. See the compensation below.
             List<Reservation> reserved = new ArrayList<>();
 
+            // THE COMPENSATION, and the most important lines in this method.
+            //
+            // Until Phase 20b `reserve` was Propagation.MANDATORY inside this very transaction, so
+            // a rollback after this point un-reserved the stock automatically and there was
+            // nothing to write here. inventory-service is another process now: each reservation
+            // commits there before this method reaches its next line, and no rollback of ours can
+            // reach them.
+            //
+            // So the undo becomes an action. The synchronisation fires after this transaction
+            // completes, and only when it completed by ROLLING BACK - the same machinery Phase 16
+            // used for cache eviction, pointed at the opposite outcome.
+            //
+            // REGISTERED BEFORE THE LOOP, and a test is the reason. The first version registered
+            // it AFTER, which reads naturally - you have the list, now say what to do with it -
+            // and is wrong in the one case that matters: a failure DURING the loop, which is the
+            // likeliest failure there is, left nothing registered and released nothing. The list
+            // is mutated as reservations succeed, so whatever was taken before the throw is
+            // exactly what gets given back.
+            //
+            // A compensating transaction is not a rollback. It is a second business operation that
+            // happens to mean the opposite of the first, and it can be lost: if this process dies
+            // between a reservation and the rollback, the stock stays taken for an order that never
+            // existed. Nothing reconciles that yet, and the test report says so rather than leaving
+            // it to be discovered.
+            if (TransactionSynchronizationManager.isSynchronizationActive()) {
+                TransactionSynchronizationManager.registerSynchronization(
+                        new TransactionSynchronization() {
+                            @Override
+                            public void afterCompletion(int status) {
+                                if (status != STATUS_ROLLED_BACK) {
+                                    return;
+                                }
+                                reserved.forEach(r -> inventory.release(r.productId(), r.quantity()));
+                            }
+                        });
+            }
+
             for (CartItem line : lines) {
                 // Both the order line and the reservation are built from the CART's snapshot, not
                 // from the catalogue. Checkout no longer reads a product at all - which is what
@@ -122,33 +159,6 @@ class OrderPlacementService {
                 reserved.add(new Reservation(line.getProductId(), line.getQuantity()));
             }
 
-            // THE COMPENSATION, and the most important comment in this method.
-            //
-            // Until Phase 20b `reserve` was Propagation.MANDATORY inside this very transaction, so
-            // a rollback after this point un-reserved the stock automatically and there was
-            // nothing to write here. inventory-service is another process now: each reservation
-            // committed there before this method reached its next line, and no rollback of ours
-            // can reach them.
-            //
-            // So the undo becomes an action. registerSynchronization fires after this transaction
-            // completes, and only when it completed by ROLLING BACK - the same AFTER_COMMIT
-            // machinery Phase 16 used, pointed at the opposite outcome.
-            //
-            // A compensating transaction is not a rollback. It is a second business operation that
-            // happens to mean the opposite of the first, and it can be lost: if this process dies
-            // between the reservations and the rollback, the stock stays taken for an order that
-            // never existed. Nothing reconciles that yet, and docs/test-reports says so rather
-            // than leaving it to be discovered.
-            TransactionSynchronizationManager.registerSynchronization(
-                    new TransactionSynchronization() {
-                        @Override
-                        public void afterCompletion(int status) {
-                            if (status != STATUS_ROLLED_BACK) {
-                                return;
-                            }
-                            reserved.forEach(r -> inventory.release(r.productId(), r.quantity()));
-                        }
-                    });
 
             Order placed = orderRepository.save(order);
             cartService.clearCart(cart);
