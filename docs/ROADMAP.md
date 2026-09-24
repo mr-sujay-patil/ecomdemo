@@ -85,8 +85,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 17 | [Messaging](phases/phase-17-kafka.md) | Apache Kafka | `feature/phase-17-kafka` | ✅ |
 | 18 | [Reliable Event Publishing](phases/phase-18-outbox.md) | Transactional Outbox | `feature/phase-18-outbox` | ✅ |
 | 19 | [Modular Monolith](phases/phase-19-modulith.md) | Spring Modulith | `feature/phase-19-modulith` | ✅ |
-| 20a | [Microservices Split — preparation](phases/phase-20-microservices.md) | Data split + Maven reactor | `feature/phase-20-microservices` | 🔵 |
-| 20b | [Microservices Split — extraction](phases/phase-20-microservices.md) | Five services, database per service | `feature/phase-20b-microservices` | ⬜ |
+| 20a | [Microservices Split — preparation](phases/phase-20-microservices.md) | Data split + Maven reactor | `feature/phase-20-microservices` | ✅ |
+| 20b | [Microservices Split — extraction](phases/phase-20-microservices.md) | Five services, database per service | `feature/phase-20b-microservices` | 🔵 |
 | 21 | [API Gateway](phases/phase-21-gateway.md) | Spring Cloud Gateway | `feature/phase-21-gateway` | ⬜ |
 | 22 | [Resilience](phases/phase-22-resilience.md) | Resilience4j | `feature/phase-22-resilience` | ⬜ |
 | 23 | [Distributed Tracing](phases/phase-23-tracing.md) | OpenTelemetry + Tempo | `feature/phase-23-tracing` | ⬜ |

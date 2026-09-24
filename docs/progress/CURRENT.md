@@ -3,172 +3,94 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-24
-- **Phase:** 20a: Microservices Split - PREPARATION (the phase was SPLIT IN TWO)
-- **Branch:** feature/phase-20-microservices
-- **Step:** PR_OPEN
+- **Phase:** 20b: Microservices Split - EXTRACTION (the second half of Phase 20)
+- **Branch:** feature/phase-20b-microservices
+- **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #26 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
-  https://github.com/mr-sujay-patil/ecomdemo/pull/26
-- **Waiting for user:** YES — review and merge PR #26
-- **PHASE SPLIT, on the user's instruction 2026-09-23:** 20a is this PR (the two data changes plus
-  the Maven reactor); 20b extracts the five services. `docs/phases/phase-20-plan.md` records which
-  of its §8 steps belong to which half.
-  ⚠️ **DO NOT TAG `phase-20-complete` when 20a merges.** A phase delivered in two PRs is complete
-  when the SECOND one merges. 20b's branch is `feature/phase-20b-microservices`, cut from `main`
-  after 20a is merged and verified.
+- **PR:** none yet
+- **Waiting for user:** NO
 
-## Phase 19 merge verification (PASSED 2026-09-23)
-PR #24 merged as 6e96292, then follow-up PR #25 as ddc86f9 (parents 6e96292 + 672721d) for the two
-defects the verification itself found: non-deterministic generated diagrams, and a smoke check that
-had become a race when Phase 18's outbox put a 1s relay poll in the path. Branch is an ancestor of
-`main`, no missing commits, no file diff, all 21 remote branches intact. CI on `main` green.
-`./mvnw clean verify` on `main` -> **319 + 82**, 0 failures, 0 skipped, and the working tree stayed
-CLEAN afterwards, which is the determinism fix proving itself. `scripts/smoke-test.sh` -> **270
-passed, 0 failed**. Tag `phase-19-complete` pushed at ddc86f9.
+## ⚠️ Phase 20 ships in TWO PRs — 20a is merged, this is the second
+The plan is `docs/phases/phase-20-plan.md`, approved and still current; 20b is its **§8 steps
+4-8**. `docs/test-reports/phase-20a.md` records what the first half delivered.
+**`phase-20-complete` is tagged only when THIS PR merges and verifies.** It is deliberately absent
+now - `git tag --list "phase-2*"` returns nothing, and that is correct.
 
-## The memory ceiling, MEASURED (this decides the architecture)
-Host **8 GB**; Docker Desktop capped at **3.8 GB** - which is why nine containers OOM-killed a
-background task earlier. Measured at idle: a JVM is **296 MiB**, PostgreSQL is **31 MiB**,
-kafka-ui 242, kafka 241, grafana 199, loki 59, alloy 42, prometheus 32, redis 9. Total ~1.15 GB.
-**Five databases cost ~125 MiB more; five JVMs cost ~1.2 GB more.** So collapsing to one database
-with a schema per service would save a rounding error and give up the phase's whole subject -
-database-per-service STAYS. The levers are a 384M cap per service and putting kafka-ui behind a
-Compose profile (~400 MiB back). Projection ~2.0-2.4 GB of 3.8 GB.
+## Phase 20a merge verification (PASSED 2026-09-24, NO TAG by design)
+PR #26 merged as merge commit 7e826ab (parents ddc86f9 + d8d775d). Branch is an ancestor of
+`main`, no missing commits, no file diff, all 22 remote branches intact. CI on `main` green.
+`./mvnw clean verify` on `main` -> **334 + 83**, 0 failures, 0 skipped, and the working tree stayed
+CLEAN afterwards (the Phase 19 diagram-determinism fix still holding). `scripts/smoke-test.sh` on
+`main` -> **270 passed, 0 failed, 0 skipped**. Migrations V11 and V12 present; `common/` and
+`ecomdemo-app/` present.
 
-## Checklist (copied from the phase's "What you'll implement")
-- [ ] Services: catalog, inventory, order (cart + orders + outbox + reports), customer (users +
-      JWT), notification
-- [ ] A database per service, each with its own Flyway migrations
-- [ ] Synchronous calls through RestClient / HTTP Interface clients; async through Kafka
-- [ ] JWT validation in each service
-- [ ] All services in Compose
-- [ ] Done when: the full purchase flow works across services
-- [ ] Smoke test: runs against the individual services' ports, full flow still works end to end
-- [ ] Testing protocol run in full + docs/test-reports/phase-20.md
-- [ ] README section, docs/decisions.md entries, RECENT.md rotation (Phase 18 archived),
-      tracker -> 🔵
-- [ ] PR raised
+## Where 20a left the code
+- `product_stock` is its own table (V11), NO foreign key, a missing row reads as zero.
+- `cart_item` snapshots productId/productName/unitPrice (V12); `fk_cart_item_product` is gone.
+- The build is a reactor: parent + `common` (a library depending on NO other module) +
+  `ecomdemo-app` (still the whole application, one deployable).
+- TWO dependencies inverted or vanished, both as consequences rather than decisions:
+  `inventory -> catalog` became `catalog -> inventory`, and `order -> catalog` is GONE - checkout
+  reads no product at all, so order-service will not call catalog-service.
+- A cart reflects the catalogue as at add-to-cart time, not today's. Pinned by a CartApiIT case.
 
-## The two changes that carry the risk (see the plan for detail)
-1. `catalog` and `inventory` SHARE the `product` table. Phase 19 split the behaviour and left the
-   table, recording that Phase 20 is where it comes due. Splitting it touches the Phase 12
-   optimistic lock, the Phase 16 cache eviction, the CSV import and the checkout reservation.
-2. `CartItem` has a real FK to `product` and holds `@ManyToOne Product`. Cart goes to
-   order-service, product to catalog-service - the FK cannot survive. It becomes what `OrderItem`
-   already is (id + snapshotted name and price), which is a real behaviour change: the cart stops
-   reflecting today's catalogue and starts reflecting the catalogue as at add-to-cart time.
-Both are planned to happen INSIDE the monolith first (plan steps 2 and 3), while the full
-270-check smoke test still applies end to end.
+## Checklist for 20b (plan §8 steps 4-8)
+- [ ] Extract `catalog-service` (takes `cache` with it - what it caches is the catalogue)
+- [ ] Extract `inventory-service`
+- [ ] Extract `customer-service` (customer + security + auth; it ISSUES tokens)
+- [ ] Extract `notification-service`; `order-service` is what `ecomdemo-app` becomes
+- [ ] A database per service, each with its own Flyway history starting at V1
+- [ ] `RestClient` where the answer is needed now; Kafka where it is not. The outbox stays in
+      order-service ONLY
+- [ ] JWT VALIDATION in every service (decoder config into `common`); issuing stays in customer
+- [ ] Compose: ~14 containers, **384M limit per service**, `kafka-ui` behind a `tools` profile
+- [ ] Smoke test rebuilt against per-service ports, full flow still end to end
+- [ ] Testing protocol in full + `docs/test-reports/phase-20b.md`
+- [ ] README, docs/decisions.md, RECENT rotation (Phase 19 archived), tracker
+- [ ] PR raised, and ONLY after it merges and verifies: tag `phase-20-complete`
+
+## The constraint that shapes this, MEASURED
+Docker Desktop is capped at **3.8 GB** on an 8 GB host. At idle a JVM costs **296 MiB** and
+PostgreSQL **31 MiB** - so five databases cost ~125 MiB more than one while five JVMs cost ~1.2 GB
+more. That is why database-per-service STAYS and the JVMs get capped instead; collapsing to one
+database with a schema per service would save a rounding error and give up the phase's subject.
+Projection ~2.0-2.4 GB. **A stack that will not start means no smoke verification at all** - this
+is the open risk of 20b.
 
 ## Last test run
-- 2026-09-23 (step 2 complete): `./mvnw clean verify` -> **334 + 82**, 0 failures, 0 skipped,
-  1m23s. `scripts/smoke-test.sh` -> **270 passed, 0 failed, 0 skipped - UNCHANGED**, which is the
-  whole point of doing the data split inside the monolith.
+- 2026-09-24 (on `main`, 20a merge verification): `./mvnw clean verify` -> 334 + 83, 0 failures.
+  `scripts/smoke-test.sh` -> 270 passed, 0 failed.
 
 ## Open issues / blockers
-- The Phase 15 manual check (Grafana render, Kafka UI) is CLOSED - verified by the user on
-  2026-09-23. Do not re-raise.
-- KNOWN DEFECT carried from Phase 19, not fixed: two `EcomDemo Overview` stat panels mislead
-  (`Orders placed / min` reads 0.00 for an hour containing 34 orders; `Failed checkouts` shows a
-  STALE value because its ratio goes NaN and `lastNotNull` skips nulls but not zeros). Full entry
-  in `docs/decisions.md`. Agreed: fix on its own `fix/dashboard-stat-reducers` branch.
-- Grafana traps that cost time during Phase 19 verification and will again: (a) checking out a
-  branch while Grafana runs replaces the bind-mounted provisioning dir's inode - fix with
-  `docker compose up -d --force-recreate grafana`; (b) the admin password persists on the
-  `grafana-data` volume and repeated 401s trip a 5-minute brute-force lockout.
+- KNOWN DEFECT from Phase 19, not fixed: two `EcomDemo Overview` stat panels mislead - `Orders
+  placed / min` reads 0.00 for an hour containing 34 orders, and `Failed checkouts` shows a STALE
+  value because its ratio goes NaN and `lastNotNull` skips nulls but not zeros. Agreed: its own
+  `fix/dashboard-stat-reducers` branch. Full entry in `docs/decisions.md`.
+- The Phase 15 manual check (Grafana render, Kafka UI) is CLOSED. Do not re-raise.
 
-## Progress against the plan's §8 order
-NOTE: steps 2 and 3 are being done BEFORE step 1, stated to the user and agreed. The Maven
-restructure buys nothing for the two data changes, and doing them while the build is untouched
-keeps the 270-check net at its most trustworthy.
+## Machine-level traps that have already cost time here
+- **Docker Desktop quitting.** Testcontainers then fails with "Could not find a valid Docker
+  environment", which reads like a code failure. `open -a Docker` and wait for `docker info`.
+- **macOS denying access to the project directory** (TCC on ~/Documents): `ls` and reads return
+  "Operation not permitted" while writes to new files still work. It cleared on its own.
+- **Checking out a branch while Grafana runs** replaces the bind-mounted provisioning directory's
+  inode; fix with `docker compose up -d --force-recreate grafana`.
+- **`mvn test-compile` can report success against STALE test classes.** Use `clean` after any
+  signature change.
 
-- [x] **Step 2 - split product_stock out of product.** V11 migration, no foreign key (the tables
-      are about to be in different databases), missing row reads as zero. THE DEPENDENCY INVERTED:
-      InventoryService deals in product ids and never sees a Product, so `inventory -> catalog` is
-      gone and `catalog -> inventory` replaces it. The optimistic lock moved with the column.
-      StockMutationRulesTest now names ONE module, which is exactly what Phase 19 predicted.
-      The CSV import gained `ImportedProduct` because a processor cannot set stock on an unsaved
-      product. `./mvnw clean verify` -> 334 + 82, 0 failures. Smoke -> **270 passed, unchanged**.
-- [x] **Step 3 - CartItem drops its FK to product**, snapshots name and price. V12 backfills
-      through the join that is about to disappear, then drops the constraint. ORDER NO LONGER
-      DEPENDS ON CATALOG AT ALL - checkout builds the line and the reservation from the cart's
-      snapshot, so order-service will place an order without calling catalog-service. Removing the
-      FK also removed a query (CartRepository's second JOIN FETCH). BEHAVIOUR CHANGE: a cart now
-      reflects the catalogue as at add-to-cart time, pinned by a new CartApiIT test.
-      `./mvnw clean verify` -> 334 + 83, 0 failures. Smoke -> **270 passed, unchanged**.
-- [x] **Step 1 - the build is a REACTOR.** Parent (builds nothing, owns every version and plugin
-      config in <pluginManagement>), `common` (a LIBRARY depending on no other module), and
-      `ecomdemo-app` (still the whole application, one deployable). Dockerfile and CI paths updated.
-      `./mvnw clean verify` -> 334 + 83, 0 failures. Smoke -> **270 passed**.
-- [ ] Steps 4-7 - extract the five services, compose, rebuild the smoke test per service.
-
-## Decisions this phase (to be copied into docs/decisions.md)
-- product_stock is a separate table with NO foreign key to product, because the two are about to
-  be in different databases; a missing row means zero.
-- The optimistic lock moved to product_stock, which sharpens it: it used to make a checkout
-  collide with an administrator editing a description.
-- InventoryService takes the product NAME as a parameter for its error message, because it can no
-  longer look one up. The first small tax of the split, and the honest one to pay.
-- ProductResponse takes stock as a PARAMETER so the lookup stays batched - one call for a listing,
-  not one per row, which becomes N+1 HTTP round trips after the split.
-- CartItem snapshots productId/productName/unitPrice instead of holding @ManyToOne Product. The
-  cart stops reflecting today's catalogue and starts reflecting it as at add-to-cart time; that is
-  the trade, and CartApiIT pins it.
-- Incremental `mvn test-compile` can report success against STALE test classes. Use
-  `mvn clean test-compile` when a signature changes, or the tests appear to compile when they
-  cannot.
-- `shared.AuthMessages` holds the 401 wording, because `shared` importing it from `security` was a
-  cycle Maven cannot resolve once they are separate modules. Same answer as Phase 19's TokenClaims.
-- Tests that read repo files go through `ProjectRoot`, which walks up to find compose.yaml. Maven
-  sets the working directory to the MODULE, and `../` would encode the current depth into every
-  call site - which this phase changes again with every extraction.
-- Moving a constant is a refactor; REWORDING it is a user-facing change. Doing both at once is how
-  the second happens by accident - AuthApiIT caught exactly that.
-- @MockitoBean does NOT work for ApplicationEventPublisher (Spring resolves it as the context
-  itself, not a bean). @RecordApplicationEvents is the right tool and tests the real publication.
+## Decisions this phase
+- (none yet)
 
 ## Environment left behind
-Docker Desktop is RUNNING but the compose stack is **DOWN** - Docker Desktop had quit entirely at
-one point (`./mvnw verify` failed with "Could not find a valid Docker environment", which is
-Testcontainers having no daemon rather than a code failure) and was restarted with `open -a Docker`.
-Named volumes are intact; schema on them is **V12**. The SonarQube stack is stopped. `.env` holds
-a real JWT_SECRET and is gitignored.
-
-Also worth knowing: this machine briefly denied access to the whole project directory mid-session
-(macOS TCC on ~/Documents - `ls` and reads returned "Operation not permitted" while writes to new
-files still worked). It cleared on its own. If it recurs, it is a Files-and-Folders permission for
-the terminal app, not anything in the repo.
+Docker Desktop running, the compose stack **UP** (nine containers), schema **V12**. The SonarQube
+stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-STOPPED at the mandatory post-PR stop point for **20a**. PR #26 is open and CI is green.
-- If they say `merged, continue` -> merge verification (execution-protocol §5) on `main`, and
-  **NO TAG** - see the split note at the top. Then cut `feature/phase-20b-microservices` from the
-  new `main` and work plan §8 steps 4-8.
-- If they say `changes: <feedback>` -> back to IMPLEMENTING on this same branch.
-- Do NOT merge unless they say so explicitly.
-- The smoke test needs the stack: `docker compose up -d --build --wait`, then
-  `docker compose up -d --force-recreate grafana` (the branch-checkout inode trap from Phase 16).
+Start step 5 (IMPLEMENTING) on plan §8 step 4: extract `catalog-service` first, because it is the
+one whose dependencies already point outward - 20a removed both edges INTO it from order and
+inventory, so it can leave with `cache` and take nothing else with it. Give it its own module, its
+own database and its own Flyway history, then have `ecomdemo-app` reach it over `RestClient`.
 
-Delivered in 20a (all green: `./mvnw clean verify` -> **334 + 83**, `scripts/smoke-test.sh` ->
-**270 passed, unchanged**): V11 splits product_stock (inventory stopped
-depending on catalog - `catalog -> inventory` now), V12 makes cart_item snapshot the product
-(`order -> catalog` disappeared entirely, and a cart now keeps the price it was added at), and the
-build is a reactor (parent + `common` library + `ecomdemo-app`). Report:
-`docs/test-reports/phase-20a.md`. README section, 5 decisions entries, RECENT rotated with Phase 18
-archived, ROADMAP shows 20a 🔵 / 20b ⬜.
-
-## What 20b still has to do
-
-1. **Steps 4-6** - extract catalog-service and inventory-service, then customer-service and
-   notification-service, leaving order-service; HTTP clients between them; JWT validation in each;
-   five databases; compose with per-service memory limits and kafka-ui behind a profile.
-2. **Step 7** - rebuild the smoke test against per-service ports.
-3. Testing protocol in full, test report, README, decisions, RECENT rotation, PR.
-
-`cache` did NOT go into `common`, and the dependency graph is why: it reads catalog's DTOs and
-listens for inventory's stock event, so a `common` containing it would have to depend on both.
-It stays in `ecomdemo-app` and belongs to catalog-service when that is extracted.
-
-MEMORY: cap each service at 384M. A JVM idles at ~296 MiB and Docker Desktop has 3.8 GB total;
-five uncapped JVMs against that cgroup is the mistake compose.yaml already warns about, five
-times over.
+Work one service per commit, running `./mvnw clean verify` after each. The smoke test cannot be
+trusted again until step 7 rebuilds it against per-service ports - that is the known cost of this
+half, recorded in the 20a report.

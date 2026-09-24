@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 20a: Microservices Split - PREPARATION (tag: none yet, PR: pending)
+## Phase 20a: Microservices Split - PREPARATION (tag: NONE - see below, PR #26)
 **What exists now:** Still ONE deployable, but every precondition for splitting it is in place.
 `product_stock` is its own table, `cart_item` snapshots the product instead of pointing at it, and
 the build is a Maven reactor (parent + `common` library + `ecomdemo-app`). 417 tests (334 + 83),
