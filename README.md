@@ -2066,6 +2066,119 @@ and an Asciidoc canvas per module listing its published types. They are generate
 rather than a build plugin, so a pull request that moves a dependency shows the moved arrow in its
 own diff. That is the only time anybody actually looks at an architecture diagram.
 
+## Preparing to split into services
+
+Phase 20 breaks the application into five services. This half does not extract any of them — it
+makes the extraction *possible*, and the reason it is a half is worth stating: every change below
+ends with **the same 270 smoke checks passing, unchanged**, which is only possible while there is
+still one application to run them against.
+
+### Two things had to change before anything could be pulled apart
+
+**`product_stock` became its own table.** Phase 19 separated catalogue from inventory as modules
+and deliberately left them sharing the `product` table, noting in the test that enforced the
+boundary that *"Phase 20 is where that question belongs"*. Two services cannot share a column.
+
+The result that mattered was not the migration. **`InventoryService` stopped needing the catalogue
+at all** — it used to hold a `Product`, mutate a field and save through `ProductService`, and it
+now deals in product ids:
+
+```text
+before:   inventory -> catalog
+after:    catalog   -> inventory
+```
+
+An inventory-service will not have a catalogue to depend on. Splitting the table is what made the
+code admit it.
+
+There is deliberately **no foreign key** on `product_stock.product_id`. Inside one database it
+would work and be free; two migrations later these tables are in different databases, where it
+cannot exist. Adding one buys a few commits of integrity in exchange for teaching the code to rely
+on a guarantee about to be withdrawn. A missing row reads as zero.
+
+The optimistic lock moved with the column, and **sharpened**. On the product row it guarded every
+column at once, so a checkout collided with an administrator editing a description — two writes
+with nothing to say to each other. It now sits on the row that actually contends.
+
+**The cart stopped pointing at the catalogue.** `cart_item` held a real foreign key to `product`
+and `CartItem` held `@ManyToOne Product`. The cart goes to order-service and the product to
+catalog-service, so neither survives. It now snapshots what `order_item` has snapshotted since
+Phase 6 — id, name, price.
+
+### The behaviour that changed, stated plainly
+
+Before, `lineTotal()` read the live product, so a cart always reflected *today's* catalogue: edit
+a price and every existing cart silently repriced. Now a cart reflects the catalogue **as at the
+moment the line was added**.
+
+That is not strictly better. It is the trade a distributed system makes — a self-repricing cart
+needs a call to the catalogue on the hottest read there is. It is arguably the more honest
+behaviour too: the price a shopper was shown is the price they expect at checkout. **What an order
+is charged did not change**; that was already snapshotted at checkout.
+
+Nothing in the 270 smoke checks depended on repricing, which means nothing was testing it — so a
+test now changes a price behind an existing cart and asserts the line and total do not move. A
+deliberate semantic change with no test is one that silently reverts.
+
+**A second dependency vanished, unplanned.** Checkout builds both the order line and the
+reservation from the cart's snapshot, so it never reads a product:
+
+```text
+order -> catalog    GONE
+```
+
+order-service will place an order **without calling catalog-service at all**. That fell out of
+removing a foreign key.
+
+Removing the key also removed a query: the cart's `JOIN FETCH` had a second fetch for `i.product`
+to avoid N+1 on the catalogue, and there is no per-line lookup left to make.
+
+### The build became a reactor
+
+One POM producing one jar becomes a parent that builds nothing, a `common` library, and
+`ecomdemo-app` — still the whole application, still one deployable. Doing this before extracting
+anything means each extraction is a move between modules that already exist, rather than inventing
+the module system and moving the code in the same diff.
+
+**`common` depends on no other module of this project.** That is what makes it safe underneath
+everything, and it was not free: `shared` imported a constant from `security`, which is survivable
+inside one jar and a cycle Maven cannot resolve between two. Same fix as Phase 19's claim names —
+a string two modules must agree on is a contract, and a contract belongs to the shared kernel.
+
+**`cache` deliberately did not go into `common`.** It reads the catalogue's DTOs and listens for
+inventory's stock event, so a `common` holding it would depend on both. It belongs to
+catalog-service.
+
+### Three things that broke, and what they teach
+
+**`mvn test-compile` reported `BUILD SUCCESS` against stale test classes.** After a signature
+change, one test helper had not been recompiled, so tests that could not possibly compile appeared
+to. `mvn clean test-compile` showed four broken files. Incremental compilation is not a check that
+a refactor is complete.
+
+**Maven sets a test's working directory to its module**, and until this phase the module *was* the
+repository — so six tests reading `compose.yaml` and the Grafana and Prometheus config broke at
+once, none of them touching a file that had changed. They now resolve through a helper that walks
+up to find the repository. `"../compose.yaml"` would encode the module's current depth into every
+call site, and the next half moves that depth again with every service.
+
+**A user-facing message changed by accident.** Moving a constant between classes, its wording was
+reworded in the same edit. `AuthApiIT` caught it. Moving a constant is a refactor; rewording it is
+a change to what a caller sees — doing both at once is how the second one slips through.
+
+### What is still to come
+
+Five services, a database each, `RestClient` between them where the answer is needed now and Kafka
+where it is not, JWT validation in every service, and the smoke test rebuilt against per-service
+ports.
+
+**The constraint that shapes it is memory, measured rather than assumed.** Docker Desktop is
+capped at 3.8 GB on this host, and at idle a JVM costs **296 MiB** against PostgreSQL's **31 MiB**.
+Five databases therefore cost about 125 MiB more than one, while five JVMs cost about 1.2 GB more
+— so database-per-service stays, and the JVMs get capped instead. That measurement reversed the
+shortcut that looked obvious before anyone took it: collapsing to one database with a schema per
+service would have saved a rounding error and given up the entire architectural point.
+
 ## Code quality
 
 Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually

@@ -1,0 +1,8 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.metrics`
+|Spring components
+|* `c.e.m.CheckoutMetrics`
+* `c.e.m.MetricsConfig`
+|===

@@ -78,8 +78,8 @@ jobs:
         with:
           name: test-reports
           path: |
-            target/surefire-reports/
-            target/failsafe-reports/
+            ecomdemo-app/target/surefire-reports/
+            ecomdemo-app/target/failsafe-reports/
           retention-days: 14
           # Nothing to upload is not a failure: a compilation error fails before any test runs.
           if-no-files-found: ignore
@@ -95,7 +95,7 @@ jobs:
             echo "| Suite | Tests | Failures | Errors | Skipped |"
             echo "|---|---:|---:|---:|---:|"
             for suite in surefire failsafe; do
-              dir="target/${suite}-reports"
+              dir="ecomdemo-app/target/${suite}-reports"
               [ -d "$dir" ] || continue
               python3 - "$dir" "$suite" <<'PY'
           import glob, sys, xml.etree.ElementTree as ET

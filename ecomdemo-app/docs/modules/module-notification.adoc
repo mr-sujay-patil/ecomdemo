@@ -1,0 +1,9 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.notification`
+|Bean references
+|* `c.e.m.EventDeduplicator` (in Messaging)
+|Aggregate roots
+|* `c.e.n.Notification`
+|===

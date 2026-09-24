@@ -1,0 +1,23 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.security`
+|Spring components
+|_Services_
+
+* `c.e.s.AppUserDetailsService`
+
+_Configuration properties_
+
+* `c.e.s.JwtProperties`
+
+_Others_
+
+* `c.e.s.ApiErrorAccessDeniedHandler`
+* `c.e.s.ApiErrorAuthenticationEntryPoint`
+* `c.e.s.ApiErrorWriter`
+* `c.e.s.JwtConfig`
+* `c.e.s.SecurityConfig`
+|Bean references
+|* `c.e.c.UserDirectory` (in Customer)
+|===

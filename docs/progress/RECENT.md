@@ -12,7 +12,38 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 19: Modular Monolith (tag: pending, PR: pending)
+## Phase 20a: Microservices Split - PREPARATION (tag: none yet, PR: pending)
+**What exists now:** Still ONE deployable, but every precondition for splitting it is in place.
+`product_stock` is its own table, `cart_item` snapshots the product instead of pointing at it, and
+the build is a Maven reactor (parent + `common` library + `ecomdemo-app`). 417 tests (334 + 83),
+smoke test **270 - UNCHANGED**, schema **V12**. Phase 20 is HALF DONE: 20b extracts the services.
+**DO NOT TAG `phase-20-complete` until 20b merges.**
+**Key code:** `inventory.ProductStock` + `ProductStockRepository`; `InventoryService` now deals in
+product IDS and no longer sees a `Product`. `CartItem` holds productId/productName/unitPrice.
+`shared.AuthMessages` (the 401 wording, moved out of `security` to break a Maven cycle).
+`support.ProjectRoot` for tests that read repo files. `batch.ImportedProduct` carries the stock
+level to the writer, because a processor cannot set stock on an unsaved product.
+**Config & infrastructure:** V11 splits product_stock (no FK - the tables are about to be in
+different databases; a missing row reads as zero). V12 adds cart_item.product_name/unit_price and
+drops fk_cart_item_product. Dockerfile copies both module poms and takes the jar from
+`ecomdemo-app/target/`. CI report paths moved under `ecomdemo-app/`.
+**Tests:** `InventoryServiceTest` (16, against a real database - the stock arithmetic and the
+stock-changed event moved here from OrderPlacementServiceTest and ProductServiceTest). New
+`CartApiIT` case pinning that a cart keeps the price it was added at.
+**Gotchas:** (1) TWO DEPENDENCIES INVERTED OR VANISHED: `inventory -> catalog` became
+`catalog -> inventory`, and `order -> catalog` is GONE - checkout reads no product at all, so
+order-service will not call catalog-service. (2) A cart now reflects the catalogue as at
+add-to-cart time, not today's; what an order is CHARGED is unchanged. (3) `mvn test-compile` can
+report success against STALE test classes - use `clean`. (4) Maven sets a test's working directory
+to its MODULE, which broke six file-reading tests at once. (5) Moving a constant is a refactor;
+REWORDING it is user-facing - AuthApiIT caught that. (6) `cache` cannot go in `common`: it reads
+catalog DTOs and listens for inventory events.
+**Follow-ups (20b):** extract the five services, a database each, RestClient between them, JWT
+validation per service, compose at ~14 containers with a 384M cap per service and kafka-ui behind
+a profile, and the smoke test rebuilt against per-service ports. MEMORY IS THE OPEN RISK: Docker
+Desktop is capped at 3.8 GB, a JVM idles at 296 MiB and PostgreSQL at 31, projection ~2.0-2.4 GB.
+
+## Phase 19: Modular Monolith (tag: phase-19-complete, PR #24 + follow-up #25)
 **What exists now:** Fourteen named modules, each declaring in `package-info.java` exactly which
 others it may depend on, enforced by `ModularityTest` - an undeclared import now fails the build
 naming both ends. The graph is ACYCLIC. Every module keeps its published API at its package root
@@ -43,38 +74,3 @@ overall diagram because it has no edges; cosmetic.
 name one module (Phase 20, if the service split demands it); let `catalog` contribute its own cache
 configuration so `cache` stops knowing products exist; `order -> cart` stays a direct call on
 purpose, since `clearCart` is inside the checkout transaction.
-
-## Phase 18: Reliable Event Publishing (tag: phase-18-complete, PR #23)
-**What exists now:** A checkout writes its `OrderPlacedEvent` into `outbox_event` in the ORDER's
-own transaction, and a scheduled relay publishes pending rows to `orders.placed` and marks them
-sent. The dual-write gap Phase 17 measured is closed: with the broker stopped, the checkout still
-returns 201 in under a second, the event waits in the database, and the order is notified once the
-broker returns, with nobody replaying anything. Phase 17 lost 4 orders under that test; this loses
-zero. A cleanup job sweeps published rows after 7 days. 392 tests (310 + 82), smoke test 270
-checks. Schema **V10**. No new dependencies.
-**Key code:** `com.ecomdemo.messaging` - `OutboxEvent` (two ids: a sequence for ORDER, a UUID for
-IDENTITY), `OutboxWriter` (`Propagation.MANDATORY`, serialises with the CONSUMER's Jackson 2
-mapper), `OutboxRelay` (the timer) + `OutboxBatchPublisher` (the transaction), `OutboxKafkaSender`
-(owns its producer privately - NOT a bean), `OutboxCleanupJob`. `OrderPlacementService.placeOnce`
-calls `outbox.append(...)` where Phase 17 called `events.publishEvent(...)`.
-`OrderEventPublisher` and `MessagingAsyncConfig` are GONE - the outbox replaces them.
-**Config & infrastructure:** `ecomdemo.outbox.poll-delay=1s`, `batch-size=100`, `retention=7d`,
-`cleanup-cron=0 0 3 * * *`. No new containers, no new ports. The four properties are spelled out in
-`application.properties` because `@Scheduled` resolves placeholders from the Environment, not from
-the bound record.
-**Tests:** `OutboxBatchPublisherTest`, `OutboxWriterTest`, `OutboxEventRepositoryTest`,
-`OutboxCleanupJobTest`, `OutboxPropertiesTest`, `KafkaTemplateWiringTest` (a guard, see Gotchas),
-`OutboxRelayKafkaIT` (5 IT). Smoke test section 14 stops the real Kafka container, places an order,
-restarts it and waits - restored through an EXIT trap if the run is interrupted.
-**Gotchas:** (1) Do NOT add a second `KafkaTemplate` bean. Boot's is
-`@ConditionalOnMissingBean(KafkaTemplate.class)` so any other one deletes it, and
-`DeadLetterPublishingRecoverer` resolves by TYPE - the first draft did this and stopped the
-consumer's whole partition while both test suites stayed green. `KafkaTemplateWiringTest` guards
-it. (2) Boot 4 is Jackson 3; spring-kafka's `JsonDeserializer` is Jackson 2. A Kafka payload must
-be written by `JacksonUtils.enhancedObjectMapper()`. (3) Spring counts private constructors when
-choosing one - a second "for tests" constructor gives "No default constructor found". (4) The
-relay stops its batch at the first failure, on purpose.
-**Follow-ups (not done, out of scope):** `SELECT ... FOR UPDATE SKIP LOCKED` so two instances do
-not both publish (harmless today - the consumer dedupes - and recorded in `docs/decisions.md` as
-deferred); a Micrometer gauge on the pending count and an Actuator health indicator for a stuck
-outbox; CDC with Debezium as the no-application-change alternative.

@@ -720,8 +720,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V10, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V12, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -1275,7 +1275,11 @@ check "and neither is /actuator/heapdump" "404" "$(request GET /actuator/heapdum
 # --- Which build is running ---------------------------------------------------------------------
 as_anonymous
 request GET /actuator/info >/dev/null
-check "/actuator/info names the artifact" "ecomdemo" "$(jget "d['build']['artifact']")"
+# `ecomdemo-app` since Phase 20 made the build a reactor: the deployable is a MODULE now, and
+# the artifact name is the module's. That is the check working rather than the check being wrong -
+# the whole point of this endpoint is that it says which build is running, so the day the answer
+# changes it should say so.
+check "/actuator/info names the artifact" "ecomdemo-app" "$(jget "d['build']['artifact']")"
 check "and carries a build timestamp" "True" "$(jget "len(str(d['build']['time'])) > 0")"
 
 # --- A placed order moves the business meters -----------------------------------------------------

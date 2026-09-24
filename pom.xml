@@ -9,10 +9,41 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.ecomdemo</groupId>
-	<artifactId>ecomdemo</artifactId>
+	<artifactId>ecomdemo-parent</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>ecomdemo</name>
+	<packaging>pom</packaging>
+	<name>ecomdemo-parent</name>
 	<description>Learning project: e-commerce monolith evolving into a distributed system</description>
+
+	<!--
+		PHASE 20: the build becomes a REACTOR.
+
+		Until now this was one POM producing one jar. The phase splits the application into services,
+		and a service is a deployable - which in Maven means a module of its own. This POM builds
+		nothing itself; it owns the versions, the properties and every plugin's configuration, and the
+		modules below inherit them.
+
+		`common` is a LIBRARY, not a service. It holds what several services genuinely share - the API
+		error shape, the domain exceptions, the correlation-ID filter, the meter names - and it
+		depends on no other module of this project. That is the property that makes it safe to be
+		underneath everything else, and it was not free: `shared` used to import a constant from
+		`security`, which was survivable inside one jar and a cycle Maven cannot resolve between two.
+
+		`ecomdemo-app` is still the whole application, one deployable, exactly as it was. The services
+		are carved out of it in the commits that follow; doing the build restructure first means each
+		extraction is a move between existing modules rather than an invention of the module system
+		at the same time.
+
+		Every plugin lives in <pluginManagement>: a module gets a plugin by NAMING it, with no
+		configuration of its own. That matters most for spring-boot-maven-plugin, which repackages a
+		jar into an executable application - correct for a service, and a build failure for a library
+		with no main class.
+	-->
+	<modules>
+		<module>common</module>
+		<module>ecomdemo-app</module>
+	</modules>
+
 	<properties>
 		<java.version>21</java.version>
 		<springdoc.version>3.1.1</springdoc.version>
@@ -60,360 +91,15 @@
 			**/dto/**
 		</sonar.coverage.exclusions>
 	</properties>
-	<dependencies>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-jpa</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-validation</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webmvc</artifactId>
-		</dependency>
-
-		<!--
-			springdoc-openapi scans the controllers at startup, builds an OpenAPI 3 document from
-			the mappings, the DTO records and the Bean Validation constraints, serves it at
-			/v3/api-docs and bundles Swagger UI to render it. 3.1.1 is the first GA line built
-			against Spring Boot 4 / Spring Framework 7; the 2.x line targets Boot 3.
-		-->
-		<dependency>
-			<groupId>org.springdoc</groupId>
-			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-			<version>${springdoc.version}</version>
-		</dependency>
-
-		<!--
-			Spring Security. Adding this one starter changes the application before a line of
-			our code runs: it registers a servlet Filter that sits in front of every request,
-			and its auto-configuration locks the whole application down by default. That default
-			is the point — a new endpoint added in a later phase is protected until somebody
-			deliberately opens it, rather than public until somebody remembers to close it.
-			`SecurityConfig` replaces the defaults with this application's own rules.
-
-			It also brings `spring-security-crypto`, which is where BCryptPasswordEncoder lives,
-			so password hashing needs no separate dependency. The version comes from the Spring
-			Boot BOM (Spring Security 7.x for Boot 4.x).
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-security</artifactId>
-		</dependency>
-
-		<!--
-			Spring Cache plus Redis.
-
-			`spring-boot-starter-cache` is the abstraction: @Cacheable and friends, and the
-			proxying that makes them work. It does nothing on its own - with no cache provider on
-			the classpath Spring falls back to a ConcurrentHashMap, which is a cache per JVM and
-			therefore no cache at all once there are two instances.
-
-			`spring-boot-starter-data-redis` supplies the provider. It brings Lettuce, the default
-			Redis client since Boot 2 (netty-based, non-blocking, and one connection is safe to
-			share across threads - Jedis needed a pool). Versions come from the Spring Boot BOM.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-cache</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-redis</artifactId>
-		</dependency>
-
-		<!--
-			Spring Batch. One starter brings the whole framework: Job, Step, the chunk-oriented
-			reader/processor/writer contract, the fault-tolerant skip and retry machinery, and -
-			the part that makes it more than a for-loop - the JobRepository, which records every
-			run in the database so that a failed job can be restarted from where it stopped
-			rather than from the beginning.
-
-			`spring-boot-starter-batch` pulls `spring-boot-batch`, which is Boot 4's
-			auto-configuration module for it (Boot 4 splits auto-configuration into a module per
-			technology, so `spring-batch-core` on its own would wire up nothing). That
-			auto-configuration needs a DataSource and a transaction manager, both of which this
-			application already has from spring-boot-starter-data-jpa.
-
-			Versions come from the Spring Boot BOM (Spring Batch 6.x for Boot 4.x).
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-batch</artifactId>
-		</dependency>
-
-		<!--
-			Actuator (Phase 15). It adds the /actuator endpoints - health, info, metrics - and,
-			more importantly, the Micrometer MeterRegistry that everything else in this phase
-			builds on. Spring Boot auto-instruments what it already owns the moment the starter
-			is present: HTTP request timings, the HikariCP pool, the JVM's heap, GC and threads,
-			Hibernate's statistics, the Redis cache from Phase 13 and the Spring Batch jobs from
-			Phase 14 all start publishing meters without a line of code from us.
-
-			Nothing is exposed over HTTP by default except /actuator/health: the endpoints a
-			deployment actually publishes are an explicit list in application.properties.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-actuator</artifactId>
-		</dependency>
-
-		<!--
-			The Prometheus registry. Micrometer is a facade - meters are recorded against its API
-			and a registry decides what that means for one monitoring system. This one holds the
-			values in memory and renders them, on request, in Prometheus' text exposition format
-			at /actuator/prometheus. That is the whole of the "pull model": the application never
-			connects to Prometheus, it just answers when Prometheus asks.
-
-			Swapping this artifact for micrometer-registry-otlp or -datadog would change the
-			destination without touching a single instrumented line, which is the point of the
-			facade. The version comes from the Spring Boot BOM.
-		-->
-		<dependency>
-			<groupId>io.micrometer</groupId>
-			<artifactId>micrometer-registry-prometheus</artifactId>
-			<scope>runtime</scope>
-		</dependency>
-
-		<!--
-			Spring Security's OAuth2 Resource Server. "Resource server" is the OAuth2 word for
-			an API that ACCEPTS tokens rather than one that issues them: it adds a filter that
-			pulls a Bearer token off the Authorization header, verifies its signature and its
-			expiry, and turns the claims into an Authentication. All of that used to be the job
-			of BasicAuthenticationFilter plus a database lookup on every request.
-
-			Strictly, this application is both halves — it also ISSUES the token, at
-			/api/auth/login — which a textbook OAuth2 deployment would split into a separate
-			authorization server. That is the honest simplification of this phase, and the README
-			says so. The starter brings `spring-security-oauth2-jose` with it, which carries
-			Nimbus JOSE and therefore both the decoder AND the encoder, so signing needs no
-			further dependency (and in particular no third-party JWT library).
-
-			The version comes from the Spring Boot BOM (Spring Security 7.1.1).
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
-		</dependency>
-
-		<!--
-			The PostgreSQL JDBC driver. It is only ever loaded by reflection through the JDBC URL,
-			so runtime scope is enough - no application code imports it. The version comes from
-			the Spring Boot BOM, which pins a driver known to work with the managed HikariCP.
-		-->
-		<dependency>
-			<groupId>org.postgresql</groupId>
-			<artifactId>postgresql</artifactId>
-			<scope>runtime</scope>
-		</dependency>
-
-		<!--
-			Flyway. On startup it scans classpath:db/migration, works out from its own
-			`flyway_schema_history` table which versioned scripts this database has not run yet,
-			and applies them in order, each inside a transaction.
-
-			Two artifacts, for two different reasons:
-
-			* `spring-boot-starter-flyway` brings `flyway-core` AND Spring Boot's Flyway
-			  auto-configuration. Spring Boot 4 split auto-configuration out of one fat jar into
-			  a module per technology, so - unlike Boot 3 - putting `flyway-core` on the
-			  classpath by itself wires up nothing at all: the migrations are simply never run
-			  and the application starts against whatever schema it happens to find.
-			* Since Flyway 10, each database engine lives in its own module, so
-			  `flyway-database-postgresql` carries the PostgreSQL dialect. (H2, which the test
-			  suite uses, is one of the two still bundled inside flyway-core.)
-
-			Both versions come from the Spring Boot BOM, so they match each other and the driver.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-flyway</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.flywaydb</groupId>
-			<artifactId>flyway-database-postgresql</artifactId>
-		</dependency>
-
-		<!--
-			H2, on the test classpath only. Phase 7 was pencilled in as the phase that would
-			delete it; it stays, and that is a deliberate choice rather than an oversight.
-
-			The two suites now answer two different questions. The unit and slice tests
-			(Surefire, `test` profile, H2) ask "is the Java right?" - they run in seconds, on any
-			machine, with no Docker, and they are what a developer runs constantly. The
-			integration tests (Failsafe, `it` profile, Testcontainers) ask "is this true of
-			PostgreSQL?" - they cost a container start and they are where an H2-only truth would
-			be caught. Deleting H2 would buy honesty in the fast suite at the price of making it
-			slow, which is the trade the testing pyramid exists to avoid.
-		-->
-		<dependency>
-			<groupId>com.h2database</groupId>
-			<artifactId>h2</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-validation-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-webmvc-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<!--
-			`spring-security-test`, by way of Boot 4's starter. It contributes @WithMockUser and
-			the SecurityMockMvcRequestPostProcessors that let a slice test say "run this request
-			as an ADMIN" without a real login, and it is what makes the 401/403 assertions in the
-			controller tests possible at all — a @WebMvcTest builds the security filter chain,
-			so without an authenticated user every request in those tests would simply be a 401.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-security-test</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<!--
-			Apache Kafka (Phase 17). `spring-kafka` brings the `kafka-clients` library plus
-			Spring's wrapper over it: `KafkaTemplate` for producing, `@KafkaListener` and the
-			listener container for consuming, and the `@RetryableTopic` machinery that creates
-			the retry and dead-letter topics.
-
-			No version: Spring Boot manages both. Boot 4.1.1 pins spring-kafka 4.1.1 and
-			kafka-clients 4.2.1 - and compose runs the broker on `apache/kafka:4.2.1`, the same
-			number on purpose. The Kafka protocol is versioned and negotiated, so a mismatch
-			usually works; matching them means the client never silently falls back to an older
-			protocol version and behaves differently here than it would against the broker it
-			was tested with.
-
-			THE STARTER, NOT `org.springframework.kafka:spring-kafka`. Boot 4 split its
-			auto-configuration out of the monolithic `spring-boot-autoconfigure` into a module per
-			technology, so the library on its own now gives you the classes and none of the
-			wiring: `KafkaAutoConfiguration` lives in `spring-boot-kafka`, which this starter
-			brings. The symptom of getting it wrong is not a missing class but a missing BEAN -
-			"required a bean of type 'KafkaTemplate' that could not be found" - which reads like
-			an application mistake rather than a dependency one.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-kafka</artifactId>
-		</dependency>
-
-		<!--
-			Testcontainers. `testcontainers-postgresql` starts a real PostgreSQL server in a
-			Docker container for the duration of the tests and throws it away afterwards, so the
-			integration tests run against the same engine production uses instead of an H2
-			imitation of it. In Testcontainers 2.x every database module is named
-			`testcontainers-<engine>`; the 1.x coordinates were `org.testcontainers:postgresql`.
-
-			`spring-boot-testcontainers` is the bridge: it is what makes @ServiceConnection work,
-			so a container declared as a @Bean supplies the JDBC url, username and password to
-			the application context by itself. Without it the container would start and the test
-			would still connect to whatever spring.datasource.url happened to say.
-
-			There is deliberately no `testcontainers-junit-jupiter`: its @Testcontainers/@Container
-			extension is the alternative to letting Spring own the container lifecycle, and this
-			phase lets Spring own it (see PostgresContainerConfig).
-
-			Versions come from the Spring Boot BOM (testcontainers 2.0.5).
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-testcontainers</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.testcontainers</groupId>
-			<artifactId>testcontainers-kafka</artifactId>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.testcontainers</groupId>
-			<artifactId>testcontainers-postgresql</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<!--
-			`TestRestTemplate` - the client the integration tests use to call the running
-			application - is a thin wrapper over `RestTemplate`, and it builds one through
-			`RestTemplateBuilder`. Spring Boot 4 moved that builder into its own
-			`spring-boot-restclient` module, and this application never makes an outbound HTTP
-			call, so nothing else drags it in: without this line the context fails to start with
-			`ClassNotFoundException: org.springframework.boot.restclient.RestTemplateBuilder`.
-			Test scope, because it is the test client that needs it and not the application.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-restclient</artifactId>
-			<scope>test</scope>
-		</dependency>
-
-		<!--
-			Spring Modulith, TEST SCOPE ONLY, and both halves of that are deliberate.
-
-			Scope first. This phase wants three things: named modules, a test that fails when one
-			reaches into another's internals, and generated diagrams. All three are build-time
-			concerns - `ApplicationModules` reads the package structure with ArchUnit and
-			`Documenter` writes PlantUML from it. None of them run in production, so none of them
-			belong on the runtime classpath. `spring-modulith-starter-core` would also pull the
-			runtime auto-configuration and the event publication registry, which this phase does
-			not use: Phase 18 already built a durable outbox, and a second event-persistence
-			mechanism alongside it would be two answers to one question.
-
-			Version second, and this is the sharp edge. Spring Boot 4.1.1 does NOT manage Spring
-			Modulith - it is absent from `spring-boot-dependencies` - and the newest GA line,
-			1.4.x, targets Boot 3.5 and Spring Framework 6.2. Keeping it test-scoped is what makes
-			that mismatch tolerable: the application context is never assembled from these jars,
-			so the Boot-4 auto-configuration changes that would break the starter cannot be
-			reached. `spring-modulith-core` needs little more than ArchUnit and Spring's core
-			type-scanning, and `ModularityTest` is the proof that it holds on this stack.
-		-->
-		<!--
-			The annotations only - `@ApplicationModule` and `@NamedInterface` - and these DO go on
-			main source, because a module's boundary is declared by the code that owns it and not
-			by the test that checks it. COMPILE scope for that reason, unlike the two below.
-
-			It is an annotations jar in practice: its three dependencies (spring-boot-autoconfigure,
-			spring-tx, spring-context) are all declared OPTIONAL, so none of them is pulled in
-			transitively and none of Boot's auto-configuration comes with it. That is what makes it
-			safe to put on the runtime classpath of an application whose Boot version this Modulith
-			line does not officially target.
-		-->
-		<dependency>
-			<groupId>org.springframework.modulith</groupId>
-			<artifactId>spring-modulith-api</artifactId>
-			<version>${spring-modulith.version}</version>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.modulith</groupId>
-			<artifactId>spring-modulith-core</artifactId>
-			<version>${spring-modulith.version}</version>
-			<scope>test</scope>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.modulith</groupId>
-			<artifactId>spring-modulith-docs</artifactId>
-			<version>${spring-modulith.version}</version>
-			<scope>test</scope>
-		</dependency>
-	</dependencies>
 
 	<build>
-		<plugins>
-			<plugin>
-				<groupId>org.springframework.boot</groupId>
-				<artifactId>spring-boot-maven-plugin</artifactId>
-				<executions>
-					<!--
+			<pluginManagement>
+				<plugins>
+				<plugin>
+					<groupId>org.springframework.boot</groupId>
+					<artifactId>spring-boot-maven-plugin</artifactId>
+					<executions>
+						<!--
 						Writes target/classes/META-INF/build-info.properties at package time.
 						Actuator turns that file into a BuildProperties bean, which is what makes
 						/actuator/info report the artifact, version and build timestamp. Without
@@ -421,51 +107,51 @@
 						from a running container WHICH build is running - the first question
 						anyone asks when a deployment behaves unexpectedly.
 					-->
-					<execution>
-						<goals>
-							<goal>build-info</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin>
+						<execution>
+							<goals>
+								<goal>build-info</goal>
+							</goals>
+						</execution>
+					</executions>
+				</plugin>
 
-			<!--
+				<!--
 				Resolves dependency coordinates into properties, so that the surefire
 				configuration below can point at the mockito-core jar in the local repository
 				without hard-coding a path or a version.
 			-->
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-dependency-plugin</artifactId>
-				<executions>
-					<execution>
-						<goals>
-							<goal>properties</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin>
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-dependency-plugin</artifactId>
+					<executions>
+						<execution>
+							<goals>
+								<goal>properties</goal>
+							</goals>
+						</execution>
+					</executions>
+				</plugin>
 
-			<!--
+				<!--
 				Mockito rewrites bytecode to build mocks, which needs a Java agent. Left alone it
 				attaches one to the running JVM at the first mock, and recent JDKs warn that
 				self-attaching will stop working; a future JDK will refuse it outright and the
 				whole unit-test suite would fail. Loading the agent up front on the command line
 				is the supported way to do it, and it silences the warning today.
 			-->
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<configuration>
-					<!--
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-surefire-plugin</artifactId>
+					<configuration>
+						<!--
 						@{jacocoUnitArgLine} rather than ${...}: the @ form is Surefire's LATE
 						evaluation, resolved when the test JVM is forked rather than when the pom
 						is read. JaCoCo sets the property during the build, so the ${...} form
 						would expand to the empty default it had at parse time and no coverage
 						would be recorded - a silent failure that looks like 0% coverage.
 					-->
-					<argLine>@{jacocoUnitArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
-					<!--
+						<argLine>@{jacocoUnitArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+						<!--
 						Activate the `test` profile for every test JVM, so the suite reads
 						src/test/resources/application-test.properties and talks to H2 instead of
 						the PostgreSQL server the `dev` profile points at. A system property beats
@@ -475,13 +161,13 @@
 						deliberate: a file of that name on the test classpath SHADOWS the main one
 						instead of adding to it, and every shared setting in it would be lost.
 					-->
-					<systemPropertyVariables>
-						<spring.profiles.active>test</spring.profiles.active>
-					</systemPropertyVariables>
-				</configuration>
-			</plugin>
+						<systemPropertyVariables>
+							<spring.profiles.active>test</spring.profiles.active>
+						</systemPropertyVariables>
+					</configuration>
+				</plugin>
 
-			<!--
+				<!--
 				Failsafe runs the integration tests. It is a separate plugin from Surefire, and
 				the split is not cosmetic:
 
@@ -504,11 +190,11 @@
 				`./mvnw test` now means "the fast suite"; `./mvnw verify` means both. Docker must
 				be running for the second.
 			-->
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-failsafe-plugin</artifactId>
-				<configuration>
-					<!--
+				<plugin>
+					<groupId>org.apache.maven.plugins</groupId>
+					<artifactId>maven-failsafe-plugin</artifactId>
+					<configuration>
+						<!--
 						The same Java agent Surefire gets. No integration test mocks anything,
 						but spring-test's MockitoTestExecutionListener runs for every test and
 						touches Mockito, which then self-attaches an agent and prints the "this
@@ -516,19 +202,19 @@
 						the command line is the supported way and keeps this JVM behaving like
 						the Surefire one.
 					-->
-					<argLine>@{jacocoItArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
-				</configuration>
-				<executions>
-					<execution>
-						<goals>
-							<goal>integration-test</goal>
-							<goal>verify</goal>
-						</goals>
-					</execution>
-				</executions>
-			</plugin>
+						<argLine>@{jacocoItArgLine} -javaagent:${org.mockito:mockito-core:jar} -Xshare:off</argLine>
+					</configuration>
+					<executions>
+						<execution>
+							<goals>
+								<goal>integration-test</goal>
+								<goal>verify</goal>
+							</goals>
+						</execution>
+					</executions>
+				</plugin>
 
-			<!--
+				<!--
 				JaCoCo measures which lines the tests actually executed, by instrumenting classes
 				as the JVM loads them.
 
@@ -544,91 +230,92 @@
 				fast suite alone - which for this project would badly understate it, since the
 				*IT tests are the only ones that exercise the controllers over real HTTP.
 			-->
-			<plugin>
-				<groupId>org.jacoco</groupId>
-				<artifactId>jacoco-maven-plugin</artifactId>
-				<version>${jacoco.version}</version>
-				<executions>
+				<plugin>
+					<groupId>org.jacoco</groupId>
+					<artifactId>jacoco-maven-plugin</artifactId>
+					<version>${jacoco.version}</version>
+					<executions>
 
-					<!-- Unit and slice tests (Surefire). Binds to `initialize` by default. -->
-					<execution>
-						<id>prepare-agent-unit</id>
-						<goals>
-							<goal>prepare-agent</goal>
-						</goals>
-						<configuration>
-							<destFile>${project.build.directory}/jacoco-unit.exec</destFile>
-							<propertyName>jacocoUnitArgLine</propertyName>
-						</configuration>
-					</execution>
+						<!-- Unit and slice tests (Surefire). Binds to `initialize` by default. -->
+						<execution>
+							<id>prepare-agent-unit</id>
+							<goals>
+								<goal>prepare-agent</goal>
+							</goals>
+							<configuration>
+								<destFile>${project.build.directory}/jacoco-unit.exec</destFile>
+								<propertyName>jacocoUnitArgLine</propertyName>
+							</configuration>
+						</execution>
 
-					<!-- Integration tests (Failsafe). Binds to `pre-integration-test`. -->
-					<execution>
-						<id>prepare-agent-it</id>
-						<goals>
-							<goal>prepare-agent-integration</goal>
-						</goals>
-						<configuration>
-							<destFile>${project.build.directory}/jacoco-it.exec</destFile>
-							<propertyName>jacocoItArgLine</propertyName>
-						</configuration>
-					</execution>
+						<!-- Integration tests (Failsafe). Binds to `pre-integration-test`. -->
+						<execution>
+							<id>prepare-agent-it</id>
+							<goals>
+								<goal>prepare-agent-integration</goal>
+							</goals>
+							<configuration>
+								<destFile>${project.build.directory}/jacoco-it.exec</destFile>
+								<propertyName>jacocoItArgLine</propertyName>
+							</configuration>
+						</execution>
 
-					<!--
+						<!--
 						One file from the two runs. `fileset` rather than naming the two files so
 						that a build which ran only `./mvnw test` still merges cleanly - there is
 						simply one file to merge, and the report then honestly shows unit
 						coverage only.
 					-->
-					<execution>
-						<id>merge-coverage</id>
-						<phase>verify</phase>
-						<goals>
-							<goal>merge</goal>
-						</goals>
-						<configuration>
-							<fileSets>
-								<fileSet>
-									<directory>${project.build.directory}</directory>
-									<includes>
-										<include>jacoco-*.exec</include>
-									</includes>
-								</fileSet>
-							</fileSets>
-							<destFile>${project.build.directory}/jacoco-merged.exec</destFile>
-						</configuration>
-					</execution>
+						<execution>
+							<id>merge-coverage</id>
+							<phase>verify</phase>
+							<goals>
+								<goal>merge</goal>
+							</goals>
+							<configuration>
+								<fileSets>
+									<fileSet>
+										<directory>${project.build.directory}</directory>
+										<includes>
+											<include>jacoco-*.exec</include>
+										</includes>
+									</fileSet>
+								</fileSets>
+								<destFile>${project.build.directory}/jacoco-merged.exec</destFile>
+							</configuration>
+						</execution>
 
-					<!--
+						<!--
 						The human-readable report (HTML, open target/site/jacoco-merged/index.html)
 						and the XML one the Sonar scanner reads.
 					-->
-					<execution>
-						<id>report-coverage</id>
-						<phase>verify</phase>
-						<goals>
-							<goal>report</goal>
-						</goals>
-						<configuration>
-							<dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
-							<outputDirectory>${project.build.directory}/site/jacoco-merged</outputDirectory>
-						</configuration>
-					</execution>
-				</executions>
-			</plugin>
+						<execution>
+							<id>report-coverage</id>
+							<phase>verify</phase>
+							<goals>
+								<goal>report</goal>
+							</goals>
+							<configuration>
+								<dataFile>${project.build.directory}/jacoco-merged.exec</dataFile>
+								<outputDirectory>${project.build.directory}/site/jacoco-merged</outputDirectory>
+							</configuration>
+						</execution>
+					</executions>
+				</plugin>
 
-			<!--
+				<!--
 				The Sonar scanner. Not bound to a phase: analysis is an explicit
 				`./mvnw sonar:sonar` against a running SonarQube, never something that happens
 				during an ordinary build. Pinned, because a scanner that changes under you
 				changes what the quality gate sees.
 			-->
-			<plugin>
-				<groupId>org.sonarsource.scanner.maven</groupId>
-				<artifactId>sonar-maven-plugin</artifactId>
-				<version>${sonar-maven-plugin.version}</version>
-			</plugin>
-		</plugins>
+				<plugin>
+					<groupId>org.sonarsource.scanner.maven</groupId>
+					<artifactId>sonar-maven-plugin</artifactId>
+					<version>${sonar-maven-plugin.version}</version>
+				</plugin>
+				</plugins>
+			</pluginManagement>
 	</build>
 
 </project>
