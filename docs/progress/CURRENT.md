@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-24
 - **Phase:** 20b: Microservices Split - EXTRACTION (the second half of Phase 20)
 - **Branch:** feature/phase-20b-microservices
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -35,6 +35,10 @@ CLEAN afterwards (the Phase 19 diagram-determinism fix still holding). `scripts/
 - A cart reflects the catalogue as at add-to-cart time, not today's. Pinned by a CartApiIT case.
 
 ## Checklist for 20b (plan §8 steps 4-8)
+- [x] **Extract `inventory-service`** - DONE and committed (4278e0f). Its own module, its own
+      `inventory_db` starting at Flyway V1, a REST API, and a Kafka publisher for stock changes.
+      **inventory-service's own 20 tests pass.** `ecomdemo-app`'s test suite does NOT yet compile -
+      that is the next commit.
 - [ ] Extract `catalog-service` (takes `cache` with it - what it caches is the catalogue)
 - [ ] Extract `inventory-service`
 - [ ] Extract `customer-service` (customer + security + auth; it ISSUES tokens)
@@ -78,7 +82,7 @@ is the open risk of 20b.
 - **`mvn test-compile` can report success against STALE test classes.** Use `clean` after any
   signature change.
 
-## Decisions this phase — APPROVED BY THE USER, not yet implemented
+## Decisions this phase — APPROVED, and now IMPLEMENTED for inventory
 1. **Checkout reserves stock as a SAGA.** `OrderPlacementService.reserve` is
    `Propagation.MANDATORY` today precisely so stock cannot commit while the order rolls back. Over
    HTTP that guarantee is gone. Agreed shape: call reserve, and on failure compensate through an
@@ -103,6 +107,22 @@ Docker Desktop running, the compose stack **UP** (nine containers), schema **V12
 stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
+**FINISH THE inventory-service EXTRACTION**: `ecomdemo-app`'s tests do not compile yet. Six files
+reference types that moved or changed:
+
+    cache/ProductCacheEvictorTest       the evictor is a Kafka listener now, not an event listener
+    cache/CacheApiIT                    called inventoryService.reserve() to trigger an eviction
+    catalog/internal/ProductServiceTest mocked InventoryService; it is InventoryClient now
+    order/internal/OrderPlacementServiceTest  same, plus the saga compensation is new behaviour
+                                        that deserves a test: a rollback must call release()
+
+Then `./mvnw clean verify` across the reactor, and only then move on to catalog-service.
+
+REMEMBER: the smoke test is NOT a valid net from this commit onward - nothing runs inventory-service
+yet, so `docker compose up` would start an app whose InventoryClient has nothing to call. Compose
+work is step 5 of the list above. Do not run the smoke test and read its failures as regressions.
+
+### Original design notes for the extraction (kept for the remaining four services)
 Start with **inventory-service** (see the ordering correction above). The work is designed and the
 two decisions it depends on are approved; a first attempt was made and DELIBERATELY PARKED rather
 than left half-applied, so this branch is at the green housekeeping commit with a clean tree.
