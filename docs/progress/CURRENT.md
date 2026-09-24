@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-20b-microservices
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
+- **PR:** #27 — https://github.com/mr-sujay-patil/ecomdemo/pull/27
 - **Waiting for user:** YES — review the PR, and decide the scope question in §8 of the test report
 
 ## ⚠️ Phase 20 ships in TWO PRs — 20a is merged, this is the second
