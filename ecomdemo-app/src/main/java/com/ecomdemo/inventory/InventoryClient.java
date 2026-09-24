@@ -99,7 +99,7 @@ public class InventoryClient implements InventoryGateway {
     public void reserve(Long productId, String productName, int quantity) {
         rest.post()
                 .uri("/api/inventory/{productId}/reserve", productId)
-                .body(new QuantityBody(null, quantity, productName))
+                .body(new UnitsBody(quantity, productName))
                 .retrieve()
                 .onStatus(HttpStatusCode::is4xxClientError, (request, response) -> {
                     throw new InsufficientStockException(productName, quantity, quantityFor(productId));
@@ -121,7 +121,7 @@ public class InventoryClient implements InventoryGateway {
         try {
             rest.post()
                     .uri("/api/inventory/{productId}/release", productId)
-                    .body(new QuantityBody(null, quantity, null))
+                    .body(new UnitsBody(quantity, null))
                     .retrieve()
                     .toBodilessEntity();
         } catch (RuntimeException e) {
@@ -138,7 +138,7 @@ public class InventoryClient implements InventoryGateway {
     public void setStockLevel(Long productId, int quantity) {
         rest.put()
                 .uri("/api/inventory/{productId}", productId)
-                .body(new QuantityBody(quantity, null, null))
+                .body(new StockLevelBody(quantity))
                 .retrieve()
                 .toBodilessEntity();
     }
@@ -155,5 +155,15 @@ public class InventoryClient implements InventoryGateway {
     /** The wire shape, kept package-private: nothing outside this client should know it exists. */
     record StockView(Long productId, int quantity) {}
 
-    record QuantityBody(Integer quantity, Integer units, String productName) {}
+    /**
+     * The two request bodies, one per endpoint shape.
+     *
+     * <p>They replaced a single three-field record whose call sites read
+     * {@code new QuantityBody(null, quantity, null)} — three positional arguments, two of them
+     * null, and which two depended on the endpoint. That shape also made the server unable to mark
+     * any field required, so a mistake here arrived there as a 500 rather than a 400.
+     */
+    record UnitsBody(Integer units, String productName) {}
+
+    record StockLevelBody(Integer quantity) {}
 }

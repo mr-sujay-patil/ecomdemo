@@ -91,5 +91,37 @@
 			<artifactId>spring-modulith-api</artifactId>
 			<version>${spring-modulith.version}</version>
 		</dependency>
+
+		<!--
+			Test scope, and new in Phase 20b. `common` held only records, constants and
+			configuration until this phase, so there was nothing here to test and no test
+			dependency to declare. ServiceTokenProvider changed that: it has a cache, a refresh
+			margin and a floor on the token lifetime, which is behaviour, and behaviour in a
+			library every service depends on is the last place to leave untested.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
+
+	<build>
+		<plugins>
+			<!--
+				Both are inherited configuration from the parent's pluginManagement, named here so
+				this module opts in. maven-dependency-plugin resolves the Mockito agent jar that
+				surefire's argLine points at; without it the whole suite fails before the first
+				test with "Error occurred during initialization of VM".
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
 </project>

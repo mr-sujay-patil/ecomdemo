@@ -1,12 +1,12 @@
 package com.ecomdemo.inventory;
 
-import com.ecomdemo.inventory.dto.QuantityRequest;
+import com.ecomdemo.inventory.dto.StockLevelRequest;
 import com.ecomdemo.inventory.dto.StockResponse;
+import com.ecomdemo.inventory.dto.UnitsRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -76,10 +76,25 @@ class InventoryController {
                 .toList();
     }
 
-    /** Sets an absolute level. The catalogue does this on create and update; the CSV import too. */
-    @PreAuthorize("hasRole('ADMIN')")
+    /**
+     * Sets an absolute level. The catalogue does this on create and update; the CSV import too.
+     *
+     * <p><strong>The {@code @PreAuthorize("hasRole('ADMIN')")} that used to be here is gone</strong>,
+     * and its removal is the most consequential line of Phase 20b's security work. It was carried
+     * over from the monolith, where the administrator's own token reached this method. It cannot
+     * now: the application calls this service with its own SERVICE identity, so the only role that
+     * ever arrives is {@code SERVICE} and the rule could only ever have answered 403 — breaking
+     * product creation and the CSV import together.
+     *
+     * <p>It was also doing nothing, which is the part worth dwelling on. Method security is off
+     * unless {@code @EnableMethodSecurity} is present, and this service never enabled it, so the
+     * annotation was inert. An annotation that is both unsatisfiable and inactive is worse than no
+     * annotation: it reads like protection. The real check is {@code SecurityConfig}, which requires
+     * a valid token; that an ADMIN asked for this stays where the administrator's token is, at the
+     * edge.
+     */
     @PutMapping("/{productId}")
-    StockResponse setLevel(@PathVariable Long productId, @Valid @RequestBody QuantityRequest request) {
+    StockResponse setLevel(@PathVariable Long productId, @Valid @RequestBody StockLevelRequest request) {
         inventory.setStockLevel(productId, request.quantity());
         return new StockResponse(productId, inventory.quantityFor(productId));
     }
@@ -90,7 +105,7 @@ class InventoryController {
      * call — the split is not supposed to be visible from the outside.
      */
     @PostMapping("/{productId}/reserve")
-    StockResponse reserve(@PathVariable Long productId, @Valid @RequestBody QuantityRequest request) {
+    StockResponse reserve(@PathVariable Long productId, @Valid @RequestBody UnitsRequest request) {
         inventory.reserve(productId, request.productName(), request.units());
         return new StockResponse(productId, inventory.quantityFor(productId));
     }
@@ -100,12 +115,13 @@ class InventoryController {
      * rolled back after a successful reserve.
      */
     @PostMapping("/{productId}/release")
-    StockResponse release(@PathVariable Long productId, @Valid @RequestBody QuantityRequest request) {
+    StockResponse release(@PathVariable Long productId, @Valid @RequestBody UnitsRequest request) {
         inventory.release(productId, request.units());
         return new StockResponse(productId, inventory.quantityFor(productId));
     }
 
-    @PreAuthorize("hasRole('ADMIN')")
+    /** Forgets a product's stock, when the catalogue deletes the product. See {@link #setLevel} for
+     * why this no longer carries {@code @PreAuthorize("hasRole('ADMIN')")}. */
     @DeleteMapping("/{productId}")
     ResponseEntity<Void> forget(@PathVariable Long productId) {
         inventory.forget(productId);
