@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-20c-catalog-service
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** raised, see below
+- **PR:** #28 — https://github.com/mr-sujay-patil/ecomdemo/pull/28
 - **Waiting for user:** YES - review the PR
 
 ## Phase 20b merge verification (PASSED 2026-09-24 — NO TAG, by design)

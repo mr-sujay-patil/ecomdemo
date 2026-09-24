@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 20c: Microservices Split - catalog-service (tag: NONE - see below, PR #TBD)
+## Phase 20c: Microservices Split - catalog-service (tag: NONE - see below, PR #28)
 **What exists now:** THREE deployables. `catalog-service` owns `product` in `catalog_db` (Flyway
 V1-V2) and the Redis cache that serves it; `inventory-service` owns stock; `ecomdemo-app` is the
 rest, plus the PUBLIC `/api/products` which forwards to catalog-service. 426 tests
