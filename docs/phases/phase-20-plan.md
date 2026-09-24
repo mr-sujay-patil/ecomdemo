@@ -1,7 +1,25 @@
 # Phase 20 Plan: Microservices Split
 
 > Written before any code, at the user's request. `docs/phases/phase-20-microservices.md` is the
-> spec; this is how it gets built and what it costs. **Awaiting approval.**
+> spec; this is how it gets built and what it costs.
+>
+> **APPROVED 2026-09-23, and then SPLIT IN TWO on the user's instruction.**
+>
+> - **20a — delivered.** §8 steps 1, 2 and 3: the two data changes and the Maven reactor. Report:
+>   `docs/test-reports/phase-20a.md`.
+> - **20b — outstanding.** §8 steps 4 to 8: extract the five services, a database each, the HTTP
+>   clients, JWT per service, the Compose topology, and the smoke test rebuilt per service.
+>
+> The seam is not arbitrary. Everything in 20a ends with the same 270 smoke checks passing
+> unchanged, which is only possible while there is still one application to run them against; 20b
+> rewrites that script against per-service ports. Putting the riskiest data work on the near side
+> of that line is the whole point of the sequencing.
+>
+> Steps 2 and 3 were done BEFORE step 1, agreed with the user: the reactor buys nothing for two
+> pure data changes, and doing them while the build was untouched kept the net at its most
+> trustworthy.
+>
+> **`phase-20-complete` is not tagged until 20b merges.**
 
 ## 0. The constraint that shapes everything
 
@@ -45,10 +63,19 @@ Feasible, but only with the two measures in §6.
 | `order-service` | 8084 | `cart`, `cart_item`, `orders`, `order_item`, `order_audit`, `outbox_event`, batch tables | `cart`, `order`, `batch`, `messaging` |
 | `notification-service` | 8085 | `notification`, `processed_event` | `notification` |
 
-`shared`, `logging`, `metrics`, `cache` become a **`common` library module** every service depends
-on — not a service. They are code, not a deployable.
+`shared`, `logging` and `metrics` become a **`common` library module** every service depends on —
+not a service. They are code, not a deployable.
+
+> **CORRECTION from 20a.** The plan listed `cache` here too, and that was wrong: `cache` reads the
+> catalogue's DTOs and listens for inventory's stock event, so a `common` containing it would have
+> to depend on both — and `common` depending on nothing is the property that makes it safe
+> underneath everything else. `cache` stays in `ecomdemo-app` and belongs to **catalog-service**
+> when that is extracted, since what it caches is the catalogue.
 
 Maven becomes a multi-module reactor: a parent POM, one module per service, plus `common`.
+
+> **DONE in 20a**: parent + `common` + `ecomdemo-app`. The service modules are carved out of
+> `ecomdemo-app` in 20b, and what is left over becomes `order-service`.
 
 ## 2. ❗ The two real problems, and they are the whole risk
 
@@ -65,8 +92,15 @@ It is now due, because the two land in **different databases**. Plan:
 - `catalog_db.product` keeps `id, name, description, category, version`.
 - `inventory_db.product_stock` takes `product_id, quantity, version` — a new table in a new
   database, not a foreign key.
+
 - `ProductResponse` no longer carries `stockQuantity` from its own row. The catalogue asks
   inventory for it, or the caller asks inventory directly (see §3).
+
+> **DONE in 20a** (V11), inside the monolith. The outcome the plan did not predict: inventory
+> stopped depending on catalog entirely, because it deals in product ids now, so
+> `catalog -> inventory` replaced `inventory -> catalog`. `ProductResponse` takes the quantity as
+> a PARAMETER, which is what keeps the lookup batched — one call for a listing rather than one per
+> row, and therefore one HTTP round trip rather than N once the services are apart.
 
 **What this touches, and why it is the riskiest change in the phase:** the Phase 12 optimistic
 lock on stock, the Phase 16 cache eviction keyed on a stock change, the CSV import that sets
@@ -90,6 +124,11 @@ That is a genuine behaviour change to state plainly: today *"the cart reflects t
 catalogue"* because it reads the live product on every load. After the split it reflects the
 catalogue **as at the moment the line was added**, unless the cart re-fetches. That is
 eventual consistency arriving where it always arrives first — in a read that used to be a join.
+
+> **DONE in 20a** (V12), and pinned by a new `CartApiIT` case. A second thing the plan did not
+> predict: `order -> catalog` disappeared with it. Checkout builds the order line AND the
+> reservation from the cart's snapshot, so it never reads a product — order-service will place an
+> order without calling catalog-service at all.
 
 ## 3. Synchronous vs asynchronous
 
@@ -143,6 +182,8 @@ Together: ~400 MiB back, taking the projection to roughly 2.0 GB.
   everywhere, and the smoke test's readiness loop needs to wait for all five ports.
 
 ## 8. Order of work, each step leaving the build green
+
+> Status: **1, 2, 3 done in 20a** (in the order 2, 3, 1). **4 to 8 are 20b.**
 
 1. Maven multi-module skeleton: parent + `common`, monolith still runs as one deployable.
 2. Split `product` / `product_stock` **inside the monolith**, with migrations and the four

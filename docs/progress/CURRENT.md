@@ -3,12 +3,18 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-23
-- **Phase:** 20: Microservices Split (multi-service architecture)
+- **Phase:** 20a: Microservices Split - PREPARATION (the phase was SPLIT IN TWO)
 - **Branch:** feature/phase-20-microservices
-- **Step:** IMPLEMENTING
+- **Step:** TESTING (docs done; PR not yet raised)
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO — the plan (`docs/phases/phase-20-plan.md`) was APPROVED 2026-09-23.
+- **Waiting for user:** NO
+- **PHASE SPLIT, on the user's instruction 2026-09-23:** 20a is this PR (the two data changes plus
+  the Maven reactor); 20b extracts the five services. `docs/phases/phase-20-plan.md` records which
+  of its §8 steps belong to which half.
+  ⚠️ **DO NOT TAG `phase-20-complete` when 20a merges.** A phase delivered in two PRs is complete
+  when the SECOND one merges. 20b's branch is `feature/phase-20b-microservices`, cut from `main`
+  after 20a is merged and verified.
 
 ## Phase 19 merge verification (PASSED 2026-09-23)
 PR #24 merged as 6e96292, then follow-up PR #25 as ddc86f9 (parents 6e96292 + 672721d) for the two
@@ -125,8 +131,23 @@ Docker Desktop running; the compose stack is **UP** (nine containers), schema no
 The SonarQube stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
-Both data changes are DONE and green, which was the whole reason for doing them first. What
-remains is structural:
+ALL 20a WORK AND DOCUMENTATION IS COMMITTED. What is left before the PR:
+
+1. Re-run the testing protocol in full on this branch, because the docs commit is the only thing
+   that has landed since the last green run - `./mvnw clean verify` (expect **334 + 83**) and
+   `scripts/smoke-test.sh` (expect **270 passed**, with the stack up).
+2. `git push` and `gh pr create --base main`. PR title: **`Phase 20a: Preparing the microservices
+   split`** - NOT the phase file's `Phase 20: Microservices Split`, because this is half of it.
+3. STOP at the post-PR stop point.
+
+Delivered in 20a (all green at the last run): V11 splits product_stock (inventory stopped
+depending on catalog - `catalog -> inventory` now), V12 makes cart_item snapshot the product
+(`order -> catalog` disappeared entirely, and a cart now keeps the price it was added at), and the
+build is a reactor (parent + `common` library + `ecomdemo-app`). Report:
+`docs/test-reports/phase-20a.md`. README section, 5 decisions entries, RECENT rotated with Phase 18
+archived, ROADMAP shows 20a 🔵 / 20b ⬜.
+
+## What 20b still has to do
 
 1. **Steps 4-6** - extract catalog-service and inventory-service, then customer-service and
    notification-service, leaving order-service; HTTP clients between them; JWT validation in each;
