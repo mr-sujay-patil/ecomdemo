@@ -2,13 +2,14 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-23
+- **Updated:** 2026-09-24
 - **Phase:** 20a: Microservices Split - PREPARATION (the phase was SPLIT IN TWO)
 - **Branch:** feature/phase-20-microservices
-- **Step:** TESTING (docs done; PR not yet raised)
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #26 — raised, CI green (`Build and test` SUCCESS), mergeStateStatus CLEAN
+  https://github.com/mr-sujay-patil/ecomdemo/pull/26
+- **Waiting for user:** YES — review and merge PR #26
 - **PHASE SPLIT, on the user's instruction 2026-09-23:** 20a is this PR (the two data changes plus
   the Maven reactor); 20b extracts the five services. `docs/phases/phase-20-plan.md` records which
   of its §8 steps belong to which half.
