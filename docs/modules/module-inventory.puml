@@ -1,6 +1,6 @@
 @startuml
 set separator none
-title Inventory
+title Inventory (client)
 
 top to bottom direction
 
@@ -9,11 +9,13 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.JWTkeys, "JWT keys", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Inventory, "Inventory", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Inventoryclient, "Inventory (client)", $techn="Module", $descr="", $tags="", $link="")
 }
 
-Rel(EcomdemoApplication.EcomdemoApplication.Inventory, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Inventoryclient, EcomdemoApplication.EcomdemoApplication.JWTkeys, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Inventoryclient, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
 @enduml

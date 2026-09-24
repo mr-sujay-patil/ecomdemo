@@ -21,6 +21,11 @@ import java.nio.file.Path;
  * next time the layout moves — and this phase moves it again, five times, as the services are
  * carved out — every one of them is wrong again. This asks the question the paths actually mean:
  * where is the repository?
+ *
+ * <p>It moved to {@code common} in Phase 20b and is published as a TEST-JAR, because every service
+ * extracted from here needs it and each one sits at a different depth. Its depth is exactly what
+ * this class exists not to hard-code, so five copies would be five places to get the same thing
+ * subtly wrong.
  */
 public final class ProjectRoot {
 

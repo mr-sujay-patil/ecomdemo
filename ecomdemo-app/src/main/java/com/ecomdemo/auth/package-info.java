@@ -6,5 +6,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Auth",
-        allowedDependencies = {"security", "shared"})
+        allowedDependencies = {"jwt", "security", "shared"})
 package com.ecomdemo.auth;

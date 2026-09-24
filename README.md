@@ -8,7 +8,30 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 14: Batch Processing** — the application can now do work that is not a request. Spring
+**Phase 20b: Microservices Split — the first service is out.** `inventory-service` is a separate
+deployable with its own PostgreSQL database, its own Flyway history, its own JWT filter chain and
+its own Kafka topic. The application no longer owns stock; it asks over HTTP.
+
+Two things are worth knowing before reading further, because they are the split's real cost:
+
+- **Checkout is a saga.** Reserving stock is an HTTP call now, so it cannot share the order's
+  transaction. If the order rolls back after the reservation succeeded, a compensating *release*
+  puts the stock back. That call can itself fail, and when it does the stock stays reserved for an
+  order that never existed — logged, and not yet reconciled by anything.
+- **The catalogue's stock figure is eventually consistent.** A sale changes the number in
+  inventory-service, which publishes an event; the catalogue's cache evicts when it arrives. The
+  displayed figure can be stale for a moment. **What cannot go wrong is the sale itself** — the
+  reservation is synchronous and holds the row lock, so a shopper is never sold stock that is not
+  there.
+
+Four of the five services are still inside `ecomdemo-app`. See
+[`docs/test-reports/phase-20b.md`](docs/test-reports/phase-20b.md) for what extracting the first
+one cost, and why the recommendation is one service per pull request.
+
+<details>
+<summary>Phase 14: Batch Processing</summary>
+
+Spring
 Batch adds two jobs: an ADMIN uploads a product CSV and it is imported in chunks, with invalid
 rows skipped up to a limit and written to an error file; and every night at 02:00 a job writes a
 sales report for the previous day.
@@ -19,6 +42,8 @@ already completed for a given input will not run again. Both facts live in six `
 which is also where the phase's real lesson came from: Spring Batch 6 defaults to an *in-memory*
 JobRepository, under which all of that appears to work and none of it survives a restart. See
 [Batch processing](#batch-processing).
+
+</details>
 
 <details>
 <summary>Phase 13: Caching</summary>
@@ -124,42 +149,57 @@ The full 32-phase plan, with a progress tracker, lives in **[docs/ROADMAP.md](do
 
 ## Repository layout
 
+Since Phase 20a the build is a **Maven reactor**, and since 20b one of its modules is a second
+deployable. The root pom builds nothing itself; it owns every version and plugin configuration.
+
 ```
 ecomdemo/
-├── src/main/java/com/ecomdemo/
-│   ├── common/    # ApiError + @RestControllerAdvice shared by every feature
-│   ├── cache/     # cache names, per-cache TTL and serializers, hit/miss logging
-│   ├── batch/     # the two Spring Batch jobs, the admin endpoints, the JDBC JobRepository
-│   ├── security/  # the filter chain, the JWT key/encoder/decoder, CurrentUser, 401/403 handlers
-│   ├── auth/      # POST /api/auth/login: exchanging a password for a signed token
-│   ├── customer/  # accounts: registration, roles, the profile
-│   ├── product/   # catalogue CRUD
-│   ├── cart/      # one cart per account
-│   └── order/     # checkout and order history, owned by the account that placed it
-├── src/main/resources/
-│   ├── application.properties       # shared by every profile
-│   ├── application-dev.properties   # PostgreSQL + Hikari (the default profile)
-│   └── db/migration/                # V1 schema, V2 seed, V3 category, V4 version + audit,
-│                                     # V5 users + seeded admin, V6 cart/orders per user,
-│                                     # V7 the Spring Batch tables, V8 index on product.name
-├── src/test/java/com/ecomdemo/
-│   ├── support/   # TestData builders, PostgresContainerConfig, the IntegrationTest base class,
-│   │               # WithSecurityRules (imports the real rules into a slice), TestAuthentication
-│   └── <feature>/ # *ServiceTest, *ControllerTest, *RepositoryTest and *ApiIT per feature
-├── src/test/resources/
-│   ├── application-test.properties  # in-memory H2, for the fast suite (Surefire)
-│   └── application-it.properties    # the container's PostgreSQL, for the *IT tests (Failsafe)
-├── Dockerfile     # multi-stage: JDK+Maven to build, JRE to run, non-root, layered jar
-├── .dockerignore  # keeps target/, .git and .env out of the build context
-├── compose.yaml   # the app + PostgreSQL + Redis: health checks, named volumes, one network
+├── pom.xml                  # the parent: versions, pluginManagement, the module list
+│
+├── common/                  # a LIBRARY. Depends on no other module of this project, which is
+│   └── src/main/java/com/ecomdemo/
+│       ├── shared/          # ApiError, the exception types, @RestControllerAdvice, OpenAPI
+│       ├── jwt/             # the signing key, the DECODER, the roles converter, service tokens
+│       ├── logging/         # correlation id filter, request log
+│       └── metrics/         # common meter tags, the checkout counters
+│   └── src/test/…/support/  # ProjectRoot, published as a TEST-JAR for every service to share
+│
+├── inventory-service/       # A SEPARATE DEPLOYABLE (Phase 20b). Owns stock and nothing else.
+│   └── src/main/java/com/ecomdemo/inventory/
+│       ├── InventoryService, ProductStock, ProductStockRepository
+│       ├── InventoryController      # /api/inventory: read, set level, reserve, release, forget
+│       ├── SecurityConfig           # its own filter chain; a token is required for every path
+│       ├── StockChangePublisher     # publishes `inventory.stock-changed`
+│       └── db/migration/            # its OWN Flyway history, starting again at V1
+│
+└── ecomdemo-app/            # everything not yet extracted
+    └── src/main/java/com/ecomdemo/
+        ├── security/        # the filter chain, the JWT ENCODER (issuing stays here), handlers
+        ├── auth/            # POST /api/auth/login
+        ├── customer/        # accounts, roles, profile, CurrentUser
+        ├── catalog/         # the product catalogue
+        ├── inventory/       # the CLIENT: InventoryGateway + InventoryClient over RestClient
+        ├── cart/            # one cart per account; lines snapshot the product
+        ├── order/           # checkout (the saga) and order history
+        ├── cache/           # Redis, and the Kafka listener that evicts on a stock change
+        ├── batch/           # the two Spring Batch jobs
+        ├── messaging/       # the transactional outbox and its relay
+        └── notification/    # the Kafka consumer, idempotent via processed_event
+```
+
+Top level, outside the modules:
+
+```
+├── Dockerfile          # ONE file, every service: `ARG MODULE` picks which jar to extract, and is
+│                       # deliberately not read by the build stage so the reactor builds once
+├── compose.yaml        # 11 containers: two services, two databases, Redis, Kafka, and the
+│                       # observability stack. `--profile tools` adds kafka-ui.
 ├── compose.sonar.yaml  # SonarQube + its own PostgreSQL, started only for an analysis
-├── .env.example   # every variable, documented; .env itself is gitignored
-├── docs/          # roadmap, phase specs, process docs, decisions, progress
-├── scripts/       # smoke-test.sh, sonar-setup.sh (the quality gate as code)
-└── .github/
-    ├── workflows/ci.yml   # build + test every PR; publish the image on merge to main
-    ├── dependabot.yml     # weekly Maven and Actions updates
-    └── pull_request_template.md
+├── .env.example        # every variable, documented; .env itself is gitignored
+├── docker/             # prometheus, grafana and alloy configuration, bind-mounted
+├── docs/               # roadmap, phase specs, process docs, decisions, progress, test reports
+├── scripts/            # smoke-test.sh (270 checks), sonar-setup.sh
+└── .github/workflows/  # build + test every PR; publish the image on merge to main
 ```
 
 Each feature package is self-contained and layered **Controller → Service → Repository**. DTOs are
@@ -191,23 +231,45 @@ cp .env.example .env            # then put a real JWT_SECRET in it
 docker compose up --build       # add -d to detach
 ```
 
-That builds the application image and starts two containers — `ecomdemo-app` and `ecomdemo-db` —
-on a private network. The application waits for PostgreSQL to be genuinely *ready*, not merely
-started, applies the migrations, and comes up on <http://localhost:8080>.
+That builds **two** images and starts eleven containers on a private network. Each service waits
+for its own PostgreSQL to be genuinely *ready*, not merely started, applies its own migrations, and
+comes up:
+
+| | Port | Owns |
+|---|---|---|
+| `ecomdemo-app` | <http://localhost:8080> | everything not yet extracted |
+| `ecomdemo-inventory-service` | <http://localhost:8082> | stock, and only stock |
+| `ecomdemo-db` | 5432 | the application's database |
+| `ecomdemo-inventory-db` | 5433 | `inventory_db` |
+
+Plus Redis, Kafka, Prometheus, Grafana, Loki and Alloy.
+
+**inventory-service's port is published for the smoke test, not for you.** Every path on it
+requires a token, and the application holds the only identity that has one. It is not a second
+public API.
 
 ```bash
-docker compose ps               # SERVICE  STATUS: both should say (healthy)
-docker compose logs -f app      # follow the application log
-docker compose down             # stop and remove the containers, KEEPING the database
-docker compose down -v          # ...and delete the database volume too
+docker compose ps                       # every row should say (healthy)
+docker compose logs -f app              # follow the application log
+docker compose logs -f inventory-service
+docker compose --profile tools up -d    # ...and Kafka UI on :8090, which costs 242 MiB
+docker compose down                     # stop and remove, KEEPING both databases
+docker compose down -v                  # ...and delete both volumes too
 ```
 
 `docker compose down` is not destructive: the database lives in a named volume that outlives the
-containers, so `up` again finds the schema already at V6. Only `-v` throws it away.
+containers, so `up` again finds the schema already migrated. Only `-v` throws it away — and note
+that there are now **two** volumes, one per database, which `down -v` removes together.
 
 **`.env` is gitignored**; `.env.example` is the documented template. Every value has a working
 default, so an empty `.env` starts a usable stack — but set `JWT_SECRET` (at least 32 characters;
 `openssl rand -base64 48` will do), or every restart invalidates every token that was issued.
+
+**`JWT_SECRET` now matters more than it did.** Both services verify with it, so leaving it unset
+means each generates a *different* random key and a token issued by one is rejected by the other —
+a failure that looks like a bug rather than like missing configuration. HS256 signs and verifies
+with the same key, which also means every service holding it can mint tokens as well as check them;
+that is a known and deliberate limitation, recorded in `docs/decisions.md`.
 
 ### Or from source
 

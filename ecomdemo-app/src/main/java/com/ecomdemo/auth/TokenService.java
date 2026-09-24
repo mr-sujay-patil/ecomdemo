@@ -4,7 +4,7 @@ import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.auth.dto.TokenResponse;
 import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;
-import com.ecomdemo.security.JwtProperties;
+import com.ecomdemo.jwt.JwtProperties;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.security.core.GrantedAuthority;

@@ -39,6 +39,23 @@ import org.junit.jupiter.api.Test;
  * <p>That is the shape the services must have: an inventory-service will not have a catalogue to
  * depend on. Splitting the table is what made the code admit it.
  *
+ * <h2>Phase 20b made the old rule VACUOUS, and ArchUnit said so</h2>
+ *
+ * <p>This used to read "no class outside {@code com.ecomdemo.inventory} may call
+ * {@code reduce}". Moved into inventory-service, that rule matched nothing at all — the other
+ * modules are not on this classpath, so there are no outside classes left to forbid — and ArchUnit
+ * failed it rather than passing an empty check, which is exactly the right behaviour. A rule that
+ * silently checks nothing is worse than no rule, because it reports success.
+ *
+ * <p>The fix is not {@code allowEmptyShould(true)}. It is to assert what is still true. The
+ * boundary the old rule protected has moved from a TEST to a PROCESS: no amount of carelessness in
+ * order-service can touch {@code ProductStock} now, because the class is not there to touch. That
+ * is a stronger guarantee than this test ever gave, and it needs no test.
+ *
+ * <p>What a test can still add is the boundary INSIDE this service: that the only class here which
+ * mutates stock is {@code InventoryService}. That is the thing a hurried edit breaks — a second
+ * component reaching for the repository — and it is what the rules below now say.
+ *
  * <h2>Why this is still a test and not a compiler guarantee</h2>
  *
  * <p>{@link ProductStock}'s mutators are package-private, so within one deployable the compiler
@@ -58,37 +75,38 @@ class StockMutationRulesTest {
     private static final JavaClasses PRODUCTION_CODE =
             new ClassFileImporter()
                     .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
-                    .importPackages("com.ecomdemo");
+                    .importPackages("com.ecomdemo.inventory");
 
     @Test
-    @DisplayName("only the inventory module may take stock out")
+    @DisplayName("only InventoryService may take stock out")
     void onlyInventoryReducesStock() {
         noClasses()
                 .that()
-                .resideOutsideOfPackage("com.ecomdemo.inventory..")
+                .doNotHaveFullyQualifiedName(InventoryService.class.getName())
                 .should()
                 .callMethod(ProductStock.class, "reduce", int.class)
                 .because(
-                        "taking stock out is the inventory module's job; going around it skips the "
+                        "taking stock out is InventoryService's job; going around it skips the "
                                 + "availability check, the InsufficientStockException a shopper should "
-                                + "see, and the ProductStockChangedEvent the catalogue cache needs")
+                                + "see, and the stock-changed event the catalogue cache needs")
                 .check(PRODUCTION_CODE);
     }
 
     @Test
-    @DisplayName("only the inventory module may set a stock level")
+    @DisplayName("only InventoryService may set a stock level")
     void onlyInventorySetsStock() {
-        // Both remaining callers - the catalogue's create/update and the CSV import - go through
-        // InventoryService.setStockLevel. In Phase 19 the catalogue had to be exempted from this
-        // rule; it is not exempted now, because it no longer has a field to write.
+        // Both remaining callers - the catalogue's create/update and the CSV import - are in
+        // another process entirely now and reach this service over HTTP, so the only classes this
+        // rule can see are the ones deployed beside InventoryService.
         noClasses()
                 .that()
-                .resideOutsideOfPackage("com.ecomdemo.inventory..")
+                .doNotHaveFullyQualifiedName(InventoryService.class.getName())
                 .should()
                 .callMethod(ProductStock.class, "setQuantity", int.class)
                 .because(
                         "every write to stock goes through InventoryService, so 'what can change "
-                                + "this number?' finally has exactly one answer")
+                                + "this number?' has exactly one answer inside this service, and "
+                                + "exactly one HTTP endpoint outside it")
                 .check(PRODUCTION_CODE);
     }
 

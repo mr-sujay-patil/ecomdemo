@@ -6,7 +6,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.inventory.ProductStockChangedEvent;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -43,7 +42,7 @@ class ProductCacheEvictorTest {
         when(cacheManager.getCache(CacheNames.PRODUCT)).thenReturn(productCache);
         when(cacheManager.getCache(CacheNames.PRODUCT_LIST)).thenReturn(listingCache);
 
-        new ProductCacheEvictor(cacheManager).onStockChanged(new ProductStockChangedEvent(42L));
+        new ProductCacheEvictor(cacheManager).onStockChanged(new ProductCacheEvictor.ProductStockChanged(42L));
 
         verify(productCache).evict(42L);
         // The listing is one cache entry holding every product, so one product's stock moving
@@ -63,7 +62,7 @@ class ProductCacheEvictorTest {
         assertThatCode(
                         () ->
                                 new ProductCacheEvictor(cacheManager)
-                                        .onStockChanged(new ProductStockChangedEvent(42L)))
+                                        .onStockChanged(new ProductCacheEvictor.ProductStockChanged(42L)))
                 .doesNotThrowAnyException();
     }
 
@@ -79,7 +78,7 @@ class ProductCacheEvictorTest {
         assertThatCode(
                         () ->
                                 new ProductCacheEvictor(cacheManager)
-                                        .onStockChanged(new ProductStockChangedEvent(42L)))
+                                        .onStockChanged(new ProductCacheEvictor.ProductStockChanged(42L)))
                 .doesNotThrowAnyException();
     }
 }

@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,11 +40,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryService {
 
     private final ProductStockRepository stock;
-    private final ApplicationEventPublisher events;
+    private final StockChangePublisher stockChanges;
 
-    public InventoryService(ProductStockRepository stock, ApplicationEventPublisher events) {
+    public InventoryService(ProductStockRepository stock, StockChangePublisher stockChanges) {
         this.stock = stock;
-        this.events = events;
+        this.stockChanges = stockChanges;
     }
 
     /** How many of one product are available. Zero if it has no stock row. */
@@ -98,22 +97,30 @@ public class InventoryService {
     /**
      * Takes {@code quantity} out of stock.
      *
-     * <p><strong>{@code MANDATORY}, for the reason Phase 18's {@code OutboxWriter} uses it.</strong>
-     * A reservation is only meaningful as part of the transaction that creates the order. If this
-     * were allowed to open one of its own, stock could commit while the order that justified it
-     * rolled back — goods sold to nobody, and no error anywhere. {@code REQUIRED}, the default,
-     * would do exactly that silently.
+     * <h2>{@code MANDATORY} is gone, and that is the cost of the boundary</h2>
+     *
+     * <p>Until Phase 20b this was {@code Propagation.MANDATORY}, so that a reservation could only
+     * happen inside the transaction that created the order — stock could not commit while the
+     * order that justified it rolled back. **That guarantee cannot survive an HTTP call.** The
+     * caller is in another process with another transaction manager; by the time it decides to
+     * roll back, this transaction has long since committed.
+     *
+     * <p>What replaces it is a saga: the caller compensates by calling {@link #release}. That is
+     * genuinely weaker, and the weakness is worth naming rather than burying — a crash between
+     * this commit and the caller's compensation leaks stock, and nothing here will notice.
+     * Reconciling that is a later phase's job, not this one's. What a distributed system buys in
+     * independence it pays for in guarantees, and this method is where the bill arrives.
      *
      * <p>The availability check is repeated here even though {@link #requireAvailable} has usually
      * just run, so that this method is safe for any caller rather than only for one that
      * remembered the protocol.
      *
-     * <p>Publishing {@link ProductStockChangedEvent} is what keeps the catalogue's cache correct.
-     * The event moved here from {@code ProductService} with the column it describes: stock
-     * changing is now this module's fact to state, and the Phase 16 evictor listens for it exactly
-     * as before.
+     * <p>Publishing the stock change is what keeps a catalogue cache correct. It was a Spring
+     * application event while everything was one process and is a Kafka message now, for the
+     * obvious reason that an in-process event cannot reach another process — see
+     * {@link StockChangePublisher}.
      */
-    @Transactional(propagation = Propagation.MANDATORY)
+    @Transactional
     public void reserve(Long productId, String productName, int quantity) {
         ProductStock row = stock.findById(productId)
                 .orElseThrow(() -> new InsufficientStockException(productName, quantity, 0));
@@ -124,7 +131,7 @@ public class InventoryService {
 
         row.reduce(quantity);
         stock.save(row);
-        events.publishEvent(new ProductStockChangedEvent(productId));
+        stockChanges.publish(productId);
     }
 
     /**
@@ -149,6 +156,33 @@ public class InventoryService {
                 .orElseGet(() -> new ProductStock(productId, 0));
         row.setQuantity(quantity);
         stock.save(row);
+    }
+
+    /**
+     * Puts stock back, compensating for a reservation whose order did not survive.
+     *
+     * <p><strong>This method exists only because {@link #reserve} lost its transaction.</strong>
+     * In one process the reservation simply rolled back with everything else and there was nothing
+     * to undo. Across a boundary the undo has to be an action, which means it can be forgotten,
+     * can fail, and can arrive late — a compensating transaction is not a rollback, it is a second
+     * business operation that happens to mean the opposite of the first.
+     *
+     * <p>It is deliberately NOT symmetric with reserve. Releasing stock for a product with no row
+     * creates one: the row may have been swept between the reservation and the compensation, and
+     * refusing to give the units back would turn a recoverable situation into permanently lost
+     * stock. Releasing more than was taken is not checked either, for the same reason — this is
+     * the recovery path, and a recovery path that can itself fail is worse than one that is
+     * generous.
+     */
+    @Transactional
+    public void release(Long productId, int quantity) {
+        if (quantity <= 0) {
+            throw new IllegalArgumentException("Cannot release a non-positive quantity: " + quantity);
+        }
+        ProductStock row = stock.findById(productId).orElseGet(() -> new ProductStock(productId, 0));
+        row.setQuantity(row.getQuantity() + quantity);
+        stock.save(row);
+        stockChanges.publish(productId);
     }
 
     /** Forgets a product's stock entirely, for when the catalogue deletes the product. */

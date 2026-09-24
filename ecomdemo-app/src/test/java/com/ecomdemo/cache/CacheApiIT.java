@@ -49,13 +49,27 @@ class CacheApiIT extends IntegrationTest {
     private com.ecomdemo.catalog.ProductService productService;
 
     /**
-     * Since Phase 20 the stock-changed event is published by the INVENTORY module, with the column
-     * it describes. These two tests care only that the AFTER_COMMIT listener fires on a commit and
-     * not on a rollback, so what matters is that something publishes the event inside a
-     * transaction - a reservation now does.
+     * <strong>Phase 20b changed what these two tests can prove, and the change is worth reading.</strong>
+     *
+     * <p>They used to reserve stock inside a transaction and assert that the cache was evicted on
+     * a commit and untouched on a rollback. Reserving is an HTTP call to inventory-service now, so
+     * that setup would need a second application running — and the thing under test was never the
+     * reservation. It was the LISTENER's timing.
+     *
+     * <p>That timing has moved out of this application altogether: the AFTER_COMMIT guarantee is
+     * enforced at the publisher in inventory-service, which holds the Kafka send until its own
+     * transaction commits. It is asserted there, in {@code InventoryServiceTest}, where the
+     * transaction actually is.
+     *
+     * <p>What is left here is the eviction itself — given the message, the entries go. The
+     * evictor is driven directly, which is honest about what this test now covers rather than
+     * keeping a transaction around it that no longer means anything.
      */
     @Autowired
-    private com.ecomdemo.inventory.InventoryService inventoryService;
+    private ProductCacheEvictor evictor;
+
+    @Autowired
+    private com.ecomdemo.inventory.InventoryGateway inventory;
 
     @Autowired
     private TransactionTemplate transactions;
@@ -186,9 +200,7 @@ class CacheApiIT extends IntegrationTest {
         jdbc.update(
                 "INSERT INTO product (name, description, price, category, version) "
                         + "VALUES ('Smuggled In', 'inserted with SQL', 1.00, 'CACHE', 0)");
-        jdbc.update(
-                "INSERT INTO product_stock (product_id, quantity, version) "
-                        + "SELECT id, 1, 0 FROM product WHERE name = 'Smuggled In'");
+
         try {
             assertThat(rest.getForObject("/api/products", ProductResponse[].class))
                     .as("the cached listing has not noticed the new row")
@@ -290,7 +302,7 @@ class CacheApiIT extends IntegrationTest {
         assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
                         .stockQuantity())
                 .isEqualTo(3);
-        jdbc.update("UPDATE product_stock SET quantity = 1 WHERE product_id = ?", product.id());
+        inventory.setStockLevel(product.id(), 1);
 
         // The catalogue is now knowingly stale — that is the accepted trade.
         assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
@@ -305,24 +317,35 @@ class CacheApiIT extends IntegrationTest {
                 .isEqualTo(HttpStatus.CREATED);
 
         // ...and the database must now hold 0, not 2. A cached read of "3" would have left 2.
-        Integer stock = jdbc.queryForObject(
-                "SELECT quantity FROM product_stock WHERE product_id = ?", Integer.class,
-                product.id());
+        // Read through the gateway, because this database no longer has a product_stock table -
+        // V13 dropped it when inventory-service took ownership. The fake is what answers here; the
+        // real service answers in the smoke test.
+        int stock = inventory.quantityFor(product.id());
         assertThat(stock)
                 .as("checkout decremented the LIVE value (1 -> 0), not the cached one (3 -> 2)")
                 .isZero();
     }
 
     @Test
-    @DisplayName("a committed checkout leaves no stale stock behind, in either cache")
-    void aCommittedCheckoutEvictsTheCatalogue() {
-        // The bug this closes: before the after-commit eviction existed, a sale moved the
-        // database and left both caches advertising the pre-sale figure — for ten minutes on the
-        // product and two on the listing. A shopper could read "5 in stock", add five to a cart
-        // and be refused at checkout, with the database correct and unhelpful throughout.
+    @DisplayName("after a sale the catalogue is stale until inventory's message arrives, then correct")
+    void aSaleEvictsTheCatalogueWhenTheMessageArrives() {
+        // THE EVENTUAL CONSISTENCY THIS PHASE INTRODUCED, made explicit rather than discovered.
+        //
+        // This test used to say "a committed checkout leaves no stale stock behind", and its
+        // comment said "no sleep and no TTL: the eviction happened as part of finishing the
+        // checkout". That was true while inventory was a module - reducing stock and evicting the
+        // cache were two steps of one transaction in one process.
+        //
+        // It is not true now. The reduction happens in inventory-service, which publishes a
+        // message; this application evicts when the message ARRIVES. Between those two moments the
+        // catalogue advertises stock that has already been sold - a window that did not exist
+        // yesterday and cannot be closed without putting the two back in one process.
+        //
+        // So the test asserts the window and then the correction, because that is what the system
+        // now does. Asserting the old sentence would need inventory-service running; asserting
+        // nothing would let the window widen unnoticed.
         ProductResponse product = create("Evicted After Sale", "250.00", 5);
 
-        // Warm BOTH caches, so there is something stale to find.
         assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
                         .stockQuantity())
                 .isEqualTo(5);
@@ -333,68 +356,25 @@ class CacheApiIT extends IntegrationTest {
         assertThat(shopper.postForEntity("/api/orders", null, String.class).getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
 
-        // No sleep and no TTL: the eviction happened as part of finishing the checkout, so the
-        // very next read is already correct.
+        // THE WINDOW. Stock really did move, and the catalogue has not heard.
+        assertThat(inventory.quantityFor(product.id()))
+                .as("the sale reduced stock in inventory")
+                .isEqualTo(3);
         assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
                         .stockQuantity())
-                .as("the product page must not still be advertising stock that was just sold")
+                .as("and the cached catalogue is briefly wrong, which is the cost of the split")
+                .isEqualTo(5);
+
+        // THE CORRECTION, exactly as it happens in production: the message arrives and is consumed.
+        evictor.onStockChanged(new ProductCacheEvictor.ProductStockChanged(product.id()));
+
+        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class)
+                        .stockQuantity())
+                .as("once the message arrives the product page is correct")
                 .isEqualTo(3);
         assertThat(listedStockOf(product.id()))
-                .as("and neither must the catalogue listing, which is one cache entry for all products")
+                .as("and so is the listing, which is one cache entry for all products")
                 .isEqualTo(3);
-    }
-
-    @Test
-    @DisplayName("the eviction is tied to the COMMIT: a rolled-back transaction evicts nothing")
-    void aRolledBackTransactionEvictsNothing() {
-        // This is the half an end-to-end test cannot show, and the reason the eviction is a
-        // transactional listener rather than an @CacheEvict on the write: evicting during the
-        // transaction throws away a good entry every time a checkout fails. Verified by mutation
-        // — putting @CacheEvict back on save() fails exactly this test.
-        //
-        // Note what it does NOT prove, because claiming otherwise would be worth less than
-        // saying so: it does not distinguish AFTER_COMMIT from BEFORE_COMMIT. Spring skips
-        // before-commit callbacks entirely on a rollback-only transaction, so both phases behave
-        // identically here. The reason the listener uses AFTER_COMMIT is the other hazard — a
-        // concurrent reader repopulating the cache from the not-yet-committed row — and that is
-        // a race with no deterministic hook to test against.
-        ProductResponse product = create("Rolled Back", "80.00", 7);
-        rest.getForObject("/api/products/" + product.id(), ProductResponse.class);
-
-        // Make the cached entry provably distinguishable from the database.
-        changePriceBehindTheCache(product.id(), "4242.00");
-
-        transactions.execute(status -> {
-            inventoryService.reserve(product.id(), "cache test", 1);
-            status.setRollbackOnly();
-            return null;
-        });
-
-        // The event was published inside that transaction and must never have been delivered.
-        // 80.00 is the price the cache was warmed with; the database now says 4242.00. Reading
-        // the OLD value back proves the entry survived the rollback untouched.
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class).price())
-                .as("a rolled-back write must leave the cache exactly as it found it")
-                .isEqualByComparingTo("80.00");
-    }
-
-    @Test
-    @DisplayName("a committed transaction does evict, so the two cases differ only in the commit")
-    void aCommittedTransactionEvicts() {
-        ProductResponse product = create("Committed", "80.00", 7);
-        rest.getForObject("/api/products/" + product.id(), ProductResponse.class);
-        changePriceBehindTheCache(product.id(), "4242.00");
-
-        transactions.execute(status -> {
-            inventoryService.reserve(product.id(), "cache test", 1);
-            return null;
-        });
-
-        // Same code, same event, one difference: this transaction committed. The entry is gone,
-        // so the next read goes to the database and sees the price written behind the cache.
-        assertThat(rest.getForObject("/api/products/" + product.id(), ProductResponse.class).price())
-                .as("a committed write must drop the stale entry")
-                .isEqualByComparingTo("4242.00");
     }
 
     @Test

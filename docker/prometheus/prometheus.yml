@@ -45,6 +45,15 @@ scrape_configs:
           # not.
           service: ecomdemo-app
 
+      # inventory-service, added in Phase 20b. It is a SECOND TARGET of the same job rather than a
+      # job of its own, because the two are the same kind of thing scraped the same way, and a
+      # shared job name is what lets a query say `sum by (service) (...)` and get one row per
+      # service without listing them. A job per service would make every dashboard panel grow a
+      # line each time a service is extracted.
+      - targets: ["inventory-service:8082"]
+        labels:
+          service: inventory-service
+
   # --- Prometheus itself ----------------------------------------------------------------------
   # A monitoring system that does not monitor itself cannot tell you that it stopped working.
   # This is one line and it is the difference between "no alerts, everything is fine" and "no

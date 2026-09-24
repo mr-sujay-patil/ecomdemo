@@ -17,6 +17,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import com.ecomdemo.jwt.JwtProperties;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
@@ -29,6 +30,13 @@ import org.springframework.security.oauth2.jwt.JwtValidationException;
  * <p>{@link ApplicationContextRunner} builds a tiny context containing only {@link JwtConfig},
  * so these are configuration assertions: nothing starts a web server or a database. It is the
  * same tool {@code DatasourceConfigurationTest} uses for the profile settings.
+ *
+ * <p>Phase 20b moved the key and the decoder to {@code common}, leaving only the encoder here, and
+ * this test deliberately did NOT follow them. What it asserts is the round trip — signed here,
+ * accepted here — and that claim spans both halves. It still passes because {@code JwtConfig}
+ * imports {@code JwtKeyConfig}, which is the other thing worth guarding: the day that import is
+ * dropped, the login endpoint starts minting tokens nothing can verify, and this test is what says
+ * so.
  */
 class JwtConfigTest {
 

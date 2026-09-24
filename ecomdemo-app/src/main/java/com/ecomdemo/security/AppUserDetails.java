@@ -35,7 +35,7 @@ public class AppUserDetails implements UserDetails {
      * {@code hasAuthority("ROLE_ADMIN")}. The prefix is pure convention with no business
      * meaning, so it is added here and never written to the database.
      */
-    public static final String ROLE_PREFIX = "ROLE_";
+    public static final String ROLE_PREFIX = com.ecomdemo.jwt.JwtAuthorities.ROLE_PREFIX;
 
     private final Long id;
     private final String username;

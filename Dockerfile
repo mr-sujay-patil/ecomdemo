@@ -17,6 +17,24 @@
 # ---------------------------------------------------------------------------------------------
 # Stage 1: build
 # ---------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------
+# ONE Dockerfile, several services (Phase 20b)
+# ---------------------------------------------------------------------------------------------
+# MODULE says which module of the reactor to package. Every service here is the same shape - a
+# Spring Boot jar on a JRE, layered the same way, with the same JVM flags and the same non-root
+# user - and five near-identical Dockerfiles would be five places to forget a change.
+#
+# What is NOT parameterised is the build: `./mvnw package` builds the whole reactor, because the
+# services share `common` and Maven has to resolve it from the same run. Only the EXTRACTION of a
+# jar is per-module, which is also the only part that differs.
+# The ARG is deliberately NOT used by the build stage below, and that is the whole trick. A stage
+# that reads an ARG is a DIFFERENT stage for each value of it, so `MODULE` inside `build` would
+# make `docker compose build` run the entire reactor once per service - two full Maven builds in
+# parallel on a 3.8 GB Docker VM, which is exactly how the first attempt at this hung for twenty
+# minutes and dragged Kafka and Grafana down with it. Kept out of `build`, the stage is identical
+# for every service, so BuildKit runs it ONCE and every image extracts its own jar from the result.
+ARG MODULE=ecomdemo-app
+
 FROM eclipse-temurin:21-jdk-alpine AS build
 WORKDIR /build
 
@@ -32,10 +50,12 @@ WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY common/pom.xml common/
+COPY inventory-service/pom.xml inventory-service/
 COPY ecomdemo-app/pom.xml ecomdemo-app/
 RUN ./mvnw -B -q dependency:go-offline
 
 COPY common/src/ common/src/
+COPY inventory-service/src/ inventory-service/src/
 COPY ecomdemo-app/src/ ecomdemo-app/src/
 
 # -DskipTests, deliberately. Tests run in the build (`./mvnw clean verify`) and in CI, where a
@@ -58,10 +78,15 @@ RUN ./mvnw -B -q package -DskipTests
 # Copied into the runtime image in that order, a rebuild after a code edit pushes ~200 KB instead
 # of 64 MB. (`-Djarmode=layertools` was the Boot 2/3 spelling; Boot 3.3 replaced it with
 # `jarmode=tools`, which this project uses.)
-RUN java -Djarmode=tools -jar ecomdemo-app/target/*.jar extract --layers --launcher --destination extracted
+# This is where MODULE finally comes in, in a stage of its very own. It is cheap - unzipping one
+# jar - so running it once per service costs nothing, while the expensive stage above is shared.
+FROM build AS extract
+ARG MODULE
+WORKDIR /build
+RUN java -Djarmode=tools -jar ${MODULE}/target/*.jar extract --layers --launcher --destination extracted
 
 # ---------------------------------------------------------------------------------------------
-# Stage 2: runtime
+# Stage 3: runtime
 # ---------------------------------------------------------------------------------------------
 # A JRE, not a JDK: nothing compiles at runtime, and a smaller image is less to pull and less
 # attack surface. Alpine keeps it to ~287 MB against ~450 MB for the Ubuntu-based tag.
@@ -83,10 +108,10 @@ WORKDIR /app
 
 # Copied newest-changing LAST, so the expensive layers stay cached. --chown avoids a second
 # full-size layer that would exist only to change file ownership.
-COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/dependencies/ ./
-COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/spring-boot-loader/ ./
-COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/snapshot-dependencies/ ./
-COPY --from=build --chown=ecomdemo:ecomdemo /build/extracted/application/ ./
+COPY --from=extract --chown=ecomdemo:ecomdemo /build/extracted/dependencies/ ./
+COPY --from=extract --chown=ecomdemo:ecomdemo /build/extracted/spring-boot-loader/ ./
+COPY --from=extract --chown=ecomdemo:ecomdemo /build/extracted/snapshot-dependencies/ ./
+COPY --from=extract --chown=ecomdemo:ecomdemo /build/extracted/application/ ./
 
 # Where the batch jobs (Phase 14) read uploads and write reports and error files.
 #

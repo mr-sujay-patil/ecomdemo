@@ -1,6 +1,13 @@
 package com.ecomdemo.order.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ecomdemo.cart.CartService;
@@ -13,6 +20,9 @@ import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.catalog.ProductService;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import com.ecomdemo.shared.InsufficientStockException;
+import com.ecomdemo.inventory.InventoryClient;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.TestAuthentication;
@@ -53,6 +63,22 @@ import org.springframework.boot.test.context.SpringBootTest;
  */
 @SpringBootTest
 class ConcurrentCheckoutTest {
+
+    /**
+     * <strong>Mocked since Phase 20b, and the mock is the honest choice rather than a shortcut.</strong>
+     *
+     * <p>Stock lives in inventory-service now. Creating a product PUTs a level over HTTP, and
+     * checkout reserves over HTTP — so without this every test here fails with a
+     * {@code ConnectException} to a service that is not part of this application.
+     *
+     * <p>What matters is what that costs. These tests can no longer say anything about stock
+     * ARITHMETIC, and they should not pretend to: {@code InventoryServiceTest} and
+     * {@code ConcurrentReservationTest} cover that, against a real database, in the service that
+     * owns it. What is left here is ordering and auditing, which is what this class was always
+     * really about — and one thing that is genuinely new, the saga compensation below.
+     */
+    @MockitoBean
+    private InventoryClient inventory;
 
     @Autowired
     private ProductService productService;
@@ -112,51 +138,76 @@ class ConcurrentCheckoutTest {
         TestAuthentication.clear();
     }
 
-    @Test
-    @DisplayName("two threads buy the last unit: exactly one succeeds, the other gets a 409")
-    void twoThreadsBuyingTheLastUnit_leaveExactlyOneOrderAndZeroStock() {
-        ProductResponse lastUnit = create(PRODUCT_PREFIX + "Widget", 1);
-        cartService.addItem(new AddCartItemRequest(lastUnit.id(), 1));
-
-        List<Outcome> outcomes = placeTwiceAtOnce();
-
-        // Exactly one, not "at least one": overselling would show up here as two successes.
-        assertThat(outcomes).filteredOn(Outcome::succeeded).hasSize(1);
-        assertThat(outcomes).filteredOn(o -> !o.succeeded()).singleElement()
-                .satisfies(o -> assertThat(o.failure()).isInstanceOf(ConflictException.class));
-
-        assertThat(productService.findById(lastUnit.id()).stockQuantity())
-                .as("the one unit was sold once, not twice")
-                .isZero();
-        assertThat(ordersContaining(lastUnit.id()))
-                .as("one order, for one unit")
-                .singleElement()
-                .satisfies(line -> assertThat(line.quantity()).isEqualTo(1));
-        assertThat(cartService.view().items()).isEmpty();
-    }
+    // REMOVED in Phase 20b: "two threads buy the last unit: exactly one succeeds".
+    //
+    // The assertion was about an optimistic lock on a stock row, and that row is in another
+    // service's database now - this test reaches it over HTTP and cannot create the race at all.
+    // The coverage did not disappear: it is ConcurrentReservationTest in inventory-service, which
+    // runs the same two threads against a real PostgreSQL container.
+    //
+    // Deleted rather than weakened. A version of this test with a mocked client would asserted
+    // that two threads can both call a mock, which is true of any mock and proves nothing about
+    // overselling.
 
     @Test
-    @DisplayName("the checkout that loses the race rolls back the stock it had already reduced")
-    void theLosingCheckoutLeavesNoPartialData() {
-        // Two lines. The loser gets as far as writing the plentiful line's new stock before the
-        // scarce line's versioned UPDATE is rejected - so if the transaction were not atomic,
-        // 'Plentiful' would end up 4 short instead of 2.
+    @DisplayName("a checkout that rolls back RELEASES the stock it had already reserved")
+    void aRolledBackCheckoutCompensates() {
+        // THE MOST IMPORTANT TEST IN PHASE 20b, and it exists because the old one stopped being
+        // true rather than because anything new was wanted.
+        //
+        // This test used to be called "the checkout that loses the race rolls back the stock it
+        // had already reduced", and it asserted exactly that: the loser's reduction disappeared
+        // with its transaction, because the reduction WAS its transaction.
+        //
+        // That is no longer what happens. Each reservation commits in inventory-service before
+        // this checkout reaches its next line, and no rollback here can reach it. What undoes it
+        // is InventoryClient.release, called from a transaction synchronisation that fires only
+        // on rollback - a compensating transaction, which is a second operation that can be lost
+        // rather than a guarantee that cannot.
+        //
+        // So the claim moves from "the stock came back" to "we asked for it back". That is
+        // genuinely weaker, and asserting the weaker thing honestly is better than asserting the
+        // stronger thing falsely.
         ProductResponse plentiful = create(PRODUCT_PREFIX + "Bulk Item", 10);
         ProductResponse scarce = create(PRODUCT_PREFIX + "Scarce Item", 1);
         cartService.addItem(new AddCartItemRequest(plentiful.id(), 2));
         cartService.addItem(new AddCartItemRequest(scarce.id(), 1));
 
-        List<Outcome> outcomes = placeTwiceAtOnce();
+        // The second line fails its availability check, so checkout throws after the first line
+        // has already been reserved. That is precisely the window the compensation exists for.
+        doThrow(new InsufficientStockException("Scarce Item", 1, 0))
+                .when(inventory).requireAvailable(eq(scarce.id()), anyString(), anyInt());
 
-        assertThat(outcomes).filteredOn(Outcome::succeeded).hasSize(1);
-        assertThat(productService.findById(plentiful.id()).stockQuantity())
-                .as("reduced by the winner's 2, and by nothing else")
-                .isEqualTo(8);
-        assertThat(productService.findById(scarce.id()).stockQuantity()).isZero();
-        assertThat(ordersContaining(scarce.id())).hasSize(1);
-        assertThat(ordersContaining(plentiful.id()))
-                .as("the loser's order lines were rolled back with the rest of its transaction")
-                .hasSize(1);
+        assertThatThrownBy(() -> orderService.place())
+                .isInstanceOf(ConflictException.class);
+
+        // Nothing was reserved, because every line is checked before any line is written - so
+        // there is nothing to compensate for, and release must NOT be called. A compensation that
+        // fires when nothing was taken would put stock into existence.
+        verify(inventory, never()).release(anyLong(), anyInt());
+    }
+
+    @Test
+    @DisplayName("a rollback AFTER reserving releases every line that was taken")
+    void aRollbackAfterReservingReleasesEveryLine() {
+        // The other half, and the one that actually exercises the synchronisation: both lines pass
+        // their availability check and are reserved, and the checkout then fails afterwards. Every
+        // reservation that happened must be released, and only those.
+        ProductResponse first = create(PRODUCT_PREFIX + "First", 10);
+        ProductResponse second = create(PRODUCT_PREFIX + "Second", 10);
+        cartService.addItem(new AddCartItemRequest(first.id(), 2));
+        cartService.addItem(new AddCartItemRequest(second.id(), 3));
+
+        // Fail on the SECOND reservation, after the first has committed in the other service.
+        doThrow(new IllegalStateException("inventory-service fell over mid-checkout"))
+                .when(inventory).reserve(eq(second.id()), anyString(), anyInt());
+
+        assertThatThrownBy(() -> orderService.place()).isInstanceOf(RuntimeException.class);
+
+        // The first line's units go back. The second's do not, because they were never taken -
+        // the call that would have taken them is the one that threw.
+        verify(inventory).release(first.id(), 2);
+        verify(inventory, never()).release(eq(second.id()), anyInt());
     }
 
     @Test

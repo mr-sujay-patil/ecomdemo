@@ -12,7 +12,37 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 20a: Microservices Split - PREPARATION (tag: none yet, PR: pending)
+## Phase 20b: Microservices Split - EXTRACTION, first service (tag: NONE - see below, PR #TBD)
+**What exists now:** TWO deployables. `inventory-service` owns stock in its own `inventory_db`
+(Flyway V1-V2), exposes a REST API, publishes `inventory.stock-changed`, and validates JWTs with its
+own filter chain. `ecomdemo-app` reaches it over HTTP behind `InventoryGateway`. 437 tests
+(5 + 34 + 317 + 81), smoke test **270 - UNCHANGED**, eleven containers healthy.
+**ONE of five services is extracted. Phase 20 is NOT complete and `phase-20-complete` is NOT tagged.**
+**Key code:** `common/.../jwt/` (JwtKeyConfig, JwtAuthorities, ServiceTokenProvider, ServiceTokens -
+validation is shared, ISSUING stays in the app); `inventory-service/` whole module;
+`ecomdemo-app/.../inventory/` (InventoryGateway, InventoryClient, InventoryClientConfig);
+`cache/StockChangedListenerConfig`; `order/internal/OrderPlacementService` (the saga).
+**Config & infrastructure:** `inventory-db` (5433) + `inventory-service` (8082), 384M limit each;
+`INVENTORY_BASE_URL`, `JWT_SECRET` shared by both services; `kafka-ui` behind `--profile tools`;
+Prometheus scrapes both as ONE job so `sum by (service)` works; Alloy ships both new containers.
+Dockerfile: `ARG MODULE` is NOT read by the build stage - that is what keeps one reactor build.
+`common` publishes a **test-jar** (ProjectRoot).
+**Tests:** InventorySecurityTest, InventoryApiValidationTest, SeededStockAgreesWithTheCatalogueTest,
+ServiceTokenProviderTest, StockChangedListenerConfigTest,
+LoggingStackConfigTest.alloyShipsEveryServiceThisRepositoryBuilds. All mutation-checked.
+**Gotchas:** four failures got past `clean verify` - no filter chain (everything 401 while HEALTHY),
+empty seed data (all stock zero, silently), a GLOBAL `spring.json.value.default.type` deserialising
+the stock event as an OrderPlacedEvent **with zero consumer lag**, and Alloy shipping no logs for
+the new containers. Cache eviction is now EVENTUALLY consistent (it crosses a broker); the smoke
+check polls and reports the convergence time. `@PreAuthorize("hasRole('ADMIN')")` inside a service
+called with a SERVICE token can only answer 403 - and was inert anyway without
+`@EnableMethodSecurity`.
+**Follow-ups (not done, out of scope):** extract catalog-service (takes `cache`), customer-service,
+notification-service; `order-service` is the residue. **Recommended one service per PR** - see
+`docs/test-reports/phase-20b.md` §8. Also open: a failed release call leaks a reservation, nothing
+reconciles it; HS256 shared secret; the Phase 19 dashboard defect.
+
+## Phase 20a: Microservices Split - PREPARATION (tag: NONE - see below, PR #26)
 **What exists now:** Still ONE deployable, but every precondition for splitting it is in place.
 `product_stock` is its own table, `cart_item` snapshots the product instead of pointing at it, and
 the build is a Maven reactor (parent + `common` library + `ecomdemo-app`). 417 tests (334 + 83),
@@ -42,35 +72,3 @@ catalog DTOs and listens for inventory events.
 validation per service, compose at ~14 containers with a 384M cap per service and kafka-ui behind
 a profile, and the smoke test rebuilt against per-service ports. MEMORY IS THE OPEN RISK: Docker
 Desktop is capped at 3.8 GB, a JVM idles at 296 MiB and PostgreSQL at 31, projection ~2.0-2.4 GB.
-
-## Phase 19: Modular Monolith (tag: phase-19-complete, PR #24 + follow-up #25)
-**What exists now:** Fourteen named modules, each declaring in `package-info.java` exactly which
-others it may depend on, enforced by `ModularityTest` - an undeclared import now fails the build
-naming both ends. The graph is ACYCLIC. Every module keeps its published API at its package root
-and everything else under `<module>.internal`. No schema change, no new endpoint, no new container,
-and the smoke test is **270 checks, unchanged**, which is the phase's real result: ~90 files moved
-and no behaviour did. 401 tests (319 + 82). Schema still **V10**.
-**Key code:** `catalog` (was `product`) and a new `inventory` that owns stock movement;
-`shared` (was `common`); `customer.CurrentUser` (was in `security`) and `shared.TokenClaims` (was
-`JwtConfig.Claims`) - those two moves broke the application's only dependency cycle. Three new
-narrow APIs replaced cross-module repository access: `customer.UserDirectory`,
-`catalog.ProductService.findFirstByName/saveAll`, `messaging.EventDeduplicator.claim`.
-**Config & infrastructure:** `spring-modulith-api` at COMPILE scope (annotations go on main
-source), `spring-modulith-core` and `-docs` at TEST scope. Boot 4.1.1 does not manage Spring
-Modulith and the GA line targets Boot 3.5 - keeping the runtime starter out is what makes that gap
-safe. Nothing else changed.
-**Tests:** `ModularityTest` (boundaries + regenerates `docs/modules/`), `StockMutationRulesTest`
-(ArchUnit: who may write stock), `EventDeduplicatorTest` (the idempotency assertions, moved from
-`NotificationServiceTest`). 23 test classes moved into `internal` test packages to follow the
-classes they cover.
-**Gotchas:** (1) `catalog` and `inventory` SHARE the `product` table and the `Product` entity - the
-split is behavioural, so the ArchUnit rule permits BOTH modules to write stock; `ProductService.update`
-is the admin's full replace and cannot call into inventory without a cycle. (2) `ModularityTest`
-writes into `docs/modules/` on every run, so `./mvnw test` touches the working tree - deliberate,
-so a stale diagram shows as an uncommitted change. (3) Moving a package-private class into
-`internal` breaks its test unless the test moves too. (4) `Documenter` drops `logging` from the
-overall diagram because it has no edges; cosmetic.
-**Follow-ups (not done, out of scope):** split `product` and `product_stock` so the stock rule can
-name one module (Phase 20, if the service split demands it); let `catalog` contribute its own cache
-configuration so `cache` stops knowing products exist; `order -> cart` stays a direct call on
-purpose, since `clearCart` is inside the checkout transaction.

@@ -53,7 +53,7 @@ class ProductServiceTest {
      * arithmetic behind it is {@code InventoryServiceTest}'s, against a database.
      */
     @Mock
-    private com.ecomdemo.inventory.InventoryService inventory;
+    private com.ecomdemo.inventory.InventoryClient inventory;
 
     @InjectMocks
     private ProductService productService;

@@ -41,6 +41,7 @@
 	-->
 	<modules>
 		<module>common</module>
+		<module>inventory-service</module>
 		<module>ecomdemo-app</module>
 	</modules>
 
@@ -61,6 +62,14 @@
 			application context is never built from them.
 		-->
 		<spring-modulith.version>1.4.1</spring-modulith.version>
+
+		<!--
+			ArchUnit, pinned because Phase 20b needs it in a module that does NOT depend on Spring
+			Modulith. It reached `ecomdemo-app` transitively through `spring-modulith-core`, and
+			inventory-service has no reason to carry Modulith for the sake of one architecture
+			rule - so the version is declared here and the dependency named where it is used.
+		-->
+		<archunit.version>1.4.1</archunit.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
 		<!--

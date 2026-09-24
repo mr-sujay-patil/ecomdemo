@@ -1,13 +1,11 @@
 package com.ecomdemo.cache;
 
-import com.ecomdemo.inventory.ProductStockChangedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.kafka.annotation.KafkaListener;
 
 /**
  * Drops the catalogue's cached view of a product once a checkout has really taken its stock.
@@ -63,8 +61,34 @@ public class ProductCacheEvictor {
      * one TTL of staleness — the very thing this class removes in the normal case, and not worth
      * failing a completed sale over.
      */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    public void onStockChanged(ProductStockChangedEvent event) {
+    /**
+     * <h2>A Kafka listener since Phase 20b, and it used to be a Spring event</h2>
+     *
+     * <p>The publisher is in another process now. An {@code @TransactionalEventListener} could
+     * hear a stock change while inventory was a module in this application and cannot hear one
+     * from inventory-service, so the same fact arrives as a message on
+     * {@code inventory.stock-changed}.
+     *
+     * <p><strong>The AFTER_COMMIT guarantee did not weaken; it moved.</strong> It used to be
+     * enforced here, by the listener refusing to run until the publisher's transaction committed.
+     * It is now enforced at the publisher, which holds the send until its own commit — so a
+     * reservation that rolls back still evicts nothing. The rule survived the boundary by changing
+     * which side of it is responsible.
+     *
+     * <p>No idempotency check, deliberately, and this is the one place in the project where that
+     * is the right answer. Kafka delivers at least once, so this eviction will sometimes run twice
+     * — and evicting an already-evicted entry is a no-op. Phase 17 built {@code processed_event}
+     * because writing a notification twice sends two emails; there is nothing here to protect.
+     * Machinery belongs where a duplicate costs something.
+     */
+    @KafkaListener(
+            topics = STOCK_CHANGED_TOPIC,
+            groupId = CACHE_GROUP,
+            // Its OWN container factory. The application's default one deserialises every value as
+            // an OrderPlacedEvent, which is right for the notification consumer and silently wrong
+            // here - see StockChangedListenerConfig for how that failed without any lag to show it.
+            containerFactory = StockChangedListenerConfig.FACTORY)
+    public void onStockChanged(ProductStockChanged event) {
         try {
             evict(CacheNames.PRODUCT, event.productId());
             evict(CacheNames.PRODUCT_LIST, CacheNames.PRODUCT_LIST_KEY);
@@ -76,6 +100,33 @@ public class ProductCacheEvictor {
                     ex);
         }
     }
+
+    /**
+     * The topic inventory-service publishes stock changes to.
+     *
+     * <p>Named here as a constant for the reason {@code KafkaTopics} gives: a topic name is a
+     * public interface with no compiler behind it, and a typo produces a consumer that hears
+     * nothing rather than an error.
+     */
+    static final String STOCK_CHANGED_TOPIC = "inventory.stock-changed";
+
+    /**
+     * The consumer group. Separate from the notification consumer's, because a group is a unit of
+     * work-sharing: two listeners in one group would each see only some of the messages, and the
+     * cache would be evicted for some products and not others.
+     */
+    static final String CACHE_GROUP = "ecomdemo-catalogue-cache";
+
+    /**
+     * The message, as this side reads it.
+     *
+     * <p>Deliberately a LOCAL record rather than a shared type imported from inventory-service.
+     * Sharing the class would make the two services compile against one definition, which is a
+     * compile-time coupling between things that are supposed to be independently deployable — and
+     * it is exactly the mistake that makes a distributed monolith. Each side declares the shape it
+     * needs; the contract is the JSON on the topic, not a jar.
+     */
+    record ProductStockChanged(Long productId) {}
 
     private void evict(String cacheName, Object key) {
         Cache cache = cacheManager.getCache(cacheName);

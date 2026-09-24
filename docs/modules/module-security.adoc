@@ -7,10 +7,6 @@
 
 * `c.e.s.AppUserDetailsService`
 
-_Configuration properties_
-
-* `c.e.s.JwtProperties`
-
 _Others_
 
 * `c.e.s.ApiErrorAccessDeniedHandler`

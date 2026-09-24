@@ -149,6 +149,11 @@ services:
       # the INTERNAL listener; the published 29092 is for producers running on the host.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
+      # Where inventory-service is, on the compose network. The default in
+      # application.properties is localhost:8082, which is right for running both from an IDE and
+      # wrong inside a container, where localhost is this container.
+      INVENTORY_BASE_URL: http://inventory-service:8082
+
       # Structured logging (Phase 16). Empty everywhere else, so `./mvnw spring-boot:run` on a
       # laptop keeps the readable pattern layout; `ecs` here because this container's stdout is
       # read by Alloy and parsed as JSON, never by a person scrolling. See the logging section of
@@ -174,6 +179,89 @@ services:
           memory: ${APP_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
+
+  # -------------------------------------------------------------------------------------------
+  # inventory-db (Phase 20b) - a database of its OWN, which is the point
+  # -------------------------------------------------------------------------------------------
+  # A second PostgreSQL rather than a second schema, and the choice was measured rather than
+  # assumed: at idle PostgreSQL costs ~31 MiB against a JVM's ~296, so five databases cost about
+  # 125 MiB more than one while five JVMs cost about 1.2 GB more. Collapsing to one database with a
+  # schema per service would have saved a rounding error and given up the entire subject of the
+  # phase. The JVMs get capped instead - see the memory limit on each service.
+  inventory-db:
+    image: postgres:18-alpine
+    container_name: ecomdemo-inventory-db
+    environment:
+      POSTGRES_DB: ${INVENTORY_DB_NAME:-inventory}
+      POSTGRES_USER: ${INVENTORY_DB_USER:-inventory}
+      POSTGRES_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory}
+    ports:
+      # 5433 on the host, because 5432 is the catalogue's. Inside the network both are 5432 -
+      # a container gets its own address, so the ports only collide on the host.
+      - "${INVENTORY_DB_PORT:-5433}:5432"
+    volumes:
+      # /var/lib/postgresql, NOT /var/lib/postgresql/data - matching the catalogue's db above.
+      # PostgreSQL 18 wants a single mount at the parent and puts its data in a subdirectory of
+      # it; mounting the data directory itself makes the container refuse to start with a long
+      # explanation about pg_upgrade and mount-point boundaries.
+      - inventory-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${INVENTORY_DB_USER:-inventory} -d ${INVENTORY_DB_NAME:-inventory}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # inventory-service (Phase 20b) - the first service extracted
+  # -------------------------------------------------------------------------------------------
+  inventory-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # The one Dockerfile packages whichever module this names. Everything else about the image
+        # - the JRE, the layering, the non-root user, the JVM flags - is identical by construction.
+        MODULE: inventory-service
+    image: ecomdemo-inventory:latest
+    container_name: ecomdemo-inventory-service
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      INVENTORY_DB_HOST: inventory-db
+      INVENTORY_DB_PORT: 5432
+      INVENTORY_DB_NAME: ${INVENTORY_DB_NAME:-inventory}
+      INVENTORY_DB_USER: ${INVENTORY_DB_USER:-inventory}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
+      # The SAME secret the application verifies with, because HMAC signs and verifies with one
+      # key. That is also the honest argument for asymmetric signing in a real deployment: five
+      # services each holding the signing key is five places it can leak. Recorded in
+      # docs/decisions.md rather than pretended away.
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - "${INVENTORY_PORT:-8082}:8082"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          # 384M, not the app's 768M, and this number is what makes five services fit at all.
+          # MaxRAMPercentage in the Dockerfile is a percentage OF THIS - without a limit the JVM
+          # sizes its heap against the whole Docker VM, and five JVMs each claiming 75% of 3.8 GB
+          # is the mistake the app's comment warns about, five times over. This service holds one
+          # table and one topic; it does not need what a monolith needed.
+          memory: ${INVENTORY_MEMORY_LIMIT:-384M}
+    restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
   # Prometheus (Phase 15) - scrapes the application and stores the numbers
@@ -427,6 +515,13 @@ services:
   # easier to believe once you have watched it arrive, seen which partition it landed in, and read
   # the key it was routed by.
   kafka-ui:
+    # OPT-IN since Phase 20b: `docker compose --profile tools up -d`.
+    #
+    # It idles at ~242 MiB, which was affordable with one JVM in the stack and is not with five.
+    # It is a developer's window onto the broker, not part of the system, so it is the first thing
+    # that should give way when the budget tightens - and unlike shrinking a heap, switching it off
+    # costs nothing anyone can observe.
+    profiles: ["tools"]
     image: kafbat/kafka-ui:v1.5.0
     container_name: ecomdemo-kafka-ui
     depends_on:
@@ -443,6 +538,8 @@ services:
 volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
+  inventory-data:
+
   postgres-data:
 
   # Uploads staged for the import, the error files beside them, and the nightly sales reports.
