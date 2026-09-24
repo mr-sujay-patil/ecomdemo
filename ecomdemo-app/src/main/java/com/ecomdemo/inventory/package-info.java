@@ -1,13 +1,17 @@
 /**
- * How many of a product there are, and the only route by which that number changes.
+ * What is left of inventory in this application: a client, not a module.
  *
- * <p>A catalogue and an inventory answer different questions about the same row, at very
- * different rates, with very different correctness stories - a description changes rarely and by
- * a human, a count changes on every sale, concurrently, under an optimistic lock. That divergence
- * is what a bounded context is, and separating it before Phase 20 splits the services is why this
- * phase comes first.
+ * <p>Until Phase 20b this package held the entity, the repository and the service that owned
+ * stock. All of that is in {@code inventory-service} now. What remains is an HTTP client and the
+ * address to find it at — the shadow a module leaves behind when it becomes a deployable.
+ *
+ * <p>The package keeps its name on purpose. Every caller still imports
+ * {@code com.ecomdemo.inventory.InventoryClient} and calls methods with the arguments it always
+ * used, so the diff at the five call sites is a type name. That is the payoff for Phase 20a
+ * shaping those calls — batched, id-based, carrying the product name for the error message —
+ * while they were still in-process.
  */
 @org.springframework.modulith.ApplicationModule(
-        displayName = "Inventory",
+        displayName = "Inventory (client)",
         allowedDependencies = {"shared"})
 package com.ecomdemo.inventory;

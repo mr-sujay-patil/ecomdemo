@@ -4,7 +4,12 @@ package com.ecomdemo.inventory;
  * Published when a product's stock is changed by something other than a catalogue edit — today,
  * only a checkout.
  *
- * <p><strong>It moved here from {@code catalog} in Phase 20</strong>, with the column it describes.
+ * <p><strong>It is a Kafka message as well as a Spring event since Phase 20b.</strong> Inside
+ * inventory-service it is still raised in-process, so that a transactional listener can hold the
+ * send until the commit; what crosses the boundary is the serialised form of this same record. See
+ * {@link StockChangePublisher}.
+ *
+ * <p><strong>It moved here from {@code catalog} in Phase 20a</strong>, with the column it describes.
  * Stock is the inventory module's to state a fact about now; the catalogue no longer has the
  * number and could not raise the event honestly if it wanted to.
  *

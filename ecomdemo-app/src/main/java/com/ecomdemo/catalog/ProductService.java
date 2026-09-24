@@ -1,7 +1,7 @@
 package com.ecomdemo.catalog;
 
 import com.ecomdemo.catalog.internal.ProductRepository;
-import com.ecomdemo.inventory.InventoryService;
+import com.ecomdemo.inventory.InventoryClient;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
@@ -67,10 +67,10 @@ public class ProductService {
      * Constructor injection: the dependency is final, the object cannot exist in a half-built
      * state, and the class can be instantiated in a plain unit test with {@code new}.
      */
-    private final InventoryService inventory;
+    private final InventoryClient inventory;
 
     public ProductService(ProductRepository productRepository,
-            InventoryService inventory) {
+            InventoryClient inventory) {
         this.inventory = inventory;
         this.productRepository = productRepository;
     }

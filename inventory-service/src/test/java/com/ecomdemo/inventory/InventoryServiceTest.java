@@ -12,10 +12,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.event.ApplicationEvents;
 import org.springframework.test.context.event.RecordApplicationEvents;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * The stock arithmetic, against a real database.
@@ -32,6 +31,13 @@ import org.springframework.transaction.annotation.Transactional;
  * place for it, because a {@code @DataJpaTest} can exercise the optimistic lock and the
  * missing-row case, neither of which a mock could have shown.
  *
+ * <p><strong>Phase 20b moved the file itself into inventory-service</strong>, and took a helper
+ * out of it. These tests used to wrap every reservation in a transaction, because {@code reserve}
+ * was {@code Propagation.MANDATORY} and refused to run without one. It cannot be any more — the
+ * caller is in another process — so the wrapper went with the guarantee. What replaces that
+ * guarantee is a compensating {@code release}, which is tested below and, unlike a rollback, can
+ * itself fail.
+ *
  * <h2>Why a database rather than a mocked repository</h2>
  *
  * <p>Two of the claims below are claims about JPA, not about this class: that a missing row reads
@@ -40,7 +46,7 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @DataJpaTest
 @TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
-@Import(InventoryService.class)
+@Import({InventoryService.class, StockChangePublisher.class})
 @RecordApplicationEvents
 @DisplayName("InventoryService")
 class InventoryServiceTest {
@@ -50,6 +56,19 @@ class InventoryServiceTest {
 
     @Autowired
     private ProductStockRepository stock;
+
+    /**
+     * {@code @DataJpaTest} configures a database and nothing else, so there is no
+     * {@code KafkaTemplate} for {@link StockChangePublisher} to hold. Mocking it keeps this test
+     * on the arithmetic, which is what it is for.
+     *
+     * <p>The publisher itself is REAL, because the assertion below is about the event it raises
+     * in-process — the one a transactional listener then turns into a message. Mocking the
+     * publisher would have removed the thing under test; mocking the broker underneath it removes
+     * only the part that belongs to {@code InventoryKafkaIT}.
+     */
+    @MockitoBean
+    private org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
 
     /**
      * Records what was published, rather than mocking the publisher.
@@ -156,7 +175,7 @@ class InventoryServiceTest {
             // could mutate directly.
             stock.save(new ProductStock(1L, 9));
 
-            inReadWriteTransaction(() -> inventory.reserve(1L, "Lamp", 2));
+            inventory.reserve(1L, "Lamp", 2);
 
             assertThat(inventory.quantityFor(1L)).isEqualTo(7);
         }
@@ -169,7 +188,7 @@ class InventoryServiceTest {
             // eviction itself has to wait for the commit.
             stock.save(new ProductStock(1L, 9));
 
-            inReadWriteTransaction(() -> inventory.reserve(1L, "Lamp", 2));
+            inventory.reserve(1L, "Lamp", 2);
 
             assertThat(publishedEvents.stream(ProductStockChangedEvent.class))
                     .containsExactly(new ProductStockChangedEvent(1L));
@@ -180,7 +199,7 @@ class InventoryServiceTest {
         void refusesAnOverdraw() {
             stock.save(new ProductStock(1L, 1));
 
-            assertThatThrownBy(() -> inReadWriteTransaction(() -> inventory.reserve(1L, "Lamp", 2)))
+            assertThatThrownBy(() -> inventory.reserve(1L, "Lamp", 2))
                     .isInstanceOf(InsufficientStockException.class);
 
             assertThat(inventory.quantityFor(1L)).isEqualTo(1);
@@ -189,7 +208,7 @@ class InventoryServiceTest {
         @Test
         @DisplayName("a product with no stock row cannot be reserved from")
         void refusesWhenThereIsNoRow() {
-            assertThatThrownBy(() -> inReadWriteTransaction(() -> inventory.reserve(404L, "Ghost", 1)))
+            assertThatThrownBy(() -> inventory.reserve(404L, "Ghost", 1))
                     .isInstanceOf(InsufficientStockException.class);
         }
 
@@ -198,7 +217,7 @@ class InventoryServiceTest {
         void allowsTakingTheLastUnit() {
             stock.save(new ProductStock(1L, 1));
 
-            inReadWriteTransaction(() -> inventory.reserve(1L, "Lamp", 1));
+            inventory.reserve(1L, "Lamp", 1);
 
             assertThat(inventory.quantityFor(1L)).isZero();
         }
@@ -254,13 +273,4 @@ class InventoryServiceTest {
         assertThat(stock.findById(1L)).isEmpty();
     }
 
-    /**
-     * Runs work in a transaction, because {@link InventoryService#reserve} is {@code MANDATORY}
-     * and refuses to run without one — deliberately, so that stock can never commit while the
-     * order that justified it rolls back.
-     */
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    void inReadWriteTransaction(Runnable work) {
-        work.run();
-    }
 }

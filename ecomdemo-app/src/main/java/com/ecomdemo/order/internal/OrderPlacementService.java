@@ -8,11 +8,14 @@ import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.inventory.InventoryService;
+import com.ecomdemo.inventory.InventoryClient;
 import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -36,7 +39,7 @@ class OrderPlacementService {
 
     private final OrderRepository orderRepository;
     private final CartService cartService;
-    private final InventoryService inventory;
+    private final InventoryClient inventory;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
     private final OutboxWriter outbox;
@@ -44,7 +47,7 @@ class OrderPlacementService {
     OrderPlacementService(
             OrderRepository orderRepository,
             CartService cartService,
-            InventoryService inventory,
+            InventoryClient inventory,
             OrderAuditService orderAuditService,
             CurrentUser currentUser,
             OutboxWriter outbox) {
@@ -69,7 +72,7 @@ class OrderPlacementService {
      * to break first, and it spares the database work it would only have to throw away.
      *
      * <p><strong>Since Phase 19 the stock itself belongs to somebody else.</strong> This method
-     * asks {@code InventoryService} to check and to reserve; it no longer calls
+     * asks {@code InventoryClient} to check and to reserve; it no longer calls
      * {@code reduceStock} or saves the product, and it does not know that either happens. What it
      * kept is the SEQUENCE — check every line, then write — because that is an ordering concern,
      * about the message a shopper gets when a cart cannot be fulfilled. What it gave up is the
@@ -101,6 +104,11 @@ class OrderPlacementService {
             // way for a request to check out somebody else's cart or to place an order in
             // somebody else's name, because neither is ever named in a request.
             Order order = new Order(Instant.now(), currentUser.require());
+
+            // What has been taken from inventory so far, so it can be given back if this
+            // transaction does not survive. See the compensation below.
+            List<Reservation> reserved = new ArrayList<>();
+
             for (CartItem line : lines) {
                 // Both the order line and the reservation are built from the CART's snapshot, not
                 // from the catalogue. Checkout no longer reads a product at all - which is what
@@ -111,7 +119,36 @@ class OrderPlacementService {
                         line.getQuantity());
                 inventory.reserve(
                         line.getProductId(), line.getProductName(), line.getQuantity());
+                reserved.add(new Reservation(line.getProductId(), line.getQuantity()));
             }
+
+            // THE COMPENSATION, and the most important comment in this method.
+            //
+            // Until Phase 20b `reserve` was Propagation.MANDATORY inside this very transaction, so
+            // a rollback after this point un-reserved the stock automatically and there was
+            // nothing to write here. inventory-service is another process now: each reservation
+            // committed there before this method reached its next line, and no rollback of ours
+            // can reach them.
+            //
+            // So the undo becomes an action. registerSynchronization fires after this transaction
+            // completes, and only when it completed by ROLLING BACK - the same AFTER_COMMIT
+            // machinery Phase 16 used, pointed at the opposite outcome.
+            //
+            // A compensating transaction is not a rollback. It is a second business operation that
+            // happens to mean the opposite of the first, and it can be lost: if this process dies
+            // between the reservations and the rollback, the stock stays taken for an order that
+            // never existed. Nothing reconciles that yet, and docs/test-reports says so rather
+            // than leaving it to be discovered.
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCompletion(int status) {
+                            if (status != STATUS_ROLLED_BACK) {
+                                return;
+                            }
+                            reserved.forEach(r -> inventory.release(r.productId(), r.quantity()));
+                        }
+                    });
 
             Order placed = orderRepository.save(order);
             cartService.clearCart(cart);
@@ -146,4 +183,12 @@ class OrderPlacementService {
             throw ex;
         }
     }
+
+    /**
+     * One line's worth of stock taken from inventory-service, remembered so it can be given back.
+     *
+     * <p>A local record rather than anything shared: the compensation needs an id and a number,
+     * and nothing else about the reservation is this method's business.
+     */
+    private record Reservation(Long productId, int quantity) {}
 }

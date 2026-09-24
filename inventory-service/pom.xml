@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.ecomdemo</groupId>
+		<artifactId>ecomdemo-parent</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+	<artifactId>inventory-service</artifactId>
+	<name>inventory-service</name>
+	<description>How many of each product there are, and the only thing allowed to change it</description>
+
+	<!--
+		THE FIRST SERVICE OUT, and it is first because it is the only leaf.
+
+		Phase 20a removed both edges INTO this module - `inventory -> catalog` inverted when stock
+		became its own table, and `order -> catalog` vanished when the cart started snapshotting -
+		so what is left depends on nothing but `common`. That makes it the one service that can be
+		extracted without writing an HTTP client at the same time: it answers, it does not ask.
+
+		The dependency list is deliberately SHORT, and this is the first place the split pays for
+		itself. The monolith carried Kafka, Batch, Redis, springdoc-ui and the whole web stack
+		because SOMETHING in it needed each. This service needs a database, a web layer and a way
+		to verify a token - and its container will idle at a fraction of what one JVM carrying all
+		of it does, which is the difference between five services fitting on this machine and not.
+	-->
+	<dependencies>
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-common</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!--
+			VALIDATES tokens; it does not issue them. That is the whole point of a signed token and
+			is what Phase 9 bought: this service checks a signature and reads claims, and never
+			calls customer-service to ask whether a caller is real.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
+		<!-- Publishes inventory.stock-changed, so a catalogue cache can be evicted across the boundary. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-kafka</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-flyway</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-database-postgresql</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.postgresql</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			For StockMutationRulesTest, which asserts that nothing inside this service writes stock
+			behind InventoryService. Declared directly rather than inherited through Spring
+			Modulith: this service has one module and no use for the rest of what Modulith does.
+		-->
+		<dependency>
+			<groupId>com.tngtech.archunit</groupId>
+			<artifactId>archunit</artifactId>
+			<version>${archunit.version}</version>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<!--
+				Resolves dependency coordinates into properties. Surefire's configuration in the
+				parent passes Mockito's jar as a -javaagent, and without this plugin that property
+				is never filled in - the JVM then fails to start with "Error occurred during
+				initialization of VM", which says nothing at all about the cause.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+</project>

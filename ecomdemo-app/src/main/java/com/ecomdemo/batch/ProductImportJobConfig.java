@@ -2,7 +2,7 @@ package com.ecomdemo.batch;
 
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.catalog.ProductService;
-import com.ecomdemo.inventory.InventoryService;
+import com.ecomdemo.inventory.InventoryClient;
 import java.nio.file.Path;
 import org.springframework.batch.core.configuration.annotation.StepScope;
 import org.springframework.batch.core.job.Job;
@@ -132,7 +132,7 @@ class ProductImportJobConfig {
 
     @Bean
     @StepScope
-    ProductUpsertWriter productUpsertWriter(ProductService catalogue, InventoryService inventory,
+    ProductUpsertWriter productUpsertWriter(ProductService catalogue, InventoryClient inventory,
             CacheManager cacheManager) {
         return new ProductUpsertWriter(catalogue, inventory, cacheManager);
     }
