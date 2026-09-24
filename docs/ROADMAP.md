@@ -86,8 +86,9 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 18 | [Reliable Event Publishing](phases/phase-18-outbox.md) | Transactional Outbox | `feature/phase-18-outbox` | ✅ |
 | 19 | [Modular Monolith](phases/phase-19-modulith.md) | Spring Modulith | `feature/phase-19-modulith` | ✅ |
 | 20a | [Microservices Split — preparation](phases/phase-20-microservices.md) | Data split + Maven reactor | `feature/phase-20-microservices` | ✅ |
-| 20b | [Microservices Split — extraction](phases/phase-20-microservices.md) | **inventory-service** extracted: own database, own JWT chain, own topic | `feature/phase-20b-microservices` | 🔵 |
-| 20c | [Microservices Split — remaining services](phases/phase-20-microservices.md) | catalog, customer, notification; order-service is the residue | _not yet cut_ | ⬜ |
+| 20b | [Microservices Split — extraction](phases/phase-20-microservices.md) | **inventory-service** extracted: own database, own JWT chain, own topic | `feature/phase-20b-microservices` | ✅ |
+| 20c | [Microservices Split — catalog-service](phases/phase-20-microservices.md) | **catalog-service** (takes `cache` with it) | `feature/phase-20c-catalog-service` | 🔵 |
+| 20d | [Microservices Split — the rest](phases/phase-20-microservices.md) | customer, notification; order-service is the residue | _not yet cut_ | ⬜ |
 | 21 | [API Gateway](phases/phase-21-gateway.md) | Spring Cloud Gateway | `feature/phase-21-gateway` | ⬜ |
 | 22 | [Resilience](phases/phase-22-resilience.md) | Resilience4j | `feature/phase-22-resilience` | ⬜ |
 | 23 | [Distributed Tracing](phases/phase-23-tracing.md) | OpenTelemetry + Tempo | `feature/phase-23-tracing` | ⬜ |
