@@ -8,25 +8,29 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 20b: Microservices Split — the first service is out.** `inventory-service` is a separate
-deployable with its own PostgreSQL database, its own Flyway history, its own JWT filter chain and
-its own Kafka topic. The application no longer owns stock; it asks over HTTP.
+**Phase 20c: Microservices Split — the catalogue is out too.** Three services now.
+`catalog-service` owns the products and the Redis cache that serves them; `inventory-service` owns
+stock; `ecomdemo-app` is everything not yet extracted. Each has its own PostgreSQL database and its
+own Flyway history.
 
-Two things are worth knowing before reading further, because they are the split's real cost:
+Three things are worth knowing before reading further, because they are the split's real cost:
 
-- **Checkout is a saga.** Reserving stock is an HTTP call now, so it cannot share the order's
+- **Checkout is a saga.** Reserving stock is an HTTP call, so it cannot share the order's
   transaction. If the order rolls back after the reservation succeeded, a compensating *release*
-  puts the stock back. That call can itself fail, and when it does the stock stays reserved for an
-  order that never existed — logged, and not yet reconciled by anything.
-- **The catalogue's stock figure is eventually consistent.** A sale changes the number in
-  inventory-service, which publishes an event; the catalogue's cache evicts when it arrives. The
-  displayed figure can be stale for a moment. **What cannot go wrong is the sale itself** — the
-  reservation is synchronous and holds the row lock, so a shopper is never sold stock that is not
-  there.
+  puts the stock back — and that call can itself fail, leaving stock reserved for an order that
+  never existed. Logged, and not yet reconciled by anything.
+- **The catalogue's stock figure is eventually consistent.** A sale changes it in
+  inventory-service, which publishes an event; catalog-service evicts its cache when the event
+  arrives. **What cannot go wrong is the sale itself** — the reservation is synchronous and holds
+  the row lock, so a shopper is never sold stock that is not there. Stale display, correct sale.
+- **The CSV import is a distributed write.** It creates products in one service and sets stock in
+  another, with no shared transaction. A failure between the two leaves products with no stock. The
+  import is restartable and idempotent, so the repair is to run it again.
 
-Four of the five services are still inside `ecomdemo-app`. See
-[`docs/test-reports/phase-20b.md`](docs/test-reports/phase-20b.md) for what extracting the first
-one cost, and why the recommendation is one service per pull request.
+`/api/products` has not moved: the application keeps the public endpoint and forwards to
+catalog-service, so nothing a shopper can see has changed. Two services remain inside
+`ecomdemo-app`. See [`docs/test-reports/phase-20c.md`](docs/test-reports/phase-20c.md) for what this
+extraction cost.
 
 <details>
 <summary>Phase 14: Batch Processing</summary>
@@ -160,9 +164,16 @@ ecomdemo/
 │   └── src/main/java/com/ecomdemo/
 │       ├── shared/          # ApiError, the exception types, @RestControllerAdvice, OpenAPI
 │       ├── jwt/             # the signing key, the DECODER, the roles converter, service tokens
+│       ├── clients/         # HTTP clients for the other services, and this one's identity
 │       ├── logging/         # correlation id filter, request log
 │       └── metrics/         # common meter tags, the checkout counters
 │   └── src/test/…/support/  # ProjectRoot, published as a TEST-JAR for every service to share
+│
+├── catalog-service/         # A SEPARATE DEPLOYABLE (Phase 20c). Products, and the cache.
+│   └── src/main/java/com/ecomdemo/
+│       ├── catalog/         # Product, ProductService, ProductController, its own SecurityConfig
+│       ├── cache/           # Redis, and the Kafka listener that evicts on a stock change
+│       └── db/migration/    # its OWN Flyway history, starting again at V1
 │
 ├── inventory-service/       # A SEPARATE DEPLOYABLE (Phase 20b). Owns stock and nothing else.
 │   └── src/main/java/com/ecomdemo/inventory/
@@ -177,11 +188,10 @@ ecomdemo/
         ├── security/        # the filter chain, the JWT ENCODER (issuing stays here), handlers
         ├── auth/            # POST /api/auth/login
         ├── customer/        # accounts, roles, profile, CurrentUser
-        ├── catalog/         # the product catalogue
+        ├── catalog/         # the PUBLIC /api/products, forwarding to catalog-service
         ├── inventory/       # the CLIENT: InventoryGateway + InventoryClient over RestClient
         ├── cart/            # one cart per account; lines snapshot the product
         ├── order/           # checkout (the saga) and order history
-        ├── cache/           # Redis, and the Kafka listener that evicts on a stock change
         ├── batch/           # the two Spring Batch jobs
         ├── messaging/       # the transactional outbox and its relay
         └── notification/    # the Kafka consumer, idempotent via processed_event
@@ -231,26 +241,29 @@ cp .env.example .env            # then put a real JWT_SECRET in it
 docker compose up --build       # add -d to detach
 ```
 
-That builds **two** images and starts eleven containers on a private network. Each service waits
+That builds **three** images and starts twelve containers on a private network. Each service waits
 for its own PostgreSQL to be genuinely *ready*, not merely started, applies its own migrations, and
 comes up:
 
 | | Port | Owns |
 |---|---|---|
-| `ecomdemo-app` | <http://localhost:8080> | everything not yet extracted |
+| `ecomdemo-app` | <http://localhost:8080> | everything not yet extracted, and the public API |
+| `ecomdemo-catalog-service` | <http://localhost:8081> | products, and the cache that serves them |
 | `ecomdemo-inventory-service` | <http://localhost:8082> | stock, and only stock |
 | `ecomdemo-db` | 5432 | the application's database |
+| `ecomdemo-catalog-db` | 5434 | `catalog_db` |
 | `ecomdemo-inventory-db` | 5433 | `inventory_db` |
 
 Plus Redis, Kafka, Prometheus, Grafana, Loki and Alloy.
 
-**inventory-service's port is published for the smoke test, not for you.** Every path on it
-requires a token, and the application holds the only identity that has one. It is not a second
-public API.
+**The services' ports are published for the smoke test, not for you.** Every path on
+catalog-service and inventory-service requires a token, and only the other services hold an identity
+that has one. They are not public APIs — <http://localhost:8080> is.
 
 ```bash
 docker compose ps                       # every row should say (healthy)
 docker compose logs -f app              # follow the application log
+docker compose logs -f catalog-service
 docker compose logs -f inventory-service
 docker compose --profile tools up -d    # ...and Kafka UI on :8090, which costs 242 MiB
 docker compose down                     # stop and remove, KEEPING both databases
@@ -259,7 +272,7 @@ docker compose down -v                  # ...and delete both volumes too
 
 `docker compose down` is not destructive: the database lives in a named volume that outlives the
 containers, so `up` again finds the schema already migrated. Only `-v` throws it away — and note
-that there are now **two** volumes, one per database, which `down -v` removes together.
+that there are now **three** volumes, one per database, which `down -v` removes together.
 
 **`.env` is gitignored**; `.env.example` is the documented template. Every value has a working
 default, so an empty `.env` starts a usable stack — but set `JWT_SECRET` (at least 32 characters;

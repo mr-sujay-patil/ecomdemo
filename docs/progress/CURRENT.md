@@ -2,13 +2,13 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-24
+- **Updated:** 2026-09-25
 - **Phase:** 20c: Microservices Split — extract `catalog-service` (the third PR of Phase 20)
 - **Branch:** feature/phase-20c-catalog-service
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** raised, see below
+- **Waiting for user:** YES - review the PR
 
 ## Phase 20b merge verification (PASSED 2026-09-24 — NO TAG, by design)
 PR #27 merged as merge commit **d120607** (parents 7e826ab + 122b431). Every checklist item in
@@ -40,37 +40,33 @@ for this one. The plan is still `docs/phases/phase-20-plan.md`.
 - Compose: 10 containers (+ `kafka-ui` behind `--profile tools`). App 8080, inventory 8082,
   `ecomdemo` db 5432, `inventory_db` 5433.
 
-## Checklist for 20c — plan APPROVED 2026-09-24, implementing
+## Checklist for 20c - ALL DONE
 - [x] Plan posted and approved (`docs/phases/phase-20c-plan.md`)
-- [x] **DECIDED: the inventory client moves into `common`**, so catalog-service and the app both use
-      it. 20b duplicated the event PAYLOAD deliberately (a message contract is not a shared jar);
-      a client ADAPTER is different — both callers want identical behaviour against one API, and
-      divergence would be a silent bug rather than independence.
-- [ ] `catalog-service` module: pom, application class, move `com.ecomdemo.catalog`
-- [ ] It takes `cache` WITH IT — what it caches is the catalogue (a 20a finding, see decisions.md)
-- [ ] `catalog_db` with its own Flyway history starting at **V1**; `product` DDL + seed carried over
-- [ ] A `CatalogGateway`/`CatalogClient` seam in `ecomdemo-app`, mirroring the inventory one
-- [ ] Its own `SecurityConfig`; the app calls it with a SERVICE token
-- [ ] It consumes `inventory.stock-changed` (the cache evictor moves with `cache`)
-- [ ] Compose: `catalog-db` + `catalog-service`, 384M limit, health check, Alloy + Prometheus
-- [ ] Full testing protocol + `docs/test-reports/phase-20c.md`
-- [ ] README, decisions.md, RECENT rotation, tracker; PR. **Still NO tag.**
+- [x] The inventory client moved into `common`, under `com.ecomdemo.clients`
+- [x] `catalog-service` module, `catalog_db` with its own Flyway V1-V2 (DDL read from the RUNNING
+      database, not reconstructed from four migrations)
+- [x] `cache` moved with it, including the Kafka evictor and its own container factory
+- [x] `CatalogGateway`/`CatalogClient` in `common`; cart and batch changed wiring, not logic
+- [x] Its own `SecurityConfig`; the app calls it with a SERVICE token
+- [x] The app keeps the PUBLIC `/api/products` as a temporary proxy (Phase 21 replaces it)
+- [x] `V14__drop_product.sql` - the app stops owning the catalogue
+- [x] Compose: `catalog-db` + `catalog-service`, 384M, Alloy + Prometheus cover all three
+- [x] Smoke test across three services: **270 cold / 271 warm**, 0 failed
+- [x] `./mvnw clean verify`: **5 + 34 + 41 + 281 + 65**, BUILD SUCCESS
+- [x] `docs/test-reports/phase-20c.md`, README, decisions.md, RECENT rotation (20a archived), tracker
+- [ ] PR merged and verified - and ONLY then does 20d start. **Still NO tag.**
 
 ## Next action
-Work the seven steps in `docs/phases/phase-20c-plan.md` §4, starting with the module and
-`catalog_db`'s V1. Each commit must leave `./mvnw clean verify` green. The four things 20b proved
-are where the cost is — each passed `clean verify` and still broke:
-1. **Seed data.** `product` has a 10-row seed and `inventory_db` already hard-codes ids 1-10 against
-   it. Moving `product` to `catalog_db` means `SeededStockAgreesWithTheCatalogueTest` must still
-   hold across THREE databases. Decide how before moving anything.
-2. **The `cache` module moves too**, and it holds the Kafka listener that evicts on a stock change.
-   That listener needs its own container factory in its new home — the global
-   `spring.json.value.default.type` trap that cost an afternoon in 20b.
-3. **Who still reads the catalogue?** 20a removed `order -> catalog` entirely (checkout reads the
-   cart's snapshot). `batch` does. Confirm from the module diagram before designing the client.
-4. **A third JVM.** Measured budget: Docker Desktop caps at 3.8 GB, a JVM idles at ~296 MiB. Three
-   services plus three databases plus Kafka and the observability stack needs re-measuring, not
-   assuming. 20b's projection was ~2.0-2.4 GB with TWO services.
+**WAIT FOR THE USER.** The PR is open; the phase is at its stop point. Do not start 20d.
+
+**`phase-20-complete` must NOT be tagged when this merges.** Two services remain - customer and
+notification - and `order-service` is what `ecomdemo-app` becomes. Phase 20 is complete when the
+LAST one is out. `git tag --list "phase-*"` ending at `phase-19-complete` is correct.
+
+After `approved, merge it`: `gh pr merge <n> --merge`, never squash, never `--delete-branch`, then
+merge verification per `docs/process/execution-protocol.md` §5, then cut
+`feature/phase-20d-customer-service` from main.
+
 
 ## Known traps (cost time already; do not rediscover)
 - **Docker Desktop hangs on a modal error dialog** and the daemon never starts; `docker info` just
