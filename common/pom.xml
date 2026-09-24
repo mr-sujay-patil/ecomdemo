@@ -109,6 +109,26 @@
 	<build>
 		<plugins>
 			<!--
+				Publishes `common`'s TEST classes as a second artifact, so other modules can depend
+				on shared test support - today `ProjectRoot`, which finds the repository root and
+				must not encode any module's depth. Without this, each service would copy it, and a
+				helper that exists to avoid a per-module assumption would acquire one per module.
+
+				`test-jar` is a distinct artifact, not a scope: a module asks for it with
+				<type>test-jar</type> AND <scope>test</scope>, and only its test classpath sees it.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-jar-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>test-jar</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<!--
 				Both are inherited configuration from the parent's pluginManagement, named here so
 				this module opts in. maven-dependency-plugin resolves the Mockito agent jar that
 				surefire's argLine points at; without it the whole suite fails before the first

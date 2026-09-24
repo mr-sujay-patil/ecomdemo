@@ -81,7 +81,13 @@ public class ProductCacheEvictor {
      * because writing a notification twice sends two emails; there is nothing here to protect.
      * Machinery belongs where a duplicate costs something.
      */
-    @KafkaListener(topics = STOCK_CHANGED_TOPIC, groupId = "ecomdemo-catalogue-cache")
+    @KafkaListener(
+            topics = STOCK_CHANGED_TOPIC,
+            groupId = CACHE_GROUP,
+            // Its OWN container factory. The application's default one deserialises every value as
+            // an OrderPlacedEvent, which is right for the notification consumer and silently wrong
+            // here - see StockChangedListenerConfig for how that failed without any lag to show it.
+            containerFactory = StockChangedListenerConfig.FACTORY)
     public void onStockChanged(ProductStockChanged event) {
         try {
             evict(CacheNames.PRODUCT, event.productId());
@@ -103,6 +109,13 @@ public class ProductCacheEvictor {
      * nothing rather than an error.
      */
     static final String STOCK_CHANGED_TOPIC = "inventory.stock-changed";
+
+    /**
+     * The consumer group. Separate from the notification consumer's, because a group is a unit of
+     * work-sharing: two listeners in one group would each see only some of the messages, and the
+     * cache would be evicted for some products and not others.
+     */
+    static final String CACHE_GROUP = "ecomdemo-catalogue-cache";
 
     /**
      * The message, as this side reads it.

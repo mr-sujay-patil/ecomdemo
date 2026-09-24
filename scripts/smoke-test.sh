@@ -1064,14 +1064,51 @@ check "and the listing agrees" "5" \
 request POST /api/cart/items "{\"productId\":$EVICTION_ID,\"quantity\":2}" >/dev/null
 check "buying 2 of them succeeds" "201" "$(request POST /api/orders)"
 
-# No sleep anywhere: the eviction is part of finishing the checkout, so the very next read is
-# already right. A check that needed a sleep would be a check that accepted staleness.
-request GET "/api/products/$EVICTION_ID" >/dev/null
-check "the product page shows 3 immediately, not the pre-sale 5" "3" "$(jget "d['stockQuantity']")"
+# THIS CHECK CHANGED IN PHASE 20b, AND THE CHANGE IS THE SPLIT IN ONE PLACE.
+#
+# It used to read, above these lines: "No sleep anywhere: the eviction is part of finishing the
+# checkout, so the very next read is already right. A check that needed a sleep would be a check
+# that accepted staleness." That was true of a monolith, where the stock write and the cache
+# eviction were two steps of one transaction in one process.
+#
+# They are now in different processes. inventory-service owns the stock and publishes
+# `inventory.stock-changed`; the catalogue's cache evictor consumes it. Between the checkout
+# returning 201 and the cache being evicted there is a broker, a poll interval and a network, so
+# the cache is EVENTUALLY consistent and the old claim is simply no longer true. Asserting it
+# anyway would not make it true; it would make the smoke test fail for telling the truth.
+#
+# So the check becomes: does it converge, and how fast? It polls rather than sleeping a fixed
+# amount, which keeps it quick when things are healthy and gives it room when they are not, and it
+# REPORTS THE TIME TAKEN so that a convergence window quietly growing from 200ms to 4s is visible
+# rather than merely still passing. A fixed `sleep 5` would hide exactly that.
+#
+# What did NOT become eventually consistent is worth saying: a shopper is never sold stock that is
+# not there. The reservation is synchronous and inventory-service holds the row lock, so the
+# catalogue may briefly ADVERTISE a stale number, and checkout still refuses. Stale display,
+# correct sale.
+CONVERGED=false
+ELAPSED=0
+for _ in $(seq 1 50); do
+    request GET "/api/products/$EVICTION_ID" >/dev/null
+    if [ "$(jget "d['stockQuantity']")" = "3" ]; then
+        CONVERGED=true
+        break
+    fi
+    sleep 0.2
+    ELAPSED=$((ELAPSED + 200))
+done
+check "the product page converges on 3, not the pre-sale 5 (took ${ELAPSED}ms)" "true" "$CONVERGED"
 
-request GET /api/products >/dev/null
-check "and the listing shows 3 as well" "3" \
-    "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")"
+CONVERGED=false
+for _ in $(seq 1 50); do
+    request GET /api/products >/dev/null
+    if [ "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")" = "3" ]; then
+        CONVERGED=true
+        break
+    fi
+    sleep 0.2
+done
+check "and the listing converges on 3 as well" "true" "$CONVERGED"
 
 as_admin
 request DELETE "/api/products/$EVICTION_ID" >/dev/null
@@ -1620,19 +1657,31 @@ print('app' in json.load(sys.stdin).get('data', []))" 2>/dev/null)"
     # on a perfectly healthy stack. Ask for the lines themselves, over a window long enough to
     # contain a start-up.
     INFRA_SINCE="$(python3 -c "import time; print(int((time.time() - 86400) * 1e9))")"
-    INFRA_LINES="$(curl -sSG "$LOKI_URL/loki/api/v1/query_range" \
-        --data-urlencode 'query={service_name=~"db|cache"}' \
-        --data-urlencode "start=$INFRA_SINCE" \
-        --data-urlencode 'limit=100' 2>/dev/null \
-        | python3 -c "
+
+    # ONE QUERY PER SERVICE, not a single `service_name=~"db|cache"`. Loki's `limit` caps ENTRIES
+    # across the whole result, newest first, so one chatty container can consume the entire budget
+    # and the others come back absent rather than empty. That is exactly what happened here: a
+    # freshly recreated PostgreSQL filled all 100 entries with startup chatter, Redis returned
+    # nothing, and the check reported "1" for a stack where both were shipping perfectly well. A
+    # test whose result depends on which container restarted most recently is a test that will
+    # eventually be ignored.
+    INFRA_LINES=0
+    for infra_service in db cache inventory-db; do
+        FOUND="$(curl -sSG "$LOKI_URL/loki/api/v1/query_range" \
+            --data-urlencode "query={service_name=\"$infra_service\"}" \
+            --data-urlencode "start=$INFRA_SINCE" \
+            --data-urlencode 'limit=1' 2>/dev/null \
+            | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
 except Exception:
     print(0); raise SystemExit
-print(len({s['stream'].get('service_name') for s in d.get('data', {}).get('result', [])}))" 2>/dev/null || echo 0)"
+print(1 if d.get('data', {}).get('result') else 0)" 2>/dev/null || echo 0)"
+        INFRA_LINES=$((INFRA_LINES + FOUND))
+    done
 
-    check "PostgreSQL and Redis are shipped as well, for the context an app log lacks" 2 \
+    check "both PostgreSQL databases and Redis are shipped, for the context an app log lacks" 3 \
         "$INFRA_LINES"
 
     # --- No sensitive data in logs -----------------------------------------------------------

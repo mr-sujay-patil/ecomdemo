@@ -88,6 +88,18 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!--
+			`common`'s shared TEST support (ProjectRoot), published by its maven-jar-plugin
+			test-jar execution. type AND scope are both required: the type picks the second
+			artifact, the scope keeps it off the main classpath.
+		-->
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-common</artifactId>
+			<version>${project.version}</version>
+			<type>test-jar</type>
+			<scope>test</scope>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>

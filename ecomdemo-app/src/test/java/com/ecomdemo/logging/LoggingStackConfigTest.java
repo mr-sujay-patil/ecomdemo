@@ -8,6 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -102,6 +105,48 @@ class LoggingStackConfigTest {
             assertThat(alloy).contains("target_label  = \"service_name\"");
             // Which is the selector every panel on the logs dashboard is written against.
             assertThat(dashboard).contains("service_name=\\\"app\\\"");
+        }
+
+        @Test
+        @DisplayName("every service built from this repository has its logs shipped")
+        void alloyShipsEveryServiceThisRepositoryBuilds() throws Exception {
+            // THE DRIFT THIS CATCHES ACTUALLY HAPPENED. inventory-service was extracted, deployed
+            // and healthy, and its logs went nowhere: Alloy's `keep` rule named `app` and nothing
+            // else, so the new container was discovered and then discarded. Nothing failed —
+            // querying Loki for a service that ships no logs and for one that does not exist look
+            // exactly the same, which is why this needs a test rather than a look.
+            //
+            // The rule is written against `build:` rather than a hard-coded list: a compose service
+            // built from this repository runs OUR code, and our code writes logs somebody will want
+            // when it misbehaves. Postgres and Redis are pulled images and belong to the
+            // infrastructure group, which is a different question with a different answer.
+            String compose = Files.readString(COMPOSE);
+            String alloy = Files.readString(ALLOY);
+
+            List<String> built = new ArrayList<>();
+            String current = null;
+            for (String line : compose.split("\n")) {
+                Matcher service = Pattern.compile("^  ([a-z0-9][a-z0-9-]*):\\s*$").matcher(line);
+                if (service.matches()) {
+                    current = service.group(1);
+                } else if (line.matches("^    build:\\s*$") && current != null) {
+                    built.add(current);
+                }
+            }
+
+            assertThat(built)
+                    .as("compose should still declare services built from this repository; if it "
+                            + "does not, this test's parsing has broken rather than the config")
+                    .isNotEmpty();
+
+            Matcher keep = Pattern.compile("regex\\s*=\\s*\"([^\"]*app[^\"]*)\"").matcher(alloy);
+            assertThat(keep.find()).as("Alloy should have a keep rule naming the application").isTrue();
+            List<String> shipped = List.of(keep.group(1).split("\\|"));
+
+            assertThat(shipped)
+                    .as("every service compose builds must appear in Alloy's keep rule, or its logs "
+                            + "are silently dropped")
+                    .containsAll(built);
         }
     }
 
