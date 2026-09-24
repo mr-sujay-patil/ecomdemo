@@ -14,7 +14,10 @@ public class InMemoryCatalogConfig {
 
     @Bean
     @Primary
-    CatalogGateway inMemoryCatalog() {
-        return new InMemoryCatalog();
+    CatalogGateway inMemoryCatalog(com.ecomdemo.clients.inventory.InventoryGateway inventory) {
+        // It takes the inventory fake, because the real catalog-service calls the real
+        // inventory-service on every write. A fake that skipped that would let a test create a
+        // product with stock and then fail to buy it.
+        return new InMemoryCatalog(inventory);
     }
 }

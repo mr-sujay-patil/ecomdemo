@@ -1,0 +1,21 @@
+-- The application stops owning the catalogue.
+--
+-- The sibling of V13, which dropped `product_stock` when inventory-service took it. `product` has
+-- been in this database since V1 and is now catalog-service's, with its own Flyway history starting
+-- again at V1 and the same ten seeded rows.
+--
+-- DROPPING IT IS THE POINT, not tidiness. While the table is still here, a query can still read it:
+-- a stale repository, a JOIN nobody updated, a report written against the old schema. All of them
+-- would work, return data, and be wrong - the rows would be a frozen copy from the moment of the
+-- split, drifting further from the truth with every product an administrator edits. Two services
+-- reading two copies of one table is the failure mode this whole phase exists to prevent, and
+-- leaving the old copy in place is the easiest way to cause it.
+--
+-- Nothing references it any more: V12 removed `cart_item`'s foreign key and made the line a
+-- snapshot, V13 took the stock column's table, and `order_item` has snapshotted its product since
+-- Phase 6. Verified by the ArchUnit and Modulith rules, and by this migration running green.
+--
+-- There is no going back from this without a restore, which is true of every DROP and is why the
+-- table is only dropped once the service that took it is passing its own tests against its own
+-- database.
+DROP TABLE IF EXISTS product;

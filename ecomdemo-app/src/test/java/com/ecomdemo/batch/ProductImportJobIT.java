@@ -72,7 +72,12 @@ class ProductImportJobIT extends IntegrationTest {
     }
 
     private void removeImportedProducts() {
-        jdbc.update("DELETE FROM product WHERE name LIKE ?", PREFIX + "%");
+        // Through the catalogue, not through SQL: `product` is catalog-service's table and this
+        // database no longer has one (V14 dropped it).
+        admin.getForObject("/api/products", ProductSnapshot[].class);
+        java.util.Arrays.stream(admin.getForObject("/api/products", ProductSnapshot[].class))
+                .filter(product -> product.name().startsWith(PREFIX))
+                .forEach(product -> admin.delete("/api/products/" + product.id()));
         // The listing cache would otherwise keep serving the products this class just deleted to
         // whichever test class runs next.
         // THE MANUAL CACHE EVICTION THAT WAS HERE IS GONE. The catalogue's cache is in
@@ -167,9 +172,14 @@ class ProductImportJobIT extends IntegrationTest {
         assertThat(upload(second).execution().writeCount()).isEqualTo(1);
         assertThat(countImported()).as("still one product, updated in place").isEqualTo(1);
 
-        assertThat(jdbc.queryForObject(
-                        "SELECT description FROM product WHERE name = ?", String.class,
-                        PREFIX + "Repeat"))
+        // Read back through the catalogue for the reason countImported() gives: this database has
+        // no `product` table any more. Asserting the DESCRIPTION is the point of the test - it
+        // proves the second upload UPDATED the row rather than leaving the first one alone.
+        assertThat(java.util.Arrays.stream(admin.getForObject("/api/products", ProductSnapshot[].class))
+                        .filter(product -> (PREFIX + "Repeat").equals(product.name()))
+                        .findFirst()
+                        .orElseThrow()
+                        .description())
                 .isEqualTo("second");
     }
 
@@ -298,10 +308,18 @@ class ProductImportJobIT extends IntegrationTest {
         return csv.toString();
     }
 
+    /**
+     * Counts through the CATALOGUE, not through SQL.
+     *
+     * <p>It used to be {@code SELECT count(*) FROM product}, which worked while the import and the
+     * catalogue shared a database. They do not: {@code product} belongs to catalog-service and V14
+     * dropped this database's copy, so the old query would either fail or - worse, had the table
+     * been left in place - quietly count zero for ever while the import worked perfectly.
+     */
     private long countImported() {
-        Long count = jdbc.queryForObject(
-                "SELECT count(*) FROM product WHERE name LIKE ?", Long.class, PREFIX + "%");
-        return count == null ? 0 : count;
+        ProductSnapshot[] listing = admin.getForObject("/api/products", ProductSnapshot[].class);
+        return listing == null ? 0
+                : java.util.Arrays.stream(listing).filter(p -> p.name().startsWith(PREFIX)).count();
     }
 
     private ProductImportResponse upload(String csv) {

@@ -4,6 +4,7 @@ import com.ecomdemo.clients.catalog.CatalogGateway;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.clients.catalog.ProductUpsert;
 import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.inventory.InventoryGateway;
 import com.ecomdemo.shared.NotFoundException;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,9 +29,33 @@ public class InMemoryCatalog implements CatalogGateway {
     private final Map<Long, ProductSnapshot> products = new ConcurrentHashMap<>();
     private final AtomicLong nextId = new AtomicLong(1);
 
+    /**
+     * The fake inventory, because the REAL catalog-service talks to the real inventory-service on
+     * every write — {@code create} and {@code update} call {@code setStockLevel}, {@code delete}
+     * calls {@code forget}.
+     *
+     * <p>Leaving that out is what made four integration tests fail with a 409 on checkout: a
+     * product created through this fake existed in the catalogue and had no stock anywhere, so
+     * every attempt to buy it was correctly refused. The fake was lying by omission, which is the
+     * characteristic failure of fakes and the reason this one now mirrors the collaboration
+     * instead of just the data.
+     */
+    private final InventoryGateway inventory;
+
+    public InMemoryCatalog(InventoryGateway inventory) {
+        this.inventory = inventory;
+    }
+
     @Override
     public List<ProductSnapshot> findAll() {
-        return List.copyOf(products.values());
+        // Stock is overlaid from the inventory fake on every READ, because that is what
+        // catalog-service does: its ProductResponse.from(product, inventory.quantityFor(id)) asks
+        // inventory-service each time rather than remembering a number.
+        //
+        // Returning the figure stored at creation instead is what made `placeOrderEndToEnd` read 5
+        // after selling 2 of 5. The catalogue does not own that number and must not cache it in a
+        // field; a fake that does is asserting something the real thing never promised.
+        return products.values().stream().map(this::withLiveStock).toList();
     }
 
     @Override
@@ -39,6 +64,7 @@ public class InMemoryCatalog implements CatalogGateway {
         ProductSnapshot snapshot = new ProductSnapshot(id, product.name(), product.description(),
                 product.price(), product.category(), product.stockQuantity());
         products.put(id, snapshot);
+        setStock(id, product.stockQuantity());
         return snapshot;
     }
 
@@ -48,6 +74,7 @@ public class InMemoryCatalog implements CatalogGateway {
         ProductSnapshot snapshot = new ProductSnapshot(productId, product.name(), product.description(),
                 product.price(), product.category(), product.stockQuantity());
         products.put(productId, snapshot);
+        setStock(productId, product.stockQuantity());
         return snapshot;
     }
 
@@ -55,6 +82,13 @@ public class InMemoryCatalog implements CatalogGateway {
     public void delete(Long productId) {
         requireProduct(productId);
         products.remove(productId);
+        inventory.forget(productId);
+    }
+
+    private void setStock(Long productId, Integer quantity) {
+        if (quantity != null) {
+            inventory.setStockLevel(productId, quantity);
+        }
     }
 
     @Override
@@ -65,7 +99,13 @@ public class InMemoryCatalog implements CatalogGateway {
             // missing product to surface as a 404 is testing the same path it would in production.
             throw NotFoundException.product(productId);
         }
-        return product;
+        return withLiveStock(product);
+    }
+
+    /** The product as the catalogue would return it: its own fields, inventory's number. */
+    private ProductSnapshot withLiveStock(ProductSnapshot product) {
+        return new ProductSnapshot(product.id(), product.name(), product.description(),
+                product.price(), product.category(), inventory.quantityFor(product.id()));
     }
 
     @Override

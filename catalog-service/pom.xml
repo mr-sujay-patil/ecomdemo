@@ -136,6 +136,22 @@
 			<artifactId>spring-boot-starter-webmvc-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+
+		<!--
+			RestTemplate, test scope only. Boot's TestRestTemplate auto-configuration is declared
+			against RestTemplateBuilder, so without this on the test classpath the whole context
+			fails to load with a NoClassDefFoundError from inside a @ConditionalOnMissingBean - a
+			failure that names neither this module nor the test that triggered it.
+
+			It is TEST scope deliberately. This service calls inventory-service with RestClient, the
+			modern API; shipping RestTemplate in the runtime image to satisfy a test helper would be
+			the tail wagging the dog.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-restclient</artifactId>
+			<scope>test</scope>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security-test</artifactId>

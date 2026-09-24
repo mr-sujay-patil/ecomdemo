@@ -39,11 +39,35 @@ class FlywayMigrationTest {
     private DataSource dataSource;
 
     /** The ten products V2 inserts, as a SQL list. See {@link #seedsTheCatalogueOnce()}. */
-    private static final String SEEDED_NAMES = """
-            'Mechanical Keyboard', 'Wireless Mouse', 'Webcam 1080p', '27" 4K Monitor', \
-            'Noise-Cancelling Headphones', 'Portable SSD 1TB', 'USB-C Hub', 'Laptop Stand', \
-            'Desk Mat', 'Laptop Sleeve 16"'\
-            """;
+    // ------------------------------------------------------------------------------------------
+    // THREE MIGRATION TESTS MOVED TO catalog-service IN PHASE 20c
+    // ------------------------------------------------------------------------------------------
+    // They asserted this database's V2 seed, V3's category backfill and V4's version column — all
+    // against `product`, which V14 drops because catalog-service owns it now. The migrations still
+    // exist and still ran; the TABLE they shaped is in another database, so there is nothing here
+    // left to query.
+    //
+    // The same claims are made in catalog-service's CatalogSchemaTest, against catalog_db's own
+    // V1 and V2 — ten seeded products, their categories, and a non-null version defaulting to
+    // zero. Written before these were removed, so the coverage never lapsed.
+    //
+    // What stayed here is everything about tables this database still owns, including the
+    // assertion below that `product` is GONE — which is the new claim V14 is worth making.
+
+    @Test
+    @DisplayName("V14 dropped the catalogue, because another service owns it now")
+    void dropsTheProductTable() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        // A leftover copy is worse than no copy: it would still answer queries, with rows frozen at
+        // the moment of the split and drifting further from the truth with every edit.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.tables "
+                                + "WHERE upper(table_name) = 'PRODUCT'",
+                        Integer.class))
+                .as("the application must not keep a stale copy of another service's table")
+                .isZero();
+    }
 
     @Test
     @DisplayName("V1 to V8 are applied, in order, with nothing pending or failed")
@@ -52,7 +76,7 @@ class FlywayMigrationTest {
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -99,63 +123,8 @@ class FlywayMigrationTest {
                 "outbox events",
                 "split product stock",
                 "cart item snapshots the product",
-                "drop product stock");
-    }
-
-    @Test
-    @DisplayName("V2 seeded the catalogue exactly once")
-    void seedsTheCatalogueOnce() {
-        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-
-        // Counted over the seeded names, not over the whole table. Every @SpringBootTest in the
-        // suite shares one context and therefore one H2 database, and several of them create
-        // products of their own; a bare count(*) would be asserting on their leftovers as much as
-        // on V2. Ten rows across V2's ten names still proves exactly what this test is for: the
-        // seed ran, and it ran once.
-        assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM product WHERE name IN (" + SEEDED_NAMES + ")",
-                        Integer.class))
-                .isEqualTo(10);
-        assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM product WHERE name = 'Mechanical Keyboard'",
-                        Integer.class))
-                .isEqualTo(1);
-    }
-
-    @Test
-    @DisplayName("V3 added the category column, backfilled it and indexed it")
-    void addsAndBackfillsTheCategoryColumn() {
-        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-
-        assertThat(jdbc.queryForObject(
-                        "SELECT category FROM product WHERE name = 'Mechanical Keyboard'",
-                        String.class))
-                .isEqualTo("PERIPHERALS");
-        assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM product "
-                                + "WHERE category IS NULL AND name IN (" + SEEDED_NAMES + ")",
-                        Integer.class))
-                .as("every seeded product was backfilled")
-                .isZero();
-
-        // The column is nullable on purpose, so that the migration could not break instances of
-        // the old application version still inserting products during a deploy.
-        assertThat(jdbc.queryForObject(
-                        "SELECT is_nullable FROM information_schema.columns "
-                                + "WHERE upper(table_name) = 'PRODUCT' "
-                                + "AND upper(column_name) = 'CATEGORY'",
-                        String.class))
-                .isEqualTo("YES");
-
-        // INFORMATION_SCHEMA.INDEXES is H2's own view - indexes are not part of the SQL standard
-        // information schema, and PostgreSQL exposes them as pg_indexes instead. Phase 7 moves
-        // this suite onto PostgreSQL and this one query changes with it.
-        assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM information_schema.indexes "
-                                + "WHERE upper(index_name) = 'IDX_PRODUCT_CATEGORY'",
-                        Integer.class))
-                .as("the index V3 creates alongside the column")
-                .isEqualTo(1);
+                "drop product stock",
+                "drop product");
     }
 
     @Test
@@ -165,17 +134,8 @@ class FlywayMigrationTest {
 
         // NOT NULL with a default, because the table already had ten rows. A null version would
         // make Hibernate treat an existing product as a new, unsaved entity.
-        assertThat(jdbc.queryForObject(
-                        "SELECT is_nullable FROM information_schema.columns "
-                                + "WHERE upper(table_name) = 'PRODUCT' "
-                                + "AND upper(column_name) = 'VERSION'",
-                        String.class))
-                .isEqualTo("NO");
-        assertThat(jdbc.queryForObject(
-                        "SELECT version FROM product WHERE name = 'Mechanical Keyboard'",
-                        Long.class))
-                .as("rows that already existed were backfilled with the column default")
-                .isZero();
+        // The `product.version` half of this test moved to catalog-service with the table; what
+        // remains is order_audit, which this database still owns.
 
         assertThat(jdbc.queryForObject(
                         "SELECT count(*) FROM information_schema.tables "
@@ -295,17 +255,8 @@ class FlywayMigrationTest {
                 .isEqualTo(1);
     }
 
-    @Test
-    @DisplayName("V8 indexed product.name, which the import looks every row up by")
-    void indexesTheProductName() {
-        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-
-        assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM information_schema.indexes "
-                                + "WHERE upper(index_name) = 'IDX_PRODUCT_NAME'",
-                        Integer.class))
-                .isEqualTo(1);
-    }
+    // "V8 indexed the product name" moved to catalog-service's CatalogSchemaTest with the table
+    // it indexes. Both of that table's indexes are asserted there, against catalog_db.
 
     @Test
     @DisplayName("V10 created the outbox, with the two identifiers and the nullable published_at")
