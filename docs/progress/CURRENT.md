@@ -107,6 +107,22 @@ Docker Desktop running, the compose stack **UP** (nine containers), schema **V12
 stack is stopped. `.env` holds a real JWT_SECRET and is gitignored.
 
 ## Next action
+**ALL 314 UNIT TESTS ACROSS THE REACTOR ARE GREEN** (2c54db3). inventory-service is extracted and
+holds 21 of them. What remains for this service before moving to catalog:
+
+1. `./mvnw clean verify` - the INTEGRATION tests have not been run since the extraction. Expect
+   failures: the *IT classes in ecomdemo-app start a full context and several will try to reach
+   inventory-service over HTTP. Same judgement as the unit tests - mock the client where the test
+   is about ordering, and move the claim where it is about stock.
+2. Compose: `inventory-db` + `inventory-service`, **384M limit**, health check, `depends_on`, and
+   `INVENTORY_BASE_URL=http://inventory-service:8082` for the app.
+3. ONLY THEN is the smoke test meaningful again for this service.
+
+A REAL BUG was found by the compensation test and is fixed: registerSynchronization sat AFTER the
+reservation loop, so a failure DURING the loop - the likeliest failure - registered nothing and
+released nothing. It is registered before the loop now, over a list the loop mutates.
+
+### Superseded notes (kept for the remaining four services)
 `ecomdemo-app`'s tests COMPILE now and four of its @SpringBootTest classes FAIL, all with
 `ConnectException` to localhost:8082 - they create products, which PUTs stock to a service that is
 not running. `./mvnw -pl common,inventory-service -am test` is green (21 tests).
