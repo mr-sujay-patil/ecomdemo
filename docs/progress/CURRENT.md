@@ -10,6 +10,34 @@
 - **PR:** #27 — https://github.com/mr-sujay-patil/ecomdemo/pull/27
 - **Waiting for user:** YES — review the PR, and decide the scope question in §8 of the test report
 
+## 🟢 RESUME HERE (written 2026-09-24 at a clean stop; read this first)
+
+**Nothing is half-done.** HEAD is `6571ecf` on `feature/phase-20b-microservices`, the working tree
+is CLEAN, everything is pushed, and PR #27 is open with **CI passing**. There is no in-flight edit,
+no uncommitted experiment and no failing test to chase. The phase is at a legitimate stop point
+waiting on a human.
+
+**What the user has to do, not you:** review PR #27, and answer the scope question below. Until they
+do, the correct action is to WAIT.
+
+**The scope question** (full argument in `docs/test-reports/phase-20b.md` §8): this PR extracts ONE
+of the five services the plan named. The recommendation is **one service per PR** from here, because
+extracting the first produced four failures that `./mvnw clean verify` could not see (listed further
+down under "What got past clean verify"). The roadmap already has a `20c` row for the remaining
+services. If the user instead wants all four in this phase, continue on this branch.
+
+**When the user says `approved, merge it`:** `gh pr merge 27 --merge` — a merge commit, never squash
+or rebase, and NEVER `--delete-branch`. Then run merge verification per
+`docs/process/execution-protocol.md` §5.
+
+**DO NOT TAG `phase-20-complete` after merging this PR.** Phase 20 is complete when the LAST service
+is extracted, not this one. `git tag --list "phase-2*"` returning nothing is correct.
+
+**Environment as left:** 11 containers were still UP and healthy when the session ended. They may or
+may not still be running. Nothing depends on them — bring them back with
+`docker compose up -d --wait` (images are already built), or stop them with `docker compose down`
+(which KEEPS both database volumes; only `-v` deletes them).
+
 ## ⚠️ Phase 20 ships in TWO PRs — 20a is merged, this is the second
 The plan is `docs/phases/phase-20-plan.md`, approved and still current; 20b is its **§8 steps
 4-8**. `docs/test-reports/phase-20a.md` records what the first half delivered.
@@ -65,7 +93,9 @@ database with a schema per service would save a rounding error and give up the p
 Projection ~2.0-2.4 GB. **A stack that will not start means no smoke verification at all** - this
 is the open risk of 20b.
 
-## Last test run (2026-09-24, this branch, FINAL)
+## Last test run (2026-09-24, this branch, FINAL — all green, nothing outstanding)
+- **CI on PR #27: `Build and test` PASS (2m56s).** `Publish image to GHCR` skipped, as it does on
+  every PR; it runs on merge to main.
 - `./mvnw clean verify` -> **5 + 34 + 317 + 81**, 0 failures, 0 errors, 0 skipped, BUILD SUCCESS.
   The working tree stayed CLEAN afterwards, so the Phase 19 diagram determinism still holds.
 - `scripts/smoke-test.sh` -> **270 passed, 0 failed, 0 skipped**, run TWICE against 11 healthy
