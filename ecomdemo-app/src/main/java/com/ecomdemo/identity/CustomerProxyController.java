@@ -35,7 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/customers")
 @Tag(name = "Customers", description = "Registration, and the caller's own profile.")
-class CustomerProxyController {
+public class CustomerProxyController {
 
     private final CustomerGateway customers;
 
@@ -66,26 +66,5 @@ class CustomerProxyController {
             @Valid @RequestBody UpdateProfileRequest request) {
         return customers.updateCurrentProfile(
                 authorization, new UpdateProfileCommand(request.fullName()));
-    }
-
-    /** Validated at the edge as well as in customer-service; see {@code AuthProxyController}. */
-    record RegisterRequest(
-            @NotBlank(message = "must not be blank")
-            @Size(min = 3, max = 50, message = "must be between 3 and 50 characters")
-            String username,
-
-            @NotBlank(message = "must not be blank")
-            @Size(min = 8, max = 72, message = "must be between 8 and 72 characters")
-            String password,
-
-            @NotBlank(message = "must not be blank")
-            @Size(max = 100, message = "must be at most 100 characters")
-            String fullName) {
-    }
-
-    record UpdateProfileRequest(
-            @NotBlank(message = "must not be blank")
-            @Size(max = 100, message = "must be at most 100 characters")
-            String fullName) {
     }
 }

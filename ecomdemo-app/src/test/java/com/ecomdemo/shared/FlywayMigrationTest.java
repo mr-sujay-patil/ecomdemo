@@ -100,7 +100,7 @@ class FlywayMigrationTest {
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -149,7 +149,8 @@ class FlywayMigrationTest {
                 "cart item snapshots the product",
                 "drop product stock",
                 "drop product",
-                "cart and orders hold a user id");
+                "cart and orders hold a user id",
+                "drop users notifications and processed events");
     }
 
     @Test
@@ -185,40 +186,44 @@ class FlywayMigrationTest {
                 .isEqualTo(1);
     }
 
+    // "V5 added the users table and seeded the administrator" moved to customer-service with the
+    // table. Its V1 writes the same row with the same id and the same hash, and its own schema test
+    // asserts it - including that the id is 1, which order-service's `orders.user_id` depends on now
+    // that no foreign key enforces it.
+
     @Test
-    @DisplayName("V5 added the users table and seeded exactly one administrator")
-    void addsTheUsersTableAndSeedsTheAdmin() {
+    @DisplayName("V16 dropped accounts, notifications and the ledger - other services own them")
+    void dropsTheTablesOtherServicesOwn() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
+        // Three leftover copies would be three sources of confidently wrong answers: accounts that
+        // cannot log in, notifications nobody sent, and a ledger that deduplicates nothing.
+        // `table_schema = 'PUBLIC'` is not optional, and leaving it out cost a diagnosis: H2 has its
+        // OWN INFORMATION_SCHEMA.USERS, so the unqualified query reported that the application still
+        // had a users table when it had dropped it perfectly well. A schema-less catalogue query
+        // answers a question nobody asked.
         assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM users WHERE username = 'admin' AND role = 'ADMIN'",
+                        "SELECT count(*) FROM information_schema.tables "
+                                + "WHERE table_schema = 'PUBLIC' AND upper(table_name) IN "
+                                + "('USERS', 'NOTIFICATION', 'PROCESSED_EVENT')",
                         Integer.class))
-                .as("the first ADMIN cannot come from the API, so a migration puts it there")
-                .isEqualTo(1);
+                .as("this database must keep no copy of another service's table")
+                .isZero();
+    }
 
-        // The stored value is a BCrypt hash, not a password. The prefix is the algorithm and the
-        // cost factor, and the whole string is always 60 characters.
-        String stored = jdbc.queryForObject(
-                "SELECT password FROM users WHERE username = 'admin'", String.class);
-        assertThat(stored)
-                .startsWith("$2a$10$")
-                .hasSize(60)
-                .as("a password must never be stored as typed")
-                .isNotEqualTo("admin123");
+    @Test
+    @DisplayName("what remains is exactly order-service's own")
+    void keepsOnlyWhatOrderServiceOwns() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        // And the hash really is the hash of the documented development password, so the README's
-        // "log in as admin/admin123" cannot quietly stop being true.
-        assertThat(new BCryptPasswordEncoder().matches("admin123", stored))
-                .as("the seeded administrator can actually log in")
-                .isTrue();
-
-        // Uniqueness is the database's job: a "is this name free?" check in Java is a read
-        // followed by a write, and two registrations can race between the two.
-        assertThat(jdbc.queryForObject(
-                        "SELECT count(*) FROM information_schema.table_constraints "
-                                + "WHERE upper(table_name) = 'USERS' AND constraint_type = 'UNIQUE'",
-                        Integer.class))
-                .isEqualTo(1);
+        // The residue of the monolith, named explicitly. If a future phase adds a table here it should
+        // be a deliberate decision, visible in this list, rather than something that appeared.
+        assertThat(jdbc.queryForList(
+                        "SELECT table_name FROM information_schema.tables "
+                                + "WHERE table_schema = 'PUBLIC' AND table_type = 'BASE TABLE'",
+                        String.class))
+                .map(String::toUpperCase)
+                .contains("CART", "CART_ITEM", "ORDERS", "ORDER_ITEM", "ORDER_AUDIT", "OUTBOX_EVENT");
     }
 
     @Test
