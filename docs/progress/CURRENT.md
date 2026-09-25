@@ -50,9 +50,14 @@ the tests written for them now fail automatically for the next service. That is 
       foreign key, so a deleted account leaves orphaned carts.
       **Tests MINT a token** rather than logging in, following `CatalogIntegrationTest` from 20c — a
       service with no login endpoint should not have tests that log in.
-- [ ] **`CurrentUser` reads the token instead of loading a User**, and a migration drops the two
-      foreign keys `cart.user_id -> users` and `orders.user_id -> users`. **This lands FIRST**, while
-      there is still one deployable to verify it in — the 20a lesson.
+- [x] **`CurrentUser` reads the token instead of loading a User** — DONE (212ed66). Cart and order
+      hold a `userId`; V15 drops both foreign keys AND snapshots/backfills `orders.username`.
+      Verified against **686 real orders**: `./mvnw clean verify` 5 + 34 + 41 + 283 + 65, smoke
+      **273 passed / 0 failed**.
+      **The backfill was the part with a deadline and the plan had not spotted it.**
+      `Order.getUsername()` read through the association and that name shows in the API response and
+      the audit row. New orders can take it from a claim; existing ones have it nowhere, and after
+      the split NO query can fill it in. V15 is the last migration that can see both tables.
 - [ ] `customer-service`: `users` in `customer_db` at V1, register/profile, login, the JWT **encoder**
 - [ ] `notification-service`: `notification` + `processed_event` at V1, the consumer, the deduplicator
 - [ ] The app keeps a token-validating chain but loses `AppUserDetailsService`/`AuthenticationManager`
@@ -62,11 +67,20 @@ the tests written for them now fail automatically for the next service. That is 
 - [ ] **ONLY after that PR merges and verifies: tag `phase-20-complete`**
 
 ## Next action
-Work the plan's §3, in order. **Step 1 is the data change and it lands FIRST**: `CurrentUser` reads
-the token, cart and order hold a `userId`, and a migration drops `cart.user_id -> users` and
-`orders.user_id -> users`. Doing it while there is still ONE deployable is the 20a lesson — the
-riskiest data work belongs on the near side of the line, where the existing suite still applies to
-it unchanged.
+**Step 1 is done, verified and pushed.** Continue with the plan's §3 step 2: the `customer-service`
+module — `users` in `customer_db` at V1, the register/profile API, login, the `AuthenticationManager`
+and the JWT **encoder** (the one thing that must NOT be in `common`, because only the service that
+owns accounts may issue a user token).
+
+Then step 3 (`CustomerGateway`), step 4 (`notification-service`), step 5 (the app keeps a
+token-validating chain and forwards `/api/auth/**` and `/api/customers/**`), step 6 (compose, Alloy,
+Prometheus, the Dockerfile's COPY list), step 7 (smoke across five services, report, docs, PR).
+
+Expect the app's integration tests to break at step 2: every one of them calls
+`IntegrationTest.asAdmin()`, which POSTs to `/api/auth/login`. The approved answer is to MINT a token
+from the shared secret, following `CatalogIntegrationTest` from 20c — a service with no login
+endpoint should not have tests that log in. The seeded `admin` row moves to `customer_db`, and the
+smoke test logs in as it on its very first check.
 
 ## Known traps (do not rediscover)
 - **A test classpath richer than the runtime classpath.** `spring-boot-restclient` at TEST scope let
