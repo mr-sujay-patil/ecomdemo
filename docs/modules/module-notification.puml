@@ -9,8 +9,8 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
-  Component(EcomdemoApplication.EcomdemoApplication.Notification, "Notification", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Notification, "Notification", $techn="Module", $descr="", $tags="", $link="")
 }
 
 Rel(EcomdemoApplication.EcomdemoApplication.Notification, EcomdemoApplication.EcomdemoApplication.Messaging, "uses", $techn="", $tags="", $link="")

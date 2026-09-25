@@ -14,8 +14,9 @@ import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
 import com.ecomdemo.customer.dto.UpdateProfileRequest;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import com.ecomdemo.support.TestData;
+import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -170,7 +171,10 @@ class CustomerServiceTest {
         void currentProfile_returnsTheAuthenticatedAccount() {
             // Given
             User asha = TestData.user(7L, "asha", Role.CUSTOMER);
-            when(currentUser.require()).thenReturn(asha);
+            // The lookup moved into CustomerService in Phase 20d: CurrentUser reads the token and
+            // nothing else, so the account comes from this service's own repository.
+            when(currentUser.id()).thenReturn(asha.getId());
+            when(userRepository.findById(asha.getId())).thenReturn(Optional.of(asha));
 
             // When / Then: the account is taken from the security context, never from an
             // argument, so there is nothing for a caller to tamper with
@@ -181,7 +185,10 @@ class CustomerServiceTest {
         void updateCurrentProfile_changesOnlyTheDisplayName() {
             // Given
             User asha = TestData.user(7L, "asha", Role.CUSTOMER);
-            when(currentUser.require()).thenReturn(asha);
+            // The lookup moved into CustomerService in Phase 20d: CurrentUser reads the token and
+            // nothing else, so the account comes from this service's own repository.
+            when(currentUser.id()).thenReturn(asha.getId());
+            when(userRepository.findById(asha.getId())).thenReturn(Optional.of(asha));
 
             // When
             CustomerResponse updated =

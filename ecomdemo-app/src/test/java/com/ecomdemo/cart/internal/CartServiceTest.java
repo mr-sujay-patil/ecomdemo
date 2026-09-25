@@ -1,6 +1,7 @@
 package com.ecomdemo.cart.internal;
 
 import com.ecomdemo.cart.CartService;
+import com.ecomdemo.support.TestAccount;
 import com.ecomdemo.cart.Cart;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -15,10 +16,9 @@ import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.shared.NotFoundException;
-import com.ecomdemo.customer.User;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.clients.catalog.CatalogGateway;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import com.ecomdemo.support.TestData;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
@@ -62,15 +62,15 @@ class CartServiceTest {
     @InjectMocks
     private CartService cartService;
 
-    private static final User OWNER = TestData.customer();
+    private static final TestAccount OWNER = TestData.customer();
 
     /**
      * Stubs "who is calling" and "what is in their cart" together, because in this service they
      * are always used together: the cart is found BY the caller.
      */
     private void givenTheCallersCartIs(Cart cart) {
-        when(currentUser.id()).thenReturn(OWNER.getId());
-        when(cartRepository.findByUserId(OWNER.getId())).thenReturn(Optional.of(cart));
+        when(currentUser.id()).thenReturn(OWNER.id());
+        when(cartRepository.findByUserId(OWNER.id())).thenReturn(Optional.of(cart));
     }
 
     @Nested
@@ -256,9 +256,9 @@ class CartServiceTest {
         void currentCart_whenNoCartExistsYet_createsAndSavesOneForTheCaller() {
             // Given
             Cart created = TestData.cart(1L);
-            when(currentUser.id()).thenReturn(OWNER.getId());
-            when(currentUser.id()).thenReturn(OWNER.getId());
-            when(cartRepository.findByUserId(OWNER.getId())).thenReturn(Optional.empty());
+            when(currentUser.id()).thenReturn(OWNER.id());
+            when(currentUser.id()).thenReturn(OWNER.id());
+            when(cartRepository.findByUserId(OWNER.id())).thenReturn(Optional.empty());
             when(cartRepository.save(any(Cart.class))).thenReturn(created);
 
             // When

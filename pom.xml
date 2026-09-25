@@ -43,6 +43,7 @@
 		<module>common</module>
 		<module>inventory-service</module>
 		<module>catalog-service</module>
+		<module>customer-service</module>
 		<module>ecomdemo-app</module>
 	</modules>
 

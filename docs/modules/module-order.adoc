@@ -5,7 +5,7 @@
 |Bean references
 |* `c.e.c.CartService` (in Cart)
 * `c.e.c.inventory.InventoryGateway` (in Service clients)
-* `c.e.c.CurrentUser` (in Customer)
+* `c.e.j.CurrentUser` (in JWT and token handling)
 * `c.e.m.OutboxWriter` (in Messaging)
 * `c.e.m.CheckoutMetrics` (in Metrics)
 |Aggregate roots

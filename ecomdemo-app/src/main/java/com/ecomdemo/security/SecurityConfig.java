@@ -8,8 +8,8 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
+import com.ecomdemo.jwt.ApiErrorAccessDeniedHandler;
+import com.ecomdemo.jwt.ApiErrorAuthenticationEntryPoint;
 import com.ecomdemo.jwt.JwtAuthorities;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -115,6 +115,10 @@ public class SecurityConfig {
                         // Registration must be reachable by someone who has no account yet:
                         // requiring authentication to create an account is a closed loop. The
                         // same is true of logging in — you cannot present a token to get a token.
+                        // Still open, and still here even though neither is SERVED here any more:
+                        // both forward to customer-service. The rule is about what a caller may
+                        // reach, not about which process answers - and a person with no account
+                        // cannot authenticate as one, while login exists to hand out the token.
                         .requestMatchers(HttpMethod.POST, "/api/customers/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
 
@@ -240,26 +244,12 @@ public class SecurityConfig {
         return JwtAuthorities.converter();
     }
 
-    /**
-     * How passwords are hashed, and the only place that decision is made.
-     *
-     * <p>One bean is used for both directions — {@code encode} at registration and
-     * {@code matches} at login — so the two can never drift apart. {@code matches} does not
-     * hash-and-compare-strings: it reads the algorithm, cost and salt back out of the stored
-     * hash, re-hashes the submitted password with exactly those, and compares the results in
-     * constant time so that the comparison itself leaks nothing through timing.
-     *
-     * <p>BCrypt's default cost of 10 means 2^10 rounds of key setup per verification. That is
-     * the point: it is slow enough to make a stolen table expensive to brute-force and fast
-     * enough that a login is imperceptible. The cost is stored inside each hash, so raising it
-     * later applies to new passwords without invalidating old ones.
-     *
-     * <p>{@code PasswordEncoder} is the interface rather than {@code BCryptPasswordEncoder}
-     * because moving to Argon2, or to {@code DelegatingPasswordEncoder} for a gradual migration,
-     * should be a change to this one line.
-     */
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
+    // THE PASSWORD ENCODER IS GONE, and it is the last thing to leave this application.
+    //
+    // Hashing and comparing a password is customer-service's exclusive job now, along with the
+    // AuthenticationManager and the UserDetailsService that went with it. This application cannot
+    // check a credential even if something asks it to - there is no bean here that could.
+    //
+    // What remains is the half that every service keeps: VERIFYING a token somebody else issued. The
+    // chain below is a resource server and nothing more.
 }

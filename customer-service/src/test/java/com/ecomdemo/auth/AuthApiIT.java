@@ -8,7 +8,7 @@ import com.ecomdemo.auth.dto.TokenResponse;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.security.JwtConfig;
-import com.ecomdemo.support.IntegrationTest;
+import com.ecomdemo.support.CustomerIntegrationTest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -40,7 +40,7 @@ import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
  * waiting out the decoder's clock-skew allowance as well — a minute of build time to learn
  * nothing extra.
  */
-class AuthApiIT extends IntegrationTest {
+class AuthApiIT extends CustomerIntegrationTest {
 
     private static final String SHOPPER = "it-auth-shopper";
 

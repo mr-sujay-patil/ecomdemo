@@ -1,8 +1,6 @@
-package com.ecomdemo.customer;
+package com.ecomdemo.jwt;
 
-import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.shared.TokenClaims;
-import com.ecomdemo.security.AppUserDetails;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -54,12 +52,6 @@ import org.springframework.stereotype.Component;
 @Component
 public class CurrentUser {
 
-    private final UserRepository userRepository;
-
-    public CurrentUser(UserRepository userRepository) {
-        this.userRepository = userRepository;
-    }
-
     /**
      * The id of the authenticated account, straight out of the token.
      *
@@ -85,13 +77,16 @@ public class CurrentUser {
     }
 
     /** The authenticated account as a managed entity in the caller's transaction. */
-    public User require() {
-        Long id = id();
-        return userRepository
-                .findById(id)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Authenticated as user " + id + " but that account no longer exists"));
-    }
+    // `require()` IS GONE, and its absence is the whole of Phase 20d in one deletion.
+    //
+    // It used to load the account from UserRepository, so a caller could hold a `User`. That is now
+    // another service's table, and fetching it would mean an HTTP call on EVERY authenticated
+    // request - to learn a name and a role the request already carried in its token.
+    //
+    // So this class reads claims and nothing else, and it lives in `common` where every service can
+    // use it. Whoever genuinely needs the whole account - customer-service serving a profile - loads
+    // it from its own repository using id() below. That is the entire point of a signed token: the
+    // caller's identity travels WITH the request instead of being looked up behind it.
 
     /**
      * The verified token, or a failure.

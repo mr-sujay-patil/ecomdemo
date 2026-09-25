@@ -14,9 +14,6 @@ import com.ecomdemo.cart.CartService;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.shared.ConflictException;
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.clients.catalog.CatalogGateway;
@@ -67,6 +64,9 @@ import org.springframework.context.annotation.Import;
 @Import(InMemoryCatalogConfig.class)
 class ConcurrentCheckoutTest {
 
+    private static final long SHOPPER_ID = 4101L;
+    private static final String SHOPPER_USERNAME = "race-test-shopper";
+
     /**
      * <strong>Mocked since Phase 20b, and the mock is the honest choice rather than a shortcut.</strong>
      *
@@ -95,15 +95,11 @@ class ConcurrentCheckoutTest {
     @Autowired
     private OrderAuditRepository orderAuditRepository;
 
-    @Autowired
-    private UserRepository userRepository;
-
     /**
      * The shopper both racing threads act as. They share one account deliberately: the race is
      * two checkouts of the SAME cart, which is only possible if they are the same person — two
      * different accounts now have two different carts and could not collide at all.
      */
-    private User shopper;
 
     /** Every product this class creates is named with it, so the cleanup can find them all. */
     private static final String PRODUCT_PREFIX = "Concurrency ";
@@ -114,8 +110,9 @@ class ConcurrentCheckoutTest {
      */
     @BeforeEach
     void signInAndEmptyTheCart() {
-        shopper = TestAuthentication.account(userRepository, "race-test-shopper", Role.CUSTOMER);
-        TestAuthentication.authenticateAs(shopper);
+        // An id and a name, not an account row: this application has no `users` table since Phase
+        // 20d. The id is what cart and order store, and it is all they need.
+        TestAuthentication.authenticateAs(SHOPPER_ID, SHOPPER_USERNAME);
         emptyTheCart();
     }
 
@@ -265,7 +262,7 @@ class ConcurrentCheckoutTest {
                 // SecurityContextHolder is a ThreadLocal, so each worker thread starts with an
                 // empty context and has to sign in for itself. Skipping this is how a race test
                 // fails with "no authenticated user" instead of with the race it meant to test.
-                TestAuthentication.authenticateAs(shopper);
+                TestAuthentication.authenticateAs(SHOPPER_ID, SHOPPER_USERNAME);
                 start.await(5, TimeUnit.SECONDS);
                 try {
                     return new Outcome(orderService.place(), null);

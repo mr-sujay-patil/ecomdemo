@@ -1,4 +1,4 @@
-package com.ecomdemo.security;
+package com.ecomdemo.jwt;
 
 import com.ecomdemo.shared.AuthMessages;
 

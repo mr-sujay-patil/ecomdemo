@@ -5,7 +5,7 @@ import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.customer.dto.CustomerResponse;
 import com.ecomdemo.customer.dto.RegisterRequest;
 import com.ecomdemo.customer.dto.UpdateProfileRequest;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import java.time.Instant;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -69,14 +69,37 @@ public class CustomerService {
 
     /** The caller's own account. There is deliberately no "get any user by id" endpoint. */
     public CustomerResponse currentProfile() {
-        return CustomerResponse.from(currentUser.require());
+        return CustomerResponse.from(requireCurrentAccount());
     }
 
     @Transactional
     public CustomerResponse updateCurrentProfile(UpdateProfileRequest request) {
-        User user = currentUser.require();
+        User user = requireCurrentAccount();
         user.setFullName(request.fullName());
         return CustomerResponse.from(user);
+    }
+
+    /**
+     * The caller's account, loaded from this service's own table.
+     *
+     * <p>This used to be {@code currentUser.require()}, on a {@code CurrentUser} that held a
+     * {@code UserRepository}. Phase 20d moved that class to {@code common} so every service could read
+     * the caller's identity from the token — and took the repository lookup out of it, because a
+     * service that does not own accounts must not be able to load one.
+     *
+     * <p>So the lookup lives here, in the one service that legitimately has the table. It is the same
+     * two lines it always was; what changed is that nobody else can write them.
+     *
+     * <p>The id comes from the token's {@code uid} claim, so a caller can only ever fetch THEMSELVES —
+     * the same property the missing "get any user by id" endpoint is about, now enforced by where the
+     * number comes from rather than by which endpoints exist.
+     */
+    private User requireCurrentAccount() {
+        Long id = currentUser.id();
+        return userRepository
+                .findById(id)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Authenticated as user " + id + " but that account no longer exists"));
     }
 
     private ConflictException usernameTaken(String username) {

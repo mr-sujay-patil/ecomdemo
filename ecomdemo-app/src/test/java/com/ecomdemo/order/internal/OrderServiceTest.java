@@ -1,6 +1,7 @@
 package com.ecomdemo.order.internal;
 
 import com.ecomdemo.order.OrderStatus;
+import com.ecomdemo.support.TestAccount;
 import com.ecomdemo.order.Order;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -16,12 +17,11 @@ import com.ecomdemo.shared.ConcurrentUpdateException;
 import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.shared.InsufficientStockException;
 import com.ecomdemo.shared.NotFoundException;
-import com.ecomdemo.customer.User;
 import com.ecomdemo.metrics.CheckoutMetrics;
 import com.ecomdemo.metrics.CheckoutOutcome;
 import com.ecomdemo.metrics.MetricNames;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import com.ecomdemo.support.TestData;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
@@ -96,7 +96,7 @@ class OrderServiceTest {
                 .count();
     }
 
-    private static final User SHOPPER = TestData.customer();
+    private static final TestAccount SHOPPER = TestData.customer();
 
     @Nested
     @DisplayName("place")
@@ -287,8 +287,8 @@ class OrderServiceTest {
         @Test
         void findAll_whenOrdersExist_returnsThemWithTheirLines() {
             // Given
-            when(currentUser.id()).thenReturn(SHOPPER.getId());
-            when(orderRepository.findAllByUserIdWithItems(SHOPPER.getId()))
+            when(currentUser.id()).thenReturn(SHOPPER.id());
+            when(orderRepository.findAllByUserIdWithItems(SHOPPER.id()))
                     .thenReturn(List.of(order("100.00"), order("250.00")));
 
             // When
@@ -306,8 +306,8 @@ class OrderServiceTest {
         @Test
         void findAll_whenNoOrdersHaveBeenPlaced_returnsEmptyList() {
             // Given
-            when(currentUser.id()).thenReturn(SHOPPER.getId());
-            when(orderRepository.findAllByUserIdWithItems(SHOPPER.getId())).thenReturn(List.of());
+            when(currentUser.id()).thenReturn(SHOPPER.id());
+            when(orderRepository.findAllByUserIdWithItems(SHOPPER.id())).thenReturn(List.of());
 
             // When / Then
             assertThat(orderService.findAll()).isEmpty();
@@ -351,7 +351,7 @@ class OrderServiceTest {
      * through a double first and yields 100.0.
      */
     private static Order order(String total) {
-        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"), SHOPPER.getId(), SHOPPER.getUsername());
+        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"), SHOPPER.id(), SHOPPER.username());
         order.addItem(10L, "Lamp", new BigDecimal(total), 1);
         return order;
     }

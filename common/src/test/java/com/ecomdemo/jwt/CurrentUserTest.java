@@ -1,17 +1,11 @@
-package com.ecomdemo.customer.internal;
-
-import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.CurrentUser;
+package com.ecomdemo.jwt;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 import com.ecomdemo.shared.TokenClaims;
-import com.ecomdemo.support.TestData;
 import java.time.Instant;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -32,9 +26,6 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
  */
 @ExtendWith(MockitoExtension.class)
 class CurrentUserTest {
-
-    @Mock
-    private UserRepository userRepository;
 
     @InjectMocks
     private CurrentUser currentUser;
@@ -65,8 +56,9 @@ class CurrentUserTest {
 
         assertThat(currentUser.id()).isEqualTo(7L);
         assertThat(currentUser.username()).isEqualTo("asha");
-        // userRepository was never touched — that is the whole point of a stateless token
-        org.mockito.Mockito.verifyNoInteractions(userRepository);
+        // There is no repository left to verify wasn't touched: Phase 20d removed the only method
+        // that had one. "It never reads the database" used to be an assertion; it is now a property of
+        // the class, which is strictly better - a thing that cannot happen needs no test.
     }
 
     @Test
@@ -82,17 +74,17 @@ class CurrentUserTest {
         assertThat(currentUser.id()).isEqualTo(3_000_000_000L);
     }
 
-    @Test
-    @DisplayName("require() loads the managed entity the services need")
-    void requireReadsTheRow() {
-        // The id comes from the token, but the cart and checkout need a real attached entity to
-        // hang JPA associations off — so this one method does read, by primary key.
-        User asha = TestData.user(7L, "asha", Role.CUSTOMER);
-        authenticateWith(7L);
-        when(userRepository.findById(7L)).thenReturn(Optional.of(asha));
-
-        assertThat(currentUser.require()).isSameAs(asha);
-    }
+    // "require() loads the managed entity the services need" IS GONE, and where it went matters.
+    //
+    // That method loaded the account from a UserRepository, so a caller could hold a User. Phase 20d
+    // moved this class to `common` for every service to use, and took the lookup OUT of it - a
+    // service that does not own accounts must not be able to load one, and doing so would mean an
+    // HTTP call on every authenticated request to learn what the token already carried.
+    //
+    // The claim now lives in customer-service, in CustomerServiceTest: the profile endpoints fetch
+    // the account named by the token's uid claim, from that service's own repository. This class is
+    // left asserting exactly what it should - that the claims are read correctly, and that a missing
+    // one is a loud configuration error rather than a silent null.
 
     @Test
     @DisplayName("a token with no uid claim is a configuration error, not a client error")

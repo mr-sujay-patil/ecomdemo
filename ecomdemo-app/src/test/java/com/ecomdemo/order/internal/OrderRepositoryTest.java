@@ -1,13 +1,12 @@
 package com.ecomdemo.order.internal;
 
 import com.ecomdemo.order.OrderStatus;
+import com.ecomdemo.support.TestAccount;
 import com.ecomdemo.order.OrderItem;
 import com.ecomdemo.order.Order;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.User;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -43,7 +42,7 @@ class OrderRepositoryTest {
     @Autowired
     private TestEntityManager entityManager;
 
-    private User shopper;
+    private TestAccount shopper;
 
     /** An order needs an owner ({@code user_id} is NOT NULL), so every test persists one first. */
     @BeforeEach
@@ -56,7 +55,7 @@ class OrderRepositoryTest {
         // Given: an empty orders table
 
         // When / Then
-        assertThat(orderRepository.findAllByUserIdWithItems(shopper.getId())).isEmpty();
+        assertThat(orderRepository.findAllByUserIdWithItems(shopper.id())).isEmpty();
     }
 
     @Test
@@ -67,7 +66,7 @@ class OrderRepositoryTest {
         entityManager.clear();
 
         // When
-        List<Order> found = orderRepository.findAllByUserIdWithItems(shopper.getId());
+        List<Order> found = orderRepository.findAllByUserIdWithItems(shopper.id());
 
         // Then
         assertThat(found).hasSize(2);
@@ -87,7 +86,7 @@ class OrderRepositoryTest {
         entityManager.clear();
 
         // When / Then
-        assertThat(orderRepository.findAllByUserIdWithItems(shopper.getId())).hasSize(1);
+        assertThat(orderRepository.findAllByUserIdWithItems(shopper.id())).hasSize(1);
     }
 
     @Test
@@ -95,12 +94,12 @@ class OrderRepositoryTest {
     void findAllByUserIdWithItems_whenAnotherAccountHasOrders_leavesThemOut() {
         // Given: one order each for two different shoppers
         persistOrder("2026-01-01T10:00:00Z", List.of(line("Lamp", "1500.00", 1)), shopper);
-        User other = persistUser("other");
+        TestAccount other = persistUser("other");
         persistOrder("2026-01-02T10:00:00Z", List.of(line("Mouse", "3499.00", 1)), other);
         entityManager.clear();
 
         // When / Then: the filtering is in the query, so the other account's row is never read
-        assertThat(orderRepository.findAllByUserIdWithItems(shopper.getId()))
+        assertThat(orderRepository.findAllByUserIdWithItems(shopper.id()))
                 .extracting(Order::getUsername)
                 .containsExactly("shopper");
     }
@@ -145,8 +144,8 @@ class OrderRepositoryTest {
         return persistOrder(placedAt, lines, shopper);
     }
 
-    private Order persistOrder(String placedAt, List<Line> lines, User placedBy) {
-        Order order = new Order(Instant.parse(placedAt), placedBy.getId(), placedBy.getUsername());
+    private Order persistOrder(String placedAt, List<Line> lines, TestAccount placedBy) {
+        Order order = new Order(Instant.parse(placedAt), placedBy.id(), placedBy.username());
         long productId = 10L;
         for (Line line : lines) {
             order.addItem(productId++, line.name(), new BigDecimal(line.unitPrice()), line.quantity());
@@ -154,9 +153,16 @@ class OrderRepositoryTest {
         return entityManager.persistAndFlush(order);
     }
 
-    private User persistUser(String username) {
-        return entityManager.persistAndFlush(
-                new User(username, "{not-a-real-hash}", username, Role.CUSTOMER, Instant.now()));
+    /**
+     * An account to place orders as, WITHOUT persisting one.
+     *
+     * <p>It used to persist a {@code User} row, because {@code orders.user_id} had a foreign key.
+     * Phase 20d removed it and moved the table to customer-service, so there is nothing here to write.
+     * The id is derived from the name so two different names get two different owners, which is what
+     * the "leaves another account's orders out" test actually depends on.
+     */
+    private TestAccount persistUser(String username) {
+        return TestAccount.customer(6_000_000L + Math.abs(username.hashCode() % 1_000_000), username);
     }
 
     private static Line line(String name, String unitPrice, int quantity) {

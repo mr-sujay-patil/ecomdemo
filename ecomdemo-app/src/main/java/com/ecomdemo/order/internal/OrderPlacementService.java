@@ -9,7 +9,7 @@ import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.clients.inventory.InventoryGateway;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;

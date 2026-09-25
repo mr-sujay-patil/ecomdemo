@@ -1,0 +1,7 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.identity`
+|Bean references
+|* `c.e.c.customer.CustomerGateway` (in Service clients)
+|===

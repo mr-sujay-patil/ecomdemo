@@ -1,8 +1,7 @@
 package com.ecomdemo.support;
 
 import com.ecomdemo.cart.Cart;
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.User;
+import com.ecomdemo.support.TestAccount;
 import com.ecomdemo.order.Order;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import java.math.BigDecimal;
@@ -49,29 +48,29 @@ public final class TestData {
     }
 
     /**
-     * A user with a fixed id and a fixed hash.
+     * Who a test is acting as.
      *
-     * <p>The "hash" is not a real BCrypt hash and does not need to be. Nothing in a unit test
-     * verifies a password: {@code PasswordEncoder} is either mocked or, in the slice tests,
-     * bypassed entirely by {@code @WithMockUser}. A string that could never be produced by
-     * BCrypt is better than a plausible one, because it cannot be mistaken for a working
-     * credential if it ever escapes into a log.
+     * <p>These built a {@code TestAccount} ENTITY until Phase 20d, complete with a fake BCrypt hash and a
+     * created-at timestamp. The entity belongs to customer-service now and this module cannot
+     * construct one — so what comes back is a {@link TestAccount}: an id, a name and a role, which is
+     * everything a token carries and everything cart and order store.
+     *
+     * <p>The fake hash is gone with it, and that is a small improvement on its own. Nothing here ever
+     * verified a password, so a plausible-looking credential in test data was a liability with no
+     * purpose.
      */
-    public static User user(long id, String username, Role role) {
-        User user = new User(username, "{not-a-real-hash}", username + " the " + role, role,
-                Instant.parse("2026-01-01T00:00:00Z"));
-        ReflectionTestUtils.setField(user, "id", id);
-        return user;
+    public static TestAccount user(long id, String username, String role) {
+        return new TestAccount(id, username, role);
     }
 
     /** The usual shopper: id 1, username "customer". */
-    public static User customer() {
-        return user(1L, "customer", Role.CUSTOMER);
+    public static TestAccount customer() {
+        return TestAccount.customer(1L, "customer");
     }
 
     /** The usual shopkeeper: id 2, username "admin". */
-    public static User admin() {
-        return user(2L, "admin", Role.ADMIN);
+    public static TestAccount admin() {
+        return TestAccount.admin(2L, "admin");
     }
 
     /** An empty cart with a fixed id, belonging to {@link #customer()}. */
@@ -82,12 +81,12 @@ public final class TestData {
     /**
      * An empty cart with a fixed id, belonging to a given user.
      *
-     * <p>It still TAKES a {@code User} even though the cart now stores only an id, and that is
+     * <p>It still TAKES a {@code TestAccount} even though the cart now stores only an id, and that is
      * deliberate: the call sites read {@code cart(1L, customer())}, which says who owns it far better
      * than a bare number would. The narrowing happens here, in one place.
      */
-    public static Cart cart(long id, User owner) {
-        Cart cart = new Cart(owner.getId());
+    public static Cart cart(long id, TestAccount owner) {
+        Cart cart = new Cart(owner.id());
         ReflectionTestUtils.setField(cart, "id", id);
         return cart;
     }
@@ -116,11 +115,11 @@ public final class TestData {
         return order(id, customer());
     }
 
-    /** An order with a fixed id, placed now by a given user. See {@link #cart(long, User)} on why
-     * this still takes a {@code User}. */
-    public static Order order(long id, User placedBy) {
+    /** An order with a fixed id, placed now by a given user. See {@link #cart(long, TestAccount)} on why
+     * this still takes a {@code TestAccount}. */
+    public static Order order(long id, TestAccount placedBy) {
         Order order = new Order(
-                Instant.parse("2026-01-01T00:00:00Z"), placedBy.getId(), placedBy.getUsername());
+                Instant.parse("2026-01-01T00:00:00Z"), placedBy.id(), placedBy.username());
         ReflectionTestUtils.setField(order, "id", id);
         return order;
     }

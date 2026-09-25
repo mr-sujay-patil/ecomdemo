@@ -1,0 +1,19 @@
+@startuml
+set separator none
+title Identity (public proxy)
+
+top to bottom direction
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Identitypublicproxy, "Identity (public proxy)", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
+}
+
+Rel(EcomdemoApplication.EcomdemoApplication.Identitypublicproxy, EcomdemoApplication.EcomdemoApplication.Serviceclients, "uses", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+@enduml
