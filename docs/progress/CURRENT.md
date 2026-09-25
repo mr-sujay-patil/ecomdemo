@@ -8,7 +8,7 @@
 - **Branch:** feature/phase-20d-customer-service
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #29 MERGED (e34330d) · follow-up **#30 OPEN** — https://github.com/mr-sujay-patil/ecomdemo/pull/30
+- **PR:** #29 MERGED (e34330d) · #30 MERGED (380ad6f) · follow-up **#31 OPEN** — https://github.com/mr-sujay-patil/ecomdemo/pull/31
 - **Waiting for user:** YES - review the PR
 
 ## Phase 20c merge verification (PASSED 2026-09-25 — NO TAG, by design)
@@ -63,7 +63,22 @@ the tests written for them now fail automatically for the next service. That is 
 - [ ] ⚠️ **Smoke on `main` found ONE failure** - the race check demanded stock 0 instantly where the
       figure is eventually consistent. NOT an oversell: the 201/409 check and "exactly one order holds
       it" both passed. Fixed on the feature branch, raised as **PR #30**.
-- [ ] PR #30 merged and verified - **and ONLY then: tag `phase-20-complete`**
+- [x] PR #30 merged as **380ad6f**; structural checks passed again, CI success, `./mvnw clean verify`
+      on `main` **BUILD SUCCESS** with the tree clean (stack down first, as required).
+- [ ] ⚠️ **Smoke on `main` found TWO more timing assertions**, both in the poison-message recovery.
+      The notifications WERE written - a few seconds after the 20s polls gave up, in one burst whose
+      created_at timestamps show it. `@RetryableTopic` frees the original partition but the retry
+      topics have their own consumers and backoff, and five services now share one broker. Widened to
+      60s; raised as **PR #31**.
+- [ ] PR #31 merged and verified - **and ONLY then: tag `phase-20-complete`**
+
+## ⚠️ A PATTERN WORTH NAMING: three checks asserting a timing they never meant to
+The outbox relay's retry window (15s -> 40s), the race check's stock figure (instant -> converges), and
+now the poison recovery (20s -> 60s). Every one was written when the stack was smaller, passed for
+years, and became a flake as services were added - because each embedded a latency budget nobody
+intended to assert. The tell is identical every time: the thing being waited for HAD happened, just
+after the check gave up. Any future check that polls should say what it is waiting for and why the
+bound is what it is.
 
 ## ❗ THE FINDING THAT MATTERS MOST (read `docs/test-reports/phase-20d.md` §0)
 The parent declares Failsafe in `<pluginManagement>`, so a module opts in by naming it. `ecomdemo-app`
