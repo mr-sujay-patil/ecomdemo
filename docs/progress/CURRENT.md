@@ -8,7 +8,7 @@
 - **Branch:** feature/phase-20d-customer-service
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** raised, see below
+- **PR:** #29 — https://github.com/mr-sujay-patil/ecomdemo/pull/29
 - **Waiting for user:** YES - review the PR
 
 ## Phase 20c merge verification (PASSED 2026-09-25 — NO TAG, by design)

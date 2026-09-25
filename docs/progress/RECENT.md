@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete, PR #TBD)
+## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete on merge, PR #29)
 **What exists now:** FIVE deployables, sixteen containers, five databases. `customer-service` owns
 `users` (customer_db, 8083/5435) and is the only issuer of user tokens; `notification-service` owns
 `notification` + `processed_event` (notification_db, 8085/5436) and has no business API at all;
