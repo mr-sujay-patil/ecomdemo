@@ -9,7 +9,7 @@ import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.clients.inventory.InventoryGateway;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -103,7 +103,7 @@ class OrderPlacementService {
             // the order is stamped with that same account. Neither is a parameter: there is no
             // way for a request to check out somebody else's cart or to place an order in
             // somebody else's name, because neither is ever named in a request.
-            Order order = new Order(Instant.now(), currentUser.require());
+            Order order = new Order(Instant.now(), currentUser.id(), currentUser.username());
 
             // What has been taken from inventory so far, so it can be given back if this
             // transaction does not survive. See the compensation below.

@@ -293,6 +293,27 @@ psql_query() {
 
 # --------------------------------------------------------------------------------------------
 # 0. The application must be up
+# customer_psql_query <sql> -> against CUSTOMER-SERVICE's database, which owns `users` since 20d.
+customer_psql_query() {
+    docker exec "${CUSTOMER_DB_CONTAINER:-ecomdemo-customer-db}" \
+        psql -qtAX -U "${CUSTOMER_DB_USER:-customer}" \
+        -d "${CUSTOMER_DB_NAME:-customer}" -c "$1" 2>/dev/null
+}
+
+# notification_psql_query <sql> -> the same as psql_query, but against NOTIFICATION-SERVICE's
+# database.
+#
+# Phase 20d needed this and Phase 20c needed its catalogue equivalent, for the same reason: a query
+# has to go to the service that owns the table. `notification` and `processed_event` were in the
+# application's database until 20d; they are notification-service's now, and pointing these checks at
+# the old database would not fail loudly - it would report zero notifications for an order that was
+# notified perfectly well, which reads like a broken consumer.
+notification_psql_query() {
+    docker exec "${NOTIFICATION_DB_CONTAINER:-ecomdemo-notification-db}" \
+        psql -qtAX -U "${NOTIFICATION_DB_USER:-notification}" \
+        -d "${NOTIFICATION_DB_NAME:-notification}" -c "$1" 2>/dev/null
+}
+
 # --------------------------------------------------------------------------------------------
 section "Readiness"
 
@@ -727,8 +748,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V14, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V16, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -745,6 +766,18 @@ if HISTORY="$(psql_query \
         "SELECT count(*) FROM information_schema.tables \
          WHERE table_schema = 'public' AND table_name = 'product';" | tr -d '\r ')"
     check "V14 dropped product - the catalogue belongs to catalog-service now" "0" "$PRODUCT_TABLE"
+
+    # V15's backfill, checked against REAL rows rather than a fresh schema. This is the migration with
+    # a deadline: once `users` moves to customer-service, no query can fill this column in for orders
+    # that already exist. A single null here means the backfill silently skipped a row.
+    ORDERS_WITHOUT_USERNAME="$(psql_query \
+        "SELECT count(*) FROM orders WHERE username IS NULL;" | tr -d '\r ')"
+    check "V15 backfilled every order's username, with none left null" "0" "$ORDERS_WITHOUT_USERNAME"
+
+    USER_FKS="$(psql_query \
+        "SELECT count(*) FROM information_schema.table_constraints \
+         WHERE constraint_name IN ('fk_cart_user', 'fk_orders_user');" | tr -d '\r ')"
+    check "V15 dropped the foreign keys to users - a key cannot span two databases" "0" "$USER_FKS"
 
     AUDIT_TABLE="$(psql_query \
         "SELECT count(*) FROM information_schema.tables \
@@ -768,9 +801,21 @@ if HISTORY="$(psql_query \
     # carried over separately. inventory_db's seed is keyed to these ten ids.
     check "catalog_db carries the ten seeded products" "10" "$CATALOG_SEED"
 
-    ADMIN_ROW="$(psql_query \
-        "SELECT count(*) FROM users WHERE username = 'admin' AND role = 'ADMIN';" | tr -d '\r ')"
-    check "V5 seeded exactly one administrator" "1" "$ADMIN_ROW"
+    # Against CUSTOMER_DB, because `users` moved there in Phase 20d and V16 dropped this database's
+    # copy. The seeded administrator's ID is checked as well as its existence: order-service's
+    # `orders.user_id` holds ids issued by customer-service, and V15 removed the foreign key that used
+    # to tie the two together - so id 1 is now an agreement between two migrations with nothing
+    # enforcing it.
+    ADMIN_ROW="$(customer_psql_query \
+        "SELECT count(*) FROM users WHERE id = 1 AND username = 'admin' AND role = 'ADMIN';" \
+        | tr -d '\r ')"
+    check "customer_db seeded exactly one administrator, at id 1" "1" "$ADMIN_ROW"
+
+    APP_USERS="$(psql_query \
+        "SELECT count(*) FROM information_schema.tables \
+         WHERE table_schema = 'public' AND table_name IN ('users', 'notification', 'processed_event');" \
+        | tr -d '\r ')"
+    check "V16 dropped accounts, notifications and the ledger - other services own them" "0" "$APP_USERS"
 
     # The stored credential must be a BCrypt hash, never the password. $2a$ is the algorithm,
     # 10 the cost factor; the whole string is always 60 characters.
@@ -792,22 +837,25 @@ if HISTORY="$(psql_query \
     # V9 (Phase 17). The unique constraint is the database saying independently what the
     # consumer's idempotency check says: one notification per order. If the consumer's logic were
     # ever wrong, this is what would turn a silent second notification into a visible error.
-    check "V9's notification table is unique per order" "1" \
-        "$(psql_query "SELECT count(*) FROM information_schema.table_constraints \
+    # Against NOTIFICATION_DB since Phase 20d. The application's V9 did create these tables; V16 drops
+    # its copies now that notification-service owns them, and notification_db's own V1 recreates them
+    # with the same shape.
+    check "notification_db keeps one notification per order" "1" \
+        "$(notification_psql_query "SELECT count(*) FROM information_schema.table_constraints \
             WHERE table_name = 'notification' AND constraint_type = 'UNIQUE';" | tr -d '\r ')"
 
     check "and processed_event is keyed by the event id itself" "event_id" \
-        "$(psql_query "SELECT c.column_name FROM information_schema.table_constraints t \
+        "$(notification_psql_query "SELECT c.column_name FROM information_schema.table_constraints t \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V14, all successful" \
+    skip "flyway_schema_history shows V1-V16, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
     skip "V4's order_audit table exists" "same as above"
     skip "V4's product.version column exists" "same as above"
-    skip "V5 seeded exactly one administrator" "same as above"
+    skip "customer_db seeded exactly one administrator, at id 1" "same as above"
     skip "every stored password is a BCrypt hash, not a password" "same as above"
     skip "V6's cart.user_id exists and is NOT NULL" "same as above"
     skip "no order belongs to nobody" "same as above"
@@ -1896,7 +1944,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     # immediately. A check that needed no wait would mean the work had happened synchronously.
     NOTIFICATION_COUNT=0
     for _ in $(seq 1 20); do
-        NOTIFICATION_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $KAFKA_ORDER_ID;" || echo 0)"
+        NOTIFICATION_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $KAFKA_ORDER_ID;" || echo 0)"
         [ "${NOTIFICATION_COUNT:-0}" -ge 1 ] && break
         sleep 1
     done
@@ -1904,10 +1952,10 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     check "exactly one notification row exists for the order" "1" "${NOTIFICATION_COUNT:-0}"
 
     check "and it is addressed to the customer who placed it" "$CUSTOMER_USER" \
-        "$(psql_query "SELECT recipient FROM notification WHERE order_id = $KAFKA_ORDER_ID;")"
+        "$(notification_psql_query "SELECT recipient FROM notification WHERE order_id = $KAFKA_ORDER_ID;")"
 
     check "the event was recorded as processed, which is what makes a redelivery a no-op" "1" \
-        "$(psql_query "SELECT count(*) FROM processed_event WHERE event_type = 'OrderPlacedEvent';" \
+        "$(notification_psql_query "SELECT count(*) FROM processed_event WHERE event_type = 'OrderPlacedEvent';" \
             | awk '{print ($1 >= 1 ? 1 : 0)}')"
 
     # The MESSAGE itself, read back off the topic. `--from-beginning` with a timeout rather than a
@@ -1956,7 +2004,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
 
     AFTER_POISON_COUNT=0
     for _ in $(seq 1 20); do
-        AFTER_POISON_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $AFTER_POISON_ORDER_ID;" || echo 0)"
+        AFTER_POISON_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $AFTER_POISON_ORDER_ID;" || echo 0)"
         [ "${AFTER_POISON_COUNT:-0}" -ge 1 ] && break
         sleep 1
     done
@@ -1979,18 +2027,18 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
 
     DUPLICATE_COUNT=0
     for _ in $(seq 1 20); do
-        DUPLICATE_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
+        DUPLICATE_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
         [ "${DUPLICATE_COUNT:-0}" -ge 1 ] && break
         sleep 1
     done
     # Give the second copy time to be wrong in. A "still one" assertion made immediately proves
     # nothing, because the duplicate may simply not have been consumed yet.
     sleep 3
-    DUPLICATE_COUNT="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
+    DUPLICATE_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
 
     check "the same event delivered twice writes ONE notification" "1" "${DUPLICATE_COUNT:-0}"
 
-    psql_query "DELETE FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" >/dev/null 2>&1
+    notification_psql_query "DELETE FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" >/dev/null 2>&1
 
     # --- The consumer group is keeping up --------------------------------------------------------
     # Lag is the distance between what has been written and what this group has committed. A lag
@@ -2064,6 +2112,51 @@ if command -v docker >/dev/null 2>&1 \
     # --- THE OUTAGE ----------------------------------------------------------------------------
     # Everything above this line is the system working. Everything below is the system being
     # broken on purpose.
+    # WARM THE CHECKOUT PATH FIRST, and this is a fix rather than a nicety.
+    #
+    # The timing check below flaked during Phase 20c's merge verification: it failed once against an
+    # application container seventeen seconds old, and passed on every warm run. The first checkout
+    # after a restart pays for lazy initialisation that has grown with each extracted service - the
+    # Hibernate statement cache, the JSON mappers, and now a RestClient and a signed service token for
+    # each of two downstream calls. The check was measuring JVM warm-up as much as the claim it makes.
+    #
+    # A throwaway checkout pays that cost once, outside the measurement. The claim is "the broker is not
+    # in the request path", and it should be tested on a path that has been walked before - which is
+    # also the only state a real deployment is ever measured in.
+    #
+    # IT RUNS BEFORE THE BROKER IS STOPPED, and the first attempt at this fix got that wrong. Warming up
+    # DURING the outage puts a second row in the outbox, so the relay is retrying two events and the
+    # checks below - which assert an attempt count and a recorded error on ONE row - saw the wrong one.
+    # A warm-up that perturbs the thing it precedes is worse than no warm-up.
+    as_admin
+    request POST /api/products \
+        '{"name":"Warmup Probe","description":"pays the cold-start cost","price":1.00,"stockQuantity":1,"category":"TEST"}' >/dev/null
+    WARMUP_PRODUCT_ID="$(jget "d['id']")"
+    as_customer
+    request POST /api/cart/items "{\"productId\":$WARMUP_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    request POST /api/orders >/dev/null
+    WARMUP_ORDER_ID="$(jget "d['id']")"
+
+    # AND WAIT FOR ITS OUTBOX ROW TO DRAIN before stopping the broker. This is the subtle half of the
+    # fix, and the first two attempts at it were wrong.
+    #
+    # The relay STOPS THE BATCH AT THE FIRST FAILURE - a deliberate Phase 18 decision, so that event
+    # N+1 is never published ahead of a failed event N. So a warm-up row that is still pending when
+    # Kafka goes down becomes the row the relay retries for ever, and the outage row queues silently
+    # BEHIND it with attempts still at zero. The checks below then read an untouched row and conclude
+    # the relay is not retrying, when it is retrying furiously - just not that one.
+    #
+    # Waiting for the warm-up to publish leaves exactly one pending row during the outage, which is
+    # what those checks assume. A test fixture that leaves debris in the machinery it is about to
+    # examine is worse than no fixture.
+    for _ in $(seq 1 30); do
+        WARMUP_PENDING="$(psql_query \
+            "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$WARMUP_ORDER_ID' AND published_at IS NULL;" \
+            | tr -d ' ')"
+        [ "${WARMUP_PENDING:-1}" = "0" ] && break
+        sleep 1
+    done
+
     docker stop "$KAFKA_CONTAINER" >/dev/null 2>&1
     KAFKA_WAS_STOPPED=true   # the EXIT trap restores it if anything below fails
 
@@ -2082,9 +2175,10 @@ if command -v docker >/dev/null 2>&1 \
 
     check "an order placed with the broker DOWN still returns 201" "201" "$OUTAGE_STATUS"
 
-    # Ten seconds is generous - it should be well under one - but this is a laptop running nine
+    # Ten seconds is generous - it should be well under one - but this is a laptop running SIXTEEN
     # containers and the assertion that matters is "the broker is not in the request path", not a
-    # millisecond budget.
+    # millisecond budget. The warm-up above is what makes the number mean that rather than "how long
+    # did this JVM take to finish starting".
     check "and the checkout did not wait for the broker (under 10s)" "True" \
         "$([ "$OUTAGE_ELAPSED" -lt 10 ] && echo True || echo False)"
 
@@ -2094,8 +2188,19 @@ if command -v docker >/dev/null 2>&1 \
         "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID' AND published_at IS NULL;" | tr -d ' ')"
 
     # The relay keeps trying and keeps failing, and says so in the row rather than only in a log.
+    # FORTY seconds, not fifteen, and the number is derived rather than guessed.
+    #
+    # `attempts` is incremented AFTER a send fails, and a send against a stopped broker takes as long
+    # as the producer's own budget allows: max.block.ms=5000 for cluster metadata plus
+    # delivery.timeout.ms=10000, so one failed attempt can take ten seconds to be recorded. Fifteen
+    # seconds left room for one attempt and no slack, which was survivable at nine containers and is
+    # not at sixteen - the check failed here on a stack where the relay was working perfectly and had
+    # simply not finished failing yet.
+    #
+    # The claim is "the relay retries and writes down why", not "within fifteen seconds". A budget that
+    # doubles as an undeclared performance assertion is a flake waiting for a slower machine.
     OUTAGE_ATTEMPTS=0
-    for _ in $(seq 1 15); do
+    for _ in $(seq 1 40); do
         OUTAGE_ATTEMPTS="$(psql_query "SELECT coalesce(max(attempts), 0) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID';" | tr -d ' ')"
         [ "${OUTAGE_ATTEMPTS:-0}" -ge 1 ] && break
         sleep 1
@@ -2109,7 +2214,7 @@ if command -v docker >/dev/null 2>&1 \
     # No notification yet, obviously - nothing has been published. Asserted so that the recovery
     # below is a real transition and not a re-statement of something already true.
     check "no notification has been written for it yet" "0" \
-        "$(psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
+        "$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
 
     # --- RECOVERY ------------------------------------------------------------------------------
     docker start "$KAFKA_CONTAINER" >/dev/null 2>&1
@@ -2129,7 +2234,7 @@ if command -v docker >/dev/null 2>&1 \
     # takes. The claim is that it arrives, not that it arrives immediately.
     OUTAGE_NOTIFIED=0
     for _ in $(seq 1 90); do
-        OUTAGE_NOTIFIED="$(psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
+        OUTAGE_NOTIFIED="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
         [ "${OUTAGE_NOTIFIED:-0}" -ge 1 ] && break
         sleep 1
     done
@@ -2146,7 +2251,7 @@ if command -v docker >/dev/null 2>&1 \
     # processed_event table would have absorbed the duplicate. At-least-once at the producer,
     # exactly-once in the effect.
     check "exactly ONE notification for it, despite every retry" "1" \
-        "$(psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
+        "$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
 
     # The outbox drains back to empty. A backlog that never clears would mean the relay recovered
     # for one row and stopped, which is the failure mode this check exists to catch.

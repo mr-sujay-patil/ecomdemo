@@ -1,6 +1,7 @@
 package com.ecomdemo.order.internal;
 
 import com.ecomdemo.order.OrderStatus;
+import com.ecomdemo.support.TestAccount;
 import com.ecomdemo.order.OrderItem;
 import com.ecomdemo.order.Order;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -27,11 +28,10 @@ import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.customer.User;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.clients.catalog.CatalogGateway;
 import com.ecomdemo.clients.inventory.InventoryClient;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import com.ecomdemo.support.TestData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -125,7 +125,7 @@ class OrderPlacementServiceTest {
                         outbox);
     }
 
-    private static final User SHOPPER = TestData.customer();
+    private static final TestAccount SHOPPER = TestData.customer();
 
     @Captor
     private ArgumentCaptor<Order> orderCaptor;
@@ -139,7 +139,8 @@ class OrderPlacementServiceTest {
         TestData.addTo(cart, lamp, 2);
         TestData.addTo(cart, cable, 3);
         when(cartService.currentCart()).thenReturn(cart);
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.id());
+        when(currentUser.username()).thenReturn(SHOPPER.username());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -164,7 +165,8 @@ class OrderPlacementServiceTest {
         // Given
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.id());
+        when(currentUser.username()).thenReturn(SHOPPER.username());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -244,7 +246,8 @@ class OrderPlacementServiceTest {
         // Given: the boundary — requesting exactly what is available is allowed
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.id());
+        when(currentUser.username()).thenReturn(SHOPPER.username());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -296,7 +299,8 @@ class OrderPlacementServiceTest {
         // Given
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.id());
+        when(currentUser.username()).thenReturn(SHOPPER.username());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -319,7 +323,8 @@ class OrderPlacementServiceTest {
         // NotificationServiceTest), and what lets the relay republish a row safely.
         ProductSnapshot product = TestData.product(1L, "Desk Lamp", "1200.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, product, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.id());
+        when(currentUser.username()).thenReturn(SHOPPER.username());
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         placementService.placeOnce();
@@ -327,7 +332,7 @@ class OrderPlacementServiceTest {
         ArgumentCaptor<OrderPlacedEvent> captor = ArgumentCaptor.forClass(OrderPlacedEvent.class);
         verify(outbox).append(captor.capture());
         OrderPlacedEvent appended = captor.getValue();
-        assertThat(appended.username()).isEqualTo(SHOPPER.getUsername());
+        assertThat(appended.username()).isEqualTo(SHOPPER.username());
         assertThat(appended.itemCount()).isEqualTo(1);
         assertThat(appended.eventId()).isNotNull();
     }

@@ -6,11 +6,13 @@
 |_Configuration properties_
 
 * `c.e.c.catalog.CatalogProperties`
+* `c.e.c.customer.CustomerProperties`
 * `c.e.c.inventory.InventoryProperties`
 
 _Others_
 
 * `c.e.c.ServiceIdentityConfig`
 * `c.e.c.catalog.CatalogGateway` (via `c.e.c.catalog.CatalogClient`)
+* `c.e.c.customer.CustomerGateway` (via `c.e.c.customer.CustomerClient`)
 * `c.e.c.inventory.InventoryGateway` (via `c.e.c.inventory.InventoryClient`)
 |===

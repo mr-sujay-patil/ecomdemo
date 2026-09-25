@@ -29,7 +29,7 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
-@Import({PostgresContainerConfig.class, RedisContainerConfig.class})
+@Import({PostgresContainerConfig.class, RedisContainerConfig.class, InMemoryInventoryConfig.class})
 @ActiveProfiles("it")
 public abstract class CatalogIntegrationTest {
 
@@ -51,8 +51,20 @@ public abstract class CatalogIntegrationTest {
      */
     protected TestRestTemplate rest;
 
+    /**
+     * PROTECTED, not package-private, and that keyword is load-bearing.
+     *
+     * <p>A package-private method in a superclass is not inherited by a subclass in a DIFFERENT
+     * package — and every test extending this class is in {@code com.ecomdemo.catalog} or
+     * {@code com.ecomdemo.cache}, not {@code com.ecomdemo.support}. So JUnit never saw this
+     * {@code @BeforeEach}, {@code rest} stayed null... and the tests still "passed", because Failsafe
+     * was not bound in this module and none of them had ever run.
+     *
+     * <p>Two invisible failures stacked on each other, which is why the first real execution of these
+     * integration tests found both at once.
+     */
     @org.junit.jupiter.api.BeforeEach
-    void authenticateAsTheApplication() {
+    protected void authenticateAsTheApplication() {
         rest = asService();
     }
 

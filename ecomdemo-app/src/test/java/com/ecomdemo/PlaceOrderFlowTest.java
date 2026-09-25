@@ -8,8 +8,6 @@ import com.ecomdemo.cart.CartService;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.shared.ConflictException;
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.order.internal.OrderService;
 import com.ecomdemo.order.OrderStatus;
 import com.ecomdemo.order.dto.OrderResponse;
@@ -53,9 +51,6 @@ class PlaceOrderFlowTest {
     @Autowired
     private OrderService orderService;
 
-    @Autowired
-    private UserRepository userRepository;
-
     /** A shopper of this class's own, so its cart cannot collide with another test class's. */
     /**
      * Stock is in inventory-service since Phase 20b, so creating a product and reserving at
@@ -68,8 +63,7 @@ class PlaceOrderFlowTest {
 
     @BeforeEach
     void signIn() {
-        TestAuthentication.authenticateAs(
-                TestAuthentication.account(userRepository, "flow-test-shopper", Role.CUSTOMER));
+        TestAuthentication.authenticateAs(4201L, "flow-test-shopper");
     }
 
     @AfterEach

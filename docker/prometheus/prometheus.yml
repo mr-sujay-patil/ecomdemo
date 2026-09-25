@@ -60,6 +60,15 @@ scrape_configs:
         labels:
           service: catalog-service
 
+      # The last two, added in Phase 20d. notification-service has no business API at all, and its
+      # metrics are the only way to see it working - there is no endpoint to curl.
+      - targets: ["customer-service:8083"]
+        labels:
+          service: customer-service
+      - targets: ["notification-service:8085"]
+        labels:
+          service: notification-service
+
   # --- Prometheus itself ----------------------------------------------------------------------
   # A monitoring system that does not monitor itself cannot tell you that it stopped working.
   # This is one line and it is the difference between "no alerts, everything is fine" and "no

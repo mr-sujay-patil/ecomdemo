@@ -8,7 +8,6 @@ import static org.awaitility.Awaitility.await;
 
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
-import com.ecomdemo.notification.internal.NotificationRepository;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.clients.catalog.ProductWrite;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
@@ -54,9 +53,6 @@ class OutboxRelayKafkaIT extends IntegrationTest {
 
     @Autowired
     private OutboxEventRepository outbox;
-
-    @Autowired
-    private NotificationRepository notifications;
 
     @Autowired
     private OutboxWriter outboxWriter;
@@ -144,12 +140,12 @@ class OutboxRelayKafkaIT extends IntegrationTest {
                             assertThat(row.getLastError()).isNull();
                         });
 
-        await().atMost(TIMEOUT)
-                .untilAsserted(
-                        () ->
-                                assertThat(notifications.countByOrderId(order.id()))
-                                        .as("exactly one notification for order %d", order.id())
-                                        .isEqualTo(1));
+        // THE NOTIFICATION ASSERTION THAT WAS HERE MOVED. It waited for exactly one notification row,
+        // which is notification-service's table since Phase 20d - there is nothing in this database to
+        // count. What this application can still prove is its own half: the row was written in the
+        // order's transaction, published, and marked. That the consumer then writes exactly one
+        // notification is asserted in OrderPlacedConsumerIT, and the whole path end to end is the
+        // smoke test's.
     }
 
     @Test
@@ -208,7 +204,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
      * downstream already absorbs them.
      */
     @Test
-    @DisplayName("a republished row costs a duplicate SEND, never a duplicate notification")
+    @DisplayName("a republished row is sent a second time - the duplicate is the consumer's problem")
     void republicationIsAbsorbedByTheConsumer() {
         ProductSnapshot product = createProduct("Outbox Replay Lamp", 5);
         OrderResponse order = placeAnOrderFor(product, 1);
@@ -218,7 +214,6 @@ class OutboxRelayKafkaIT extends IntegrationTest {
                         () -> {
                             assertThat(rowFor(order.id()).map(OutboxEvent::isPublished))
                                     .contains(true);
-                            assertThat(notifications.countByOrderId(order.id())).isEqualTo(1);
                         });
 
         // Put the row back into the state a crash between the send and the commit would leave.
@@ -238,9 +233,16 @@ class OutboxRelayKafkaIT extends IntegrationTest {
                             assertThat(rowFor(order.id()).map(OutboxEvent::isPublished))
                                     .as("the relay picks the row up again and republishes it")
                                     .contains(true);
-                            assertThat(notifications.countByOrderId(order.id()))
-                                    .as("still exactly one notification, absorbed by processed_event")
-                                    .isEqualTo(1);
+                            // "still exactly one notification, absorbed by processed_event" was the
+                            // other half of this assertion, and it is the half this application can no
+                            // longer see: both the notification and the processed_event ledger are
+                            // notification-service's tables now. The claim is made there, in
+                            // OrderPlacedConsumerIT's redelivery test, against a real broker.
+                            //
+                            // What is left here is still the important half for THIS side: the outbox
+                            // republishes rather than losing the row. Phase 18's whole argument was
+                            // that it may create duplicates because Phase 17 already absorbs them -
+                            // and after the split, those are demonstrably two services' jobs.
                         });
     }
 

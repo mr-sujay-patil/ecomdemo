@@ -1,10 +1,10 @@
 package com.ecomdemo.support;
 
 import com.ecomdemo.shared.internal.GlobalExceptionHandler;
-import com.ecomdemo.security.ApiErrorAccessDeniedHandler;
-import com.ecomdemo.security.ApiErrorAuthenticationEntryPoint;
-import com.ecomdemo.security.ApiErrorWriter;
-import com.ecomdemo.security.JwtConfig;
+import com.ecomdemo.jwt.ApiErrorAccessDeniedHandler;
+import com.ecomdemo.jwt.ApiErrorAuthenticationEntryPoint;
+import com.ecomdemo.jwt.ApiErrorWriter;
+import com.ecomdemo.jwt.JwtKeyConfig;
 import com.ecomdemo.security.SecurityConfig;
 import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
@@ -28,8 +28,10 @@ import org.springframework.context.annotation.Import;
  * <p>The three {@code ApiError*} classes come along because {@code SecurityConfig} is
  * constructed from them, and {@link GlobalExceptionHandler} because the 401 and 403 bodies are
  * only half its story — method-security denials and failed logins are converted there instead.
- * {@link JwtConfig} comes along because since Phase 9 the chain is a resource server, and a
- * resource server cannot be built without a {@code JwtDecoder}.
+ * {@link JwtKeyConfig} comes along because the chain is a resource server and one cannot be built
+ * without a {@code JwtDecoder}. It is {@code JwtKeyConfig} from {@code common} rather than the old
+ * {@code JwtConfig}: Phase 20d took the ENCODER to customer-service, and what this application needs
+ * is only the half that verifies.
  *
  * <p>What deliberately does <em>not</em> come along is the {@code AuthenticationManager}: it
  * needs a {@code UserDetailsService}, which a web slice has none of. It lives in
@@ -45,7 +47,7 @@ import org.springframework.context.annotation.Import;
 @Inherited
 @Import({
     SecurityConfig.class,
-    JwtConfig.class,
+    JwtKeyConfig.class,
     ApiErrorWriter.class,
     ApiErrorAuthenticationEntryPoint.class,
     ApiErrorAccessDeniedHandler.class,

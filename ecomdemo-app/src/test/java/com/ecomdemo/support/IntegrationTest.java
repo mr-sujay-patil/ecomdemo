@@ -1,9 +1,17 @@
 package com.ecomdemo.support;
 
-import com.ecomdemo.auth.dto.LoginRequest;
-import com.ecomdemo.auth.dto.TokenResponse;
-import com.ecomdemo.customer.dto.CustomerResponse;
-import com.ecomdemo.customer.dto.RegisterRequest;
+import com.ecomdemo.jwt.JwtProperties;
+import com.ecomdemo.shared.TokenClaims;
+import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import javax.crypto.SecretKey;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
+import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.assertj.core.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restclient.RestTemplateBuilder;
@@ -79,6 +87,15 @@ public abstract class IntegrationTest {
      */
     protected static final String ADMIN_USERNAME = "admin";
 
+    /**
+     * The seeded administrator's id, as customer-service's V1 writes it.
+     *
+     * <p>It is hard-coded because nothing enforces it any more: Phase 20d removed the foreign keys
+     * from {@code cart} and {@code orders} to {@code users}, so the two databases agree by convention
+     * and a migration. customer-service's {@code CatalogSchemaTest} equivalent checks its end.
+     */
+    protected static final long ADMIN_ID = 1L;
+
     protected static final String ADMIN_PASSWORD = "admin123";
 
     /** The password every account these tests create shares. Also throwaway, also not a secret. */
@@ -88,61 +105,71 @@ public abstract class IntegrationTest {
     @Autowired
     protected TestRestTemplate rest;
 
+    @Autowired
+    private SecretKey jwtSigningKey;
+
+    @Autowired
+    private JwtProperties jwtProperties;
+
     /** A client carrying a freshly issued token for the seeded ADMIN. */
+    /**
+     * An ADMIN caller.
+     *
+     * <p><strong>It MINTS a token instead of logging in</strong>, and that is Phase 20d showing
+     * through the test base. It used to POST to {@code /api/auth/login} and hold the token that came
+     * back — an endpoint this application no longer serves, because checking a password is
+     * customer-service's exclusive job now.
+     *
+     * <p>The same pattern {@code CatalogIntegrationTest} has used since 20c, and for the same reason:
+     * a service with no login endpoint should not have tests that log in. What is signed here is a
+     * real token, with the real secret, verified by the real filter chain — the only thing skipped is
+     * the password check, which is not this application's to make.
+     */
     protected TestRestTemplate asAdmin() {
-        return withToken(login(ADMIN_USERNAME, ADMIN_PASSWORD));
+        return withToken(tokenFor(ADMIN_ID, ADMIN_USERNAME, "ADMIN"));
     }
 
     /**
-     * Registers a CUSTOMER (if this container has not seen it yet), logs in, and returns a
-     * client carrying the token.
+     * A CUSTOMER caller.
      *
-     * <p>Registration goes through the public endpoint rather than straight into the database,
-     * so the password really is hashed by the application and really is verified back at login.
-     * A repeat run inside the same container gets a 409, which is fine: the account is there
-     * either way and the password has not changed.
-     *
-     * <p>Each test class uses a username of its own, because an account owns a cart — two
-     * classes sharing a name would share a cart and interfere with each other.
+     * <p>The id is derived from the username so that two different names get two different ids
+     * without a registry to keep — which matters because carts and orders are keyed by id, and two
+     * tests that accidentally shared one would see each other's data. {@code hashCode} is stable
+     * within a JVM run, which is all one suite needs, and the offset keeps it clear of the seeded
+     * administrator.
      */
     protected TestRestTemplate asCustomer(String username) {
-        rest.postForEntity(
-                "/api/customers/register",
-                new RegisterRequest(username, IT_PASSWORD, username + " (integration test)"),
-                CustomerResponse.class);
-        return withToken(login(username, IT_PASSWORD));
+        return withToken(tokenFor(idFor(username), username, "CUSTOMER"));
     }
 
-    /** Exchanges credentials for a token over real HTTP, and fails the test if that does not work. */
-    protected String login(String username, String password) {
-        TokenResponse token = rest.postForObject(
-                "/api/auth/login", new LoginRequest(username, password), TokenResponse.class);
-        Assertions.assertThat(token)
-                .as("login as %s should return a token", username)
-                .isNotNull();
-        Assertions.assertThat(token.accessToken()).isNotBlank();
-        return token.accessToken();
+    protected long idFor(String username) {
+        return 1_000_000L + Math.abs(username.hashCode() % 1_000_000);
     }
 
-    /**
-     * A client that sends the given token on every request.
-     *
-     * <p>An interceptor rather than a header passed to every call: it keeps these tests reading
-     * exactly as they did under Basic, and it mirrors what a real client does — attach the token
-     * once and forget about it until it expires.
-     *
-     * <p>The root URI is copied from the injected template, because that is what carries the
-     * random port Tomcat was given; without it the relative paths in the tests would go nowhere.
-     * It is applied through a {@link DefaultUriBuilderFactory} rather than the builder's
-     * {@code rootUri(String)}, which Spring Boot 4 has deprecated for removal — the factory is
-     * what that method was configuring all along.
-     */
+    /** Signs a token the running application will accept, using the profile's configured secret. */
+    protected String tokenFor(long userId, String username, String role) {
+        Instant issuedAt = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.issuer())
+                .subject(username)
+                .issuedAt(issuedAt)
+                .expiresAt(issuedAt.plus(Duration.ofMinutes(15)))
+                .claim(TokenClaims.USER_ID, userId)
+                .claim(TokenClaims.ROLES, List.of(role))
+                .build();
+        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
+                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
+    }
+
     protected TestRestTemplate withToken(String token) {
-        return new TestRestTemplate(new RestTemplateBuilder()
-                .uriTemplateHandler(new DefaultUriBuilderFactory(rest.getRootUri()))
-                .additionalInterceptors((request, body, execution) -> {
-                    request.getHeaders().setBearerAuth(token);
-                    return execution.execute(request, body);
-                }));
+        TestRestTemplate authenticated = new TestRestTemplate();
+        authenticated.getRestTemplate()
+                .setUriTemplateHandler(new DefaultUriBuilderFactory(rest.getRootUri()));
+        authenticated.getRestTemplate().getInterceptors().add((request, body, execution) -> {
+            request.getHeaders().setBearerAuth(token);
+            return execution.execute(request, body);
+        });
+        return authenticated;
     }
 }

@@ -9,12 +9,13 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
-  Component(EcomdemoApplication.EcomdemoApplication.JWTkeys, "JWT keys", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "JWT and token handling", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
 }
 
-Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.JWTkeys, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)

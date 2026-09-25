@@ -1,5 +1,7 @@
 package com.ecomdemo.inventory;
 
+import com.ecomdemo.jwt.ApiErrorAccessDeniedHandler;
+import com.ecomdemo.jwt.ApiErrorAuthenticationEntryPoint;
 import com.ecomdemo.jwt.JwtAuthorities;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
@@ -37,7 +39,10 @@ import org.springframework.security.web.SecurityFilterChain;
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(
+            HttpSecurity http,
+            ApiErrorAuthenticationEntryPoint entryPoint,
+            ApiErrorAccessDeniedHandler accessDenied) throws Exception {
         return http
                 // CSRF protects a session cookie the browser attaches automatically. There is no
                 // cookie and no session here: every request carries a bearer token that an
@@ -54,9 +59,19 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter())))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))
+                        // The resource server's own entry point, for a token that is present but bad.
+                        // Without it, a tampered or expired token gets an empty body instead of the
+                        // ApiError shape - so a caller cannot tell a rejected token from a network
+                        // failure. See the longer note in customer-service's chain.
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(accessDenied))
                 // No form login and no HTTP Basic: a service API has no login page, and leaving
                 // Basic enabled would mean a second way in that this file says nothing about.
+                // The same ApiError shape for a missing token that every other service produces.
+                .exceptionHandling(handling -> handling
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(accessDenied))
                 .httpBasic(basic -> basic.disable())
                 .formLogin(form -> form.disable())
                 .cors(Customizer.withDefaults())

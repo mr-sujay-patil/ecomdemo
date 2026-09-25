@@ -9,5 +9,9 @@
 
 _Others_
 
+* `c.e.j.ApiErrorAccessDeniedHandler`
+* `c.e.j.ApiErrorAuthenticationEntryPoint`
+* `c.e.j.ApiErrorWriter`
+* `c.e.j.CurrentUser`
 * `c.e.j.JwtKeyConfig`
 |===

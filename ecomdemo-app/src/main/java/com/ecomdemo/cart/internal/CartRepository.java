@@ -29,6 +29,6 @@ public interface CartRepository extends JpaRepository<Cart, Long> {
      * SQL means the rows never leave the database in the first place.
      */
     @Query("select distinct c from Cart c left join fetch c.items i "
-            + "where c.user.id = :userId")
+            + "where c.userId = :userId")
     Optional<Cart> findByUserId(@Param("userId") Long userId);
 }

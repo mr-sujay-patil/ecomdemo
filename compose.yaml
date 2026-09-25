@@ -154,6 +154,7 @@ services:
       # wrong inside a container, where localhost is this container.
       INVENTORY_BASE_URL: http://inventory-service:8082
       CATALOG_BASE_URL: http://catalog-service:8081
+      CUSTOMER_BASE_URL: http://customer-service:8083
 
       # Structured logging (Phase 16). Empty everywhere else, so `./mvnw spring-boot:run` on a
       # laptop keeps the readable pattern layout; `ecs` here because this container's stdout is
@@ -212,6 +213,136 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # customer-service's database (Phase 20d)
+  # -------------------------------------------------------------------------------------------
+  customer-db:
+    image: postgres:18-alpine
+    container_name: ecomdemo-customer-db
+    environment:
+      POSTGRES_DB: ${CUSTOMER_DB_NAME:-customer}
+      POSTGRES_USER: ${CUSTOMER_DB_USER:-customer}
+      POSTGRES_PASSWORD: ${CUSTOMER_DB_PASSWORD:-customer}
+    ports:
+      - "${CUSTOMER_DB_PORT:-5435}:5432"
+    volumes:
+      # /var/lib/postgresql, NOT .../data - see the note on the first db service.
+      - customer-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${CUSTOMER_DB_USER:-customer} -d ${CUSTOMER_DB_NAME:-customer}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # customer-service (Phase 20d) - accounts, and the only issuer of user tokens
+  # -------------------------------------------------------------------------------------------
+  customer-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: customer-service
+    image: ecomdemo-customer:latest
+    container_name: ecomdemo-customer-service
+    depends_on:
+      customer-db:
+        condition: service_healthy
+    environment:
+      CUSTOMER_DB_HOST: customer-db
+      CUSTOMER_DB_PORT: 5432
+      CUSTOMER_DB_NAME: ${CUSTOMER_DB_NAME:-customer}
+      CUSTOMER_DB_USER: ${CUSTOMER_DB_USER:-customer}
+      CUSTOMER_DB_PASSWORD: ${CUSTOMER_DB_PASSWORD:-customer}
+
+      # The SIGNING key, and here it is doing something no other service's copy does: this is the
+      # only process that MINTS a user token. The others verify. With HS256 that is a convention
+      # rather than a constraint - they hold the same key and could mint one - which is the honest
+      # argument for asymmetric signing, recorded in docs/decisions.md.
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXPIRY: ${JWT_EXPIRY:-15m}
+    ports:
+      - "${CUSTOMER_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          # 320M, lower than the others' 384M, and measured rather than guessed: this service has one
+          # small table, no cache, no broker client and no outbound calls. It is the cheapest JVM here.
+          memory: ${CUSTOMER_MEMORY_LIMIT:-320M}
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # notification-service's database (Phase 20d)
+  # -------------------------------------------------------------------------------------------
+  notification-db:
+    image: postgres:18-alpine
+    container_name: ecomdemo-notification-db
+    environment:
+      POSTGRES_DB: ${NOTIFICATION_DB_NAME:-notification}
+      POSTGRES_USER: ${NOTIFICATION_DB_USER:-notification}
+      POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-notification}
+    ports:
+      - "${NOTIFICATION_DB_PORT:-5436}:5432"
+    volumes:
+      - notification-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${NOTIFICATION_DB_USER:-notification} -d ${NOTIFICATION_DB_NAME:-notification}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # notification-service (Phase 20d) - the only service nobody calls
+  # -------------------------------------------------------------------------------------------
+  notification-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: notification-service
+    image: ecomdemo-notification:latest
+    container_name: ecomdemo-notification-service
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      kafka:
+        # Its ONLY input. Without the broker this service has nothing to do at all - unlike the
+        # others, which merely lose a feature.
+        condition: service_healthy
+    environment:
+      NOTIFICATION_DB_HOST: notification-db
+      NOTIFICATION_DB_PORT: 5432
+      NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification}
+      NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER:-notification}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-notification}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      # Published only so the smoke test can read its health and metrics. It has no business API:
+      # its SecurityConfig answers denyAll on every other path.
+      - "${NOTIFICATION_PORT:-8085}:8085"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: ${NOTIFICATION_MEMORY_LIMIT:-320M}
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -626,6 +757,8 @@ services:
 volumes:
   # Named `postgres-data` and created as <project>_postgres-data. `docker compose down` leaves it
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
+  customer-data:
+  notification-data:
   catalog-data:
   inventory-data:
 

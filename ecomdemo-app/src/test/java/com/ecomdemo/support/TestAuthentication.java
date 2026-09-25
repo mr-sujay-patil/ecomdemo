@@ -1,11 +1,7 @@
 package com.ecomdemo.support;
 
+import com.ecomdemo.jwt.JwtAuthorities;
 import com.ecomdemo.shared.TokenClaims;
-import com.ecomdemo.customer.Role;
-import com.ecomdemo.customer.User;
-import com.ecomdemo.customer.internal.UserRepository;
-import com.ecomdemo.security.AppUserDetails;
-import com.ecomdemo.security.JwtConfig;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -15,71 +11,61 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 /**
- * Signs a {@code @SpringBootTest} in as a real account.
+ * Puts a caller on the current thread, as a token rather than as an account.
  *
- * <p>{@code @WithMockUser} is the usual way to do this and is the right tool in the
- * {@code @WebMvcTest} slices, but it cannot be used here. It puts a Spring Security
- * {@code org.springframework.security.core.userdetails.User} in the context, and since Phase 9
- * {@code CurrentUser} reads a {@link Jwt} — the account's id and username are <em>claims</em>
- * now, not fields on a {@code UserDetails}. A fabricated principal of the wrong type fails on
- * the first call, and one naming an account that does not exist fails on the first
- * {@code currentUser.require()}.
+ * <p><strong>{@code account(UserRepository, ...)} is gone</strong>, and its removal is Phase 20d in
+ * this one class. It used to find-or-create a row in {@code users} so that a test had a real account
+ * to be. This application has no {@code users} table any more — customer-service owns it — so there is
+ * nothing to create and no repository to create it with.
  *
- * <p>So these tests build the same principal the filter chain would: a {@link Jwt} carrying the
- * claims {@link com.ecomdemo.auth.TokenService} writes, for a row that was actually persisted.
- * That keeps the token, the {@code users} row and the cart's {@code user_id} genuinely in
- * agreement.
+ * <p>What is left is what was always doing the real work: building a {@link Jwt} and putting it in the
+ * {@code SecurityContextHolder}. That was already the mechanism; the account was scaffolding around
+ * it. The services under test read {@code uid} and the subject from the token, so a test that supplies
+ * those has supplied everything they can see.
  *
- * <p>The token here is <strong>not signed</strong>, and does not need to be: it is installed
- * directly into the {@code SecurityContext}, downstream of the decoder that would have verified
- * it. These tests call services, not HTTP. Signature verification is exercised where it belongs
- * — over real HTTP in the {@code *ApiIT} classes, which log in for a genuine token.
+ * <p><strong>Why {@code @WithMockUser} is still not enough</strong> (the reason this class has existed
+ * since Phase 8): {@code @WithMockUser} installs a {@code UsernamePasswordAuthenticationToken} whose
+ * principal is a string. {@code CurrentUser} needs a {@code Jwt} to read {@code uid} from, and would
+ * throw. The claims are the interface now, so the test has to speak in claims.
  */
 public final class TestAuthentication {
+
+    /** The id a test gets when it does not care which account it is. */
+    public static final long DEFAULT_USER_ID = 1L;
 
     private TestAuthentication() {
     }
 
-    /**
-     * Finds or creates an account. Every {@code @SpringBootTest} in the suite shares one H2
-     * database, so a class that ran earlier may already have created this username; the unique
-     * constraint would refuse a second insert.
-     */
-    public static User account(UserRepository userRepository, String username, Role role) {
-        return userRepository
-                .findByUsername(username)
-                .orElseGet(() -> userRepository.save(
-                        new User(username, "{not-a-real-hash}", username, role, Instant.now())));
+    /** Authenticates as a CUSTOMER with the given id and username. */
+    public static void authenticateAs(long userId, String username) {
+        authenticateAs(userId, username, "CUSTOMER");
     }
 
     /**
-     * Puts that account into the {@code SecurityContext} of the CALLING thread.
+     * Authenticates as whoever the arguments say.
      *
-     * <p>The thread matters. {@code SecurityContextHolder} is a {@code ThreadLocal}, so a thread
-     * this test starts itself — the two racing checkouts in {@code ConcurrentCheckoutTest} —
-     * inherits nothing and has to call this for itself. That is not a quirk of the test: it is
-     * the same reason an {@code @Async} method or a scheduled job in production would find an
-     * empty context.
+     * <p>The role is a plain string because that is what the {@code roles} claim carries. There is no
+     * {@code Role} enum on this side of the split — it belongs to the service that owns accounts, and
+     * duplicating it here would make two definitions of one contract.
      */
-    public static void authenticateAs(User user) {
+    public static void authenticateAs(long userId, String username, String role) {
         Instant issuedAt = Instant.now();
         Jwt jwt = Jwt.withTokenValue("test-token-not-signed")
                 .header("alg", "none")
                 .issuedAt(issuedAt)
                 .expiresAt(issuedAt.plus(15, ChronoUnit.MINUTES))
-                .subject(user.getUsername())
-                .claim(TokenClaims.USER_ID, user.getId())
-                .claim(TokenClaims.ROLES, List.of(user.getRole().name()))
+                .subject(username)
+                .claim(TokenClaims.USER_ID, userId)
+                .claim(TokenClaims.ROLES, List.of(role))
                 .build();
 
-        SecurityContextHolder.getContext()
-                .setAuthentication(new JwtAuthenticationToken(
-                        jwt,
-                        List.of(new SimpleGrantedAuthority(AppUserDetails.ROLE_PREFIX + user.getRole().name())),
-                        user.getUsername()));
+        // The authorities are built the same way the real converter builds them, so a @PreAuthorize
+        // expression behaves in a test exactly as it does in production. Using the shared prefix
+        // rather than a literal "ROLE_" is what keeps that true if the convention ever changes.
+        SecurityContextHolder.getContext().setAuthentication(new JwtAuthenticationToken(
+                jwt, List.of(new SimpleGrantedAuthority(JwtAuthorities.ROLE_PREFIX + role)), username));
     }
 
-    /** Clears the context, so an authenticated thread cannot leak into the next test. */
     public static void clear() {
         SecurityContextHolder.clearContext();
     }

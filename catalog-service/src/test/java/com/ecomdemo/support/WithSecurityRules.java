@@ -1,6 +1,9 @@
 package com.ecomdemo.support;
 
 import com.ecomdemo.catalog.SecurityConfig;
+import com.ecomdemo.jwt.ApiErrorAccessDeniedHandler;
+import com.ecomdemo.jwt.ApiErrorAuthenticationEntryPoint;
+import com.ecomdemo.jwt.ApiErrorWriter;
 import com.ecomdemo.jwt.JwtKeyConfig;
 import com.ecomdemo.shared.internal.GlobalExceptionHandler;
 import java.lang.annotation.Documented;
@@ -33,6 +36,13 @@ import org.springframework.context.annotation.Import;
 @Import({
     SecurityConfig.class,
     JwtKeyConfig.class,
+    // The three ApiError* beans, because the chain now names the resource server's OWN entry point -
+    // without which a bad token comes back with an empty body. A slice test that does not import them
+    // fails to build the context at all, which is the good kind of coupling: the test cannot pass
+    // while describing a chain the service does not have.
+    ApiErrorWriter.class,
+    ApiErrorAuthenticationEntryPoint.class,
+    ApiErrorAccessDeniedHandler.class,
     GlobalExceptionHandler.class
 })
 public @interface WithSecurityRules {

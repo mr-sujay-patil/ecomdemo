@@ -18,7 +18,7 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      * endpoint, or by a mistyped argument. An administrative report over all orders would be a
      * new, deliberately named method behind its own authorization rule.
      */
-    @Query("select distinct o from Order o left join fetch o.items where o.user.id = :userId order by o.id")
+    @Query("select distinct o from Order o left join fetch o.items where o.userId = :userId order by o.id")
     List<Order> findAllByUserIdWithItems(@Param("userId") Long userId);
 
     /**

@@ -8,7 +8,7 @@
 * `c.e.c.CartService`
 |Bean references
 |* `c.e.c.catalog.CatalogGateway` (in Service clients)
-* `c.e.c.CurrentUser` (in Customer)
+* `c.e.j.CurrentUser` (in JWT and token handling)
 |Aggregate roots
 |* `c.e.c.Cart`
 |===

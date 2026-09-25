@@ -8,5 +8,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Cart",
-        allowedDependencies = {"clients :: catalog", "customer", "shared"})
+        allowedDependencies = {"clients :: catalog", "jwt", "shared"})
 package com.ecomdemo.cart;

@@ -7,7 +7,7 @@ import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.clients.catalog.CatalogGateway;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
-import com.ecomdemo.customer.CurrentUser;
+import com.ecomdemo.jwt.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -116,7 +116,7 @@ public class CartService {
     public Cart currentCart() {
         return cartRepository
                 .findByUserId(currentUser.id())
-                .orElseGet(() -> cartRepository.save(new Cart(currentUser.require())));
+                .orElseGet(() -> cartRepository.save(new Cart(currentUser.id())));
     }
 
     /** Called by the order feature once an order has been placed. */

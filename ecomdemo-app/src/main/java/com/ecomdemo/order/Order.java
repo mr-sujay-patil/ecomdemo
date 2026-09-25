@@ -1,7 +1,6 @@
 package com.ecomdemo.order;
 
 import com.ecomdemo.order.internal.OrderService;
-import com.ecomdemo.customer.User;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -60,9 +59,34 @@ public class Order {
      * Who placed it. LAZY: listing orders never needs the account row, because the query
      * already filters by its id, and {@link #getUsername()} is the only thing that reads it.
      */
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    /**
+     * Who placed it, as an ID rather than an association — see {@code Cart.userId} for the full
+     * reasoning. The account belongs to customer-service since Phase 20d, so the foreign key that
+     * used to guarantee it existed is gone.
+     *
+     * <p>An order is the one place where that loss matters least: it already snapshots the username
+     * into its audit row and the product name and price into its lines, precisely so that what was
+     * charged cannot be changed by editing something else later.
+     */
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
+
+    /**
+     * The owner's username, SNAPSHOTTED at checkout.
+     *
+     * <p>It used to be read through the association — {@code user.getUsername()} — which is exactly
+     * the kind of thing a service boundary makes impossible. The name is a claim on the token now, so
+     * it is copied onto the row when the order is placed, the same way the product name and the unit
+     * price have been since Phase 6.
+     *
+     * <p><strong>The backfill had to happen in V15, while both tables were still in one
+     * database.</strong> Once `users` is in customer-service there is no query that can populate this
+     * column for orders that already exist — no join, no subselect, nothing but ten thousand HTTP
+     * calls. That is the 20a lesson in its sharpest form: a data change that needs both halves has
+     * exactly one window, and it closes when the services separate.
+     */
+    @Column(name = "username", nullable = false, length = 50)
+    private String username;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true,
             fetch = FetchType.LAZY)
@@ -72,9 +96,10 @@ public class Order {
         // required by JPA
     }
 
-    public Order(Instant placedAt, User user) {
+    public Order(Instant placedAt, Long userId, String username) {
         this.placedAt = placedAt;
-        this.user = user;
+        this.userId = userId;
+        this.username = username;
         this.status = OrderStatus.PLACED;
         this.totalAmount = BigDecimal.ZERO;
     }
@@ -106,17 +131,18 @@ public class Order {
         return items;
     }
 
-    public User getUser() {
-        return user;
+    public Long getUserId() {
+        return userId;
     }
 
     /**
      * The owner's username, which is what the ownership check in {@code OrderService} compares
-     * against {@code authentication.name}. Reading it initialises the lazy proxy, so it is
-     * called while the order is still attached — inside {@code OrderResponse.from}, which runs
-     * within the service's transaction.
+     * against {@code authentication.name}.
+     *
+     * <p>No lazy proxy to initialise any more, so the old warning about calling this only while the
+     * order was still attached no longer applies — it is a column on this row.
      */
     public String getUsername() {
-        return user.getUsername();
+        return username;
     }
 }
