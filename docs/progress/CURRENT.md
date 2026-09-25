@@ -6,10 +6,10 @@
 - **Phase:** 20d: Microservices Split — extract `customer-service` and `notification-service` (the
   LAST PR of Phase 20)
 - **Branch:** feature/phase-20d-customer-service
-- **Step:** PLANNING
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES — the plan needs approval before any code moves
+- **Waiting for user:** NO
 
 ## Phase 20c merge verification (PASSED 2026-09-25 — NO TAG, by design)
 PR #28 merged as merge commit **34f17f0** (parents d120607 + c222420). Every checklist item passed:
@@ -42,8 +42,14 @@ the tests written for them now fail automatically for the next service. That is 
 - **"Everyone verifies, only callers sign"** is enforced by package placement: `com.ecomdemo.jwt` is
   scanned by every service, `com.ecomdemo.clients` only by services that call one.
 
-## Checklist for 20d — NOT STARTED, plan awaiting approval
-- [ ] Plan approved (`docs/phases/phase-20d-plan.md`)
+## Checklist for 20d — plan APPROVED 2026-09-25, implementing
+- [x] Plan approved (`docs/phases/phase-20d-plan.md`), with both open decisions settled:
+      **§2.1 identity comes from the TOKEN** — `CurrentUser` reads `uid`/`roles` from the claims
+      rather than loading a `User`, because otherwise every authenticated request becomes an HTTP
+      call to learn what the request already carried. Accepted cost: a cart holds a `userId` with no
+      foreign key, so a deleted account leaves orphaned carts.
+      **Tests MINT a token** rather than logging in, following `CatalogIntegrationTest` from 20c — a
+      service with no login endpoint should not have tests that log in.
 - [ ] **`CurrentUser` reads the token instead of loading a User**, and a migration drops the two
       foreign keys `cart.user_id -> users` and `orders.user_id -> users`. **This lands FIRST**, while
       there is still one deployable to verify it in — the 20a lesson.
@@ -56,14 +62,11 @@ the tests written for them now fail automatically for the next service. That is 
 - [ ] **ONLY after that PR merges and verifies: tag `phase-20-complete`**
 
 ## Next action
-**Post the 20d plan and STOP for approval** (execution-protocol §3 step 4). The plan is written and
-committed; it has NOT been approved yet, so no code has moved.
-
-The central decision needing sign-off is §2.1: `CurrentUser` must stop loading a `User` entity and
-read the token's claims instead, because otherwise every authenticated request becomes an HTTP call
-to customer-service to learn something the request already carried. The cost is that a cart will hold
-a `userId` with no foreign key behind it — a deleted account leaves orphaned carts, which the FK
-currently prevents and nothing will.
+Work the plan's §3, in order. **Step 1 is the data change and it lands FIRST**: `CurrentUser` reads
+the token, cart and order hold a `userId`, and a migration drops `cart.user_id -> users` and
+`orders.user_id -> users`. Doing it while there is still ONE deployable is the 20a lesson — the
+riskiest data work belongs on the near side of the line, where the existing suite still applies to
+it unchanged.
 
 ## Known traps (do not rediscover)
 - **A test classpath richer than the runtime classpath.** `spring-boot-restclient` at TEST scope let

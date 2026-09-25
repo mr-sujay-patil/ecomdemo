@@ -116,7 +116,7 @@ public class CartService {
     public Cart currentCart() {
         return cartRepository
                 .findByUserId(currentUser.id())
-                .orElseGet(() -> cartRepository.save(new Cart(currentUser.require())));
+                .orElseGet(() -> cartRepository.save(new Cart(currentUser.id())));
     }
 
     /** Called by the order feature once an order has been placed. */

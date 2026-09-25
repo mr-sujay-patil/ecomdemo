@@ -55,6 +55,30 @@ class FlywayMigrationTest {
     // assertion below that `product` is GONE — which is the new claim V14 is worth making.
 
     @Test
+    @DisplayName("V15 removed the foreign keys to users, and backfilled the order's username")
+    void cartAndOrdersNoLongerPointAtAnAccount() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+
+        // The constraints are gone, because `users` goes to customer-service and there is nothing
+        // left for them to point at.
+        assertThat(jdbc.queryForObject(
+                        "SELECT count(*) FROM information_schema.table_constraints "
+                                + "WHERE upper(constraint_name) IN ('FK_CART_USER', 'FK_ORDERS_USER')",
+                        Integer.class))
+                .as("a foreign key cannot span two databases")
+                .isZero();
+
+        // The column that replaced the association, and the one with a deadline: after the split
+        // there is no query that can populate it for orders that already existed.
+        assertThat(jdbc.queryForObject(
+                        "SELECT is_nullable FROM information_schema.columns "
+                                + "WHERE upper(table_name) = 'ORDERS' AND upper(column_name) = 'USERNAME'",
+                        String.class))
+                .as("the snapshot has to be NOT NULL, or the backfill silently did nothing")
+                .isEqualTo("NO");
+    }
+
+    @Test
     @DisplayName("V14 dropped the catalogue, because another service owns it now")
     void dropsTheProductTable() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
@@ -76,7 +100,7 @@ class FlywayMigrationTest {
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -124,7 +148,8 @@ class FlywayMigrationTest {
                 "split product stock",
                 "cart item snapshots the product",
                 "drop product stock",
-                "drop product");
+                "drop product",
+                "cart and orders hold a user id");
     }
 
     @Test

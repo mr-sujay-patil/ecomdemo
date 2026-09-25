@@ -73,7 +73,7 @@ class CartRepositoryTest {
     @Test
     void findByUserId_whenTheCartIsEmpty_stillFindsIt() {
         // Given: a cart with no lines at all
-        entityManager.persistAndFlush(new Cart(owner));
+        entityManager.persistAndFlush(new Cart(owner.getId()));
         entityManager.clear();
 
         // When
@@ -90,7 +90,7 @@ class CartRepositoryTest {
         // Given
         ProductSnapshot lamp = persistProduct("Lamp", "1500.00", 9);
         ProductSnapshot cable = persistProduct("Cable", "100.50", 4);
-        Cart cart = new Cart(owner);
+        Cart cart = new Cart(owner.getId());
         TestData.addTo(cart, lamp, 2);
         TestData.addTo(cart, cable, 3);
         entityManager.persistAndFlush(cart);
@@ -112,7 +112,7 @@ class CartRepositoryTest {
     void findByUserId_whenTheCartHasSeveralLines_returnsOneCartNotOnePerLine() {
         // Given: a collection join multiplies the parent row by the number of children, which is
         // what the "distinct" in the query is there to collapse
-        Cart cart = new Cart(owner);
+        Cart cart = new Cart(owner.getId());
         TestData.addTo(cart, persistProduct("Lamp", "1500.00", 9), 1);
         TestData.addTo(cart, persistProduct("Cable", "100.50", 4), 1);
         TestData.addTo(cart, persistProduct("Mouse", "3499.00", 7), 1);
@@ -133,7 +133,7 @@ class CartRepositoryTest {
         // Given: somebody else's cart, with something in it
         User other = entityManager.persistAndFlush(
                 new User("other", "{not-a-real-hash}", "Other", Role.CUSTOMER, Instant.now()));
-        Cart theirs = new Cart(other);
+        Cart theirs = new Cart(other.getId());
         TestData.addTo(theirs, persistProduct("Lamp", "1500.00", 9), 1);
         entityManager.persistAndFlush(theirs);
         entityManager.clear();

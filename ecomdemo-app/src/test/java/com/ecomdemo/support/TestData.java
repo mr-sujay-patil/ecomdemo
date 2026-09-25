@@ -79,9 +79,15 @@ public final class TestData {
         return cart(id, customer());
     }
 
-    /** An empty cart with a fixed id, belonging to a given user. */
+    /**
+     * An empty cart with a fixed id, belonging to a given user.
+     *
+     * <p>It still TAKES a {@code User} even though the cart now stores only an id, and that is
+     * deliberate: the call sites read {@code cart(1L, customer())}, which says who owns it far better
+     * than a bare number would. The narrowing happens here, in one place.
+     */
     public static Cart cart(long id, User owner) {
-        Cart cart = new Cart(owner);
+        Cart cart = new Cart(owner.getId());
         ReflectionTestUtils.setField(cart, "id", id);
         return cart;
     }
@@ -110,9 +116,11 @@ public final class TestData {
         return order(id, customer());
     }
 
-    /** An order with a fixed id, placed now by a given user. */
+    /** An order with a fixed id, placed now by a given user. See {@link #cart(long, User)} on why
+     * this still takes a {@code User}. */
     public static Order order(long id, User placedBy) {
-        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"), placedBy);
+        Order order = new Order(
+                Instant.parse("2026-01-01T00:00:00Z"), placedBy.getId(), placedBy.getUsername());
         ReflectionTestUtils.setField(order, "id", id);
         return order;
     }

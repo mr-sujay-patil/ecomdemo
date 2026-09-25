@@ -139,7 +139,8 @@ class OrderPlacementServiceTest {
         TestData.addTo(cart, lamp, 2);
         TestData.addTo(cart, cable, 3);
         when(cartService.currentCart()).thenReturn(cart);
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.getId());
+        when(currentUser.username()).thenReturn(SHOPPER.getUsername());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -164,7 +165,8 @@ class OrderPlacementServiceTest {
         // Given
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.getId());
+        when(currentUser.username()).thenReturn(SHOPPER.getUsername());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -244,7 +246,8 @@ class OrderPlacementServiceTest {
         // Given: the boundary — requesting exactly what is available is allowed
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.getId());
+        when(currentUser.username()).thenReturn(SHOPPER.getUsername());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -296,7 +299,8 @@ class OrderPlacementServiceTest {
         // Given
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, lamp, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.getId());
+        when(currentUser.username()).thenReturn(SHOPPER.getUsername());
         when(orderRepository.save(any(Order.class))).thenAnswer(saveReturnsItsArgument());
 
         // When
@@ -319,7 +323,8 @@ class OrderPlacementServiceTest {
         // NotificationServiceTest), and what lets the relay republish a row safely.
         ProductSnapshot product = TestData.product(1L, "Desk Lamp", "1200.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, product, 2));
-        when(currentUser.require()).thenReturn(SHOPPER);
+        when(currentUser.id()).thenReturn(SHOPPER.getId());
+        when(currentUser.username()).thenReturn(SHOPPER.getUsername());
         when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         placementService.placeOnce();

@@ -351,7 +351,7 @@ class OrderServiceTest {
      * through a double first and yields 100.0.
      */
     private static Order order(String total) {
-        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"), SHOPPER);
+        Order order = new Order(Instant.parse("2026-01-01T00:00:00Z"), SHOPPER.getId(), SHOPPER.getUsername());
         order.addItem(10L, "Lamp", new BigDecimal(total), 1);
         return order;
     }

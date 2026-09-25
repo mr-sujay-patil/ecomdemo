@@ -727,8 +727,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V14, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V15, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -745,6 +745,18 @@ if HISTORY="$(psql_query \
         "SELECT count(*) FROM information_schema.tables \
          WHERE table_schema = 'public' AND table_name = 'product';" | tr -d '\r ')"
     check "V14 dropped product - the catalogue belongs to catalog-service now" "0" "$PRODUCT_TABLE"
+
+    # V15's backfill, checked against REAL rows rather than a fresh schema. This is the migration with
+    # a deadline: once `users` moves to customer-service, no query can fill this column in for orders
+    # that already exist. A single null here means the backfill silently skipped a row.
+    ORDERS_WITHOUT_USERNAME="$(psql_query \
+        "SELECT count(*) FROM orders WHERE username IS NULL;" | tr -d '\r ')"
+    check "V15 backfilled every order's username, with none left null" "0" "$ORDERS_WITHOUT_USERNAME"
+
+    USER_FKS="$(psql_query \
+        "SELECT count(*) FROM information_schema.table_constraints \
+         WHERE constraint_name IN ('fk_cart_user', 'fk_orders_user');" | tr -d '\r ')"
+    check "V15 dropped the foreign keys to users - a key cannot span two databases" "0" "$USER_FKS"
 
     AUDIT_TABLE="$(psql_query \
         "SELECT count(*) FROM information_schema.tables \
@@ -801,7 +813,7 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V14, all successful" \
+    skip "flyway_schema_history shows V1-V15, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"

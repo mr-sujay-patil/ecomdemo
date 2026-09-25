@@ -257,7 +257,7 @@ class CartServiceTest {
             // Given
             Cart created = TestData.cart(1L);
             when(currentUser.id()).thenReturn(OWNER.getId());
-            when(currentUser.require()).thenReturn(OWNER);
+            when(currentUser.id()).thenReturn(OWNER.getId());
             when(cartRepository.findByUserId(OWNER.getId())).thenReturn(Optional.empty());
             when(cartRepository.save(any(Cart.class))).thenReturn(created);
 

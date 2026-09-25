@@ -1,8 +1,8 @@
 package com.ecomdemo.cart;
 
 import com.ecomdemo.cart.internal.CartRepository;
-import com.ecomdemo.customer.User;
 import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
@@ -45,13 +45,24 @@ public class Cart {
     private Long id;
 
     /**
-     * The owner. LAZY because almost nothing that reads a cart needs the account behind it —
-     * the queries in {@code CartRepository} filter on {@code user_id} rather than dereferencing
-     * this, so the row is usually never fetched at all.
+     * The owner, as an ID rather than an association.
+     *
+     * <p>It was {@code @ManyToOne(fetch = LAZY) User} until Phase 20d, with a real foreign key. The
+     * account is customer-service's now, so there is nothing in this database for a key to point at
+     * and nothing for Hibernate to lazily load.
+     *
+     * <p>THE COLUMN DID NOT CHANGE. It has always been {@code user_id}, and the queries in
+     * {@code CartRepository} already filtered on it rather than dereferencing the association — the
+     * old comment here said so. So this is a mapping change and a dropped constraint, not a data
+     * change, which is the whole reason it is safe to do while there is still one deployable.
+     *
+     * <p><strong>What is lost is real.</strong> The foreign key guaranteed that a cart belonged to
+     * an account that existed; nothing guarantees that now, so deleting an account leaves its cart
+     * behind. That is the same trade 20a made for {@code cart_item.product_id}, and it is the price
+     * of a database per service. Recorded in {@code docs/decisions.md}.
      */
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false)
-    private User user;
+    @Column(name = "user_id", nullable = false)
+    private Long userId;
 
     @OneToMany(mappedBy = "cart", cascade = CascadeType.ALL, orphanRemoval = true,
             fetch = FetchType.LAZY)
@@ -62,8 +73,8 @@ public class Cart {
     }
 
     /** A new cart starts empty and belongs to someone from the moment it exists. */
-    public Cart(User user) {
-        this.user = user;
+    public Cart(Long userId) {
+        this.userId = userId;
     }
 
     /** Adds the quantity to an existing line for this product, or creates a new line. */
@@ -122,8 +133,8 @@ public class Cart {
         return id;
     }
 
-    public User getUser() {
-        return user;
+    public Long getUserId() {
+        return userId;
     }
 
     public List<CartItem> getItems() {

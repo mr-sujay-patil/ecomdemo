@@ -146,7 +146,7 @@ class OrderRepositoryTest {
     }
 
     private Order persistOrder(String placedAt, List<Line> lines, User placedBy) {
-        Order order = new Order(Instant.parse(placedAt), placedBy);
+        Order order = new Order(Instant.parse(placedAt), placedBy.getId(), placedBy.getUsername());
         long productId = 10L;
         for (Line line : lines) {
             order.addItem(productId++, line.name(), new BigDecimal(line.unitPrice()), line.quantity());
