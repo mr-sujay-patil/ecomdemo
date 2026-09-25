@@ -60,27 +60,29 @@ the tests written for them now fail automatically for the next service. That is 
       the split NO query can fill it in. V15 is the last migration that can see both tables.
 - [ ] `customer-service`: `users` in `customer_db` at V1, register/profile, login, the JWT **encoder**
 - [ ] `notification-service`: `notification` + `processed_event` at V1, the consumer, the deduplicator
-- [ ] The app keeps a token-validating chain but loses `AppUserDetailsService`/`AuthenticationManager`
 - [ ] Compose, Alloy, Prometheus, the Dockerfile's COPY list (a test guards that one)
 - [ ] Fix the cold-start flake in the broker-timing smoke check (§5 of the plan)
 - [ ] Smoke test across five services; full protocol; `docs/test-reports/phase-20d.md`; docs; PR
 - [ ] **ONLY after that PR merges and verifies: tag `phase-20-complete`**
 
 ## Next action
-**Step 1 is done, verified and pushed.** Continue with the plan's §3 step 2: the `customer-service`
-module — `users` in `customer_db` at V1, the register/profile API, login, the `AuthenticationManager`
-and the JWT **encoder** (the one thing that must NOT be in `common`, because only the service that
-owns accounts may issue a user token).
+Steps 1, 2, 3 and 5 are done, verified and pushed. **The UNIT suites are green; the INTEGRATION
+suites have not been run since the extraction** — that is the immediate next thing, because
+`IntegrationTest` now mints tokens instead of logging in and nothing has exercised that yet.
 
-Then step 3 (`CustomerGateway`), step 4 (`notification-service`), step 5 (the app keeps a
-token-validating chain and forwards `/api/auth/**` and `/api/customers/**`), step 6 (compose, Alloy,
-Prometheus, the Dockerfile's COPY list), step 7 (smoke across five services, report, docs, PR).
-
-Expect the app's integration tests to break at step 2: every one of them calls
-`IntegrationTest.asAdmin()`, which POSTs to `/api/auth/login`. The approved answer is to MINT a token
-from the shared secret, following `CatalogIntegrationTest` from 20c — a service with no login
-endpoint should not have tests that log in. The seeded `admin` row moves to `customer_db`, and the
-smoke test logs in as it on its very first check.
+Then, in order:
+1. `./mvnw clean verify` (the ITs) and fix what the minted-token change broke.
+2. **Step 4: `notification-service`** — `notification` + `processed_event` in `notification_db` at V1,
+   the Kafka consumer, and `EventDeduplicator` moving with the table it guards. `messaging` keeps the
+   outbox and stays in order-service. notification-service declares its OWN copy of
+   `OrderPlacedEvent`, as 20b's stock event did: a message contract is not a shared jar.
+3. **Step 6: compose** — two more databases and two more services, plus Alloy's keep rule, the
+   Prometheus targets, and the Dockerfile COPY list (a test guards that last one and has now caught
+   it twice).
+4. **Step 7** — fix the cold-start flake in the broker-timing smoke check, run the smoke suite across
+   five services, write `docs/test-reports/phase-20d.md`, update the README/decisions/RECENT/tracker,
+   raise the PR.
+5. **ONLY after that PR merges and verifies: tag `phase-20-complete`.**
 
 ## Known traps (do not rediscover)
 - **A test classpath richer than the runtime classpath.** `spring-boot-restclient` at TEST scope let
