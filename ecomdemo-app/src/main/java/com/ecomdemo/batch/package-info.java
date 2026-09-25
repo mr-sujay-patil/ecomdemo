@@ -7,5 +7,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Batch",
-        allowedDependencies = {"catalog", "inventory", "shared"})
+        allowedDependencies = {"clients :: catalog", "clients :: inventory", "shared"})
 package com.ecomdemo.batch;

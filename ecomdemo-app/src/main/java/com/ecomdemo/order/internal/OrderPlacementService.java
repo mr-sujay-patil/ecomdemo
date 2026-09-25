@@ -8,7 +8,7 @@ import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.inventory.InventoryGateway;
+import com.ecomdemo.clients.inventory.InventoryGateway;
 import com.ecomdemo.customer.CurrentUser;
 import java.time.Instant;
 import java.util.ArrayList;

@@ -19,5 +19,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Order",
-        allowedDependencies = {"cart", "customer", "inventory", "messaging", "metrics", "shared"})
+        allowedDependencies = {"cart", "clients :: inventory", "customer", "messaging", "metrics", "shared"})
 package com.ecomdemo.order;

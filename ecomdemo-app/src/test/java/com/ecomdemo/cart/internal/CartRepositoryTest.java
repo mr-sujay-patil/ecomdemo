@@ -7,7 +7,7 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import com.ecomdemo.customer.Role;
 import com.ecomdemo.customer.User;
-import com.ecomdemo.catalog.Product;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.TestData;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -88,8 +88,8 @@ class CartRepositoryTest {
     @Test
     void findByUserId_whenTheCartHasLines_loadsTheItemsAndTheirProducts() {
         // Given
-        Product lamp = persistProduct("Lamp", "1500.00", 9);
-        Product cable = persistProduct("Cable", "100.50", 4);
+        ProductSnapshot lamp = persistProduct("Lamp", "1500.00", 9);
+        ProductSnapshot cable = persistProduct("Cable", "100.50", 4);
         Cart cart = new Cart(owner);
         TestData.addTo(cart, lamp, 2);
         TestData.addTo(cart, cable, 3);
@@ -146,8 +146,21 @@ class CartRepositoryTest {
         assertThat(found).isEmpty();
     }
 
-    private Product persistProduct(String name, String price, int stock) {
-        return entityManager.persistAndFlush(
-                new Product(name, name + " description", new BigDecimal(price)));
+    /**
+     * A product the cart can hold, WITHOUT persisting one.
+     *
+     * <p>It used to call {@code entityManager.persistAndFlush(new Product(...))}, because
+     * {@code cart_item} had a foreign key to {@code product} and a line could not exist without a
+     * row to point at. Phase 20a removed that key and made the line a snapshot; Phase 20c moved the
+     * table to another database entirely, so there is nothing here to persist and nothing that
+     * would check it if there were.
+     *
+     * <p>The {@code stock} parameter is kept because it reads as scenario documentation at the call
+     * sites, and dropping it would make three tests say less about what they are describing.
+     */
+    private ProductSnapshot persistProduct(String name, String price, int stock) {
+        return TestData.product(nextProductId++, name, price);
     }
+
+    private long nextProductId = 1;
 }

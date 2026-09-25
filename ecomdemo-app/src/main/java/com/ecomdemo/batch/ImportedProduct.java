@@ -1,23 +1,13 @@
 package com.ecomdemo.batch;
 
-import com.ecomdemo.catalog.Product;
+import com.ecomdemo.clients.catalog.ProductUpsert;
 
 /**
- * What one CSV row becomes: a catalogue product, and the stock level the row asked for.
+ * One CSV row, validated and split into the two writes it becomes.
  *
- * <p><strong>This record exists because Phase 20 split stock out of {@code product}.</strong>
- * Before that, the processor set stock on the entity and the writer saved one object. Now the two
- * numbers live in two tables — shortly in two databases — and a processor cannot write the stock
- * itself: the product it returns has not been saved yet and therefore has no id, and stock is
- * keyed by product id.
- *
- * <p>So the stock level travels with the product to the writer, which runs after the save and has
- * an id to key on. Carrying it in the chunk's own type is what keeps the two beans stateless: the
- * obvious alternative, a map shared between processor and writer, would leak across chunks and
- * would mis-key the moment two rows shared a product name — which this import explicitly allows,
- * because the catalogue has permitted duplicate names since Phase 1.
- *
- * @param product the catalogue row, not yet saved on an insert
- * @param stockQuantity the absolute level the CSV asked for, applied after the product has an id
+ * <p>It used to hold a {@code Product} ENTITY. It cannot now: the entity belongs to
+ * catalog-service's persistence context and catalog-service's database, so what travels between
+ * the processor and the writer is a value. The pairing with {@code stockQuantity} is unchanged and
+ * is the honest shape of the problem — one row of a CSV is two facts owned by two services.
  */
-record ImportedProduct(Product product, int stockQuantity) {}
+record ImportedProduct(ProductUpsert product, int stockQuantity) {}

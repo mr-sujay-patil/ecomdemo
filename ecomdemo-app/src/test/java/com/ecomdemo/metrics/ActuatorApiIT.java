@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -261,7 +261,7 @@ class ActuatorApiIT extends IntegrationTest {
     void httpRequestsAreTimedByUriTemplate_notByRealPath() {
         long productId = createProduct("IT template widget", new BigDecimal("3.00"), 3);
 
-        shopper.getForEntity("/api/products/" + productId, ProductResponse.class);
+        shopper.getForEntity("/api/products/" + productId, ProductSnapshot.class);
 
         // The id is NOT in the series. Were it interpolated, every product ever fetched would be
         // its own time series — the textbook way to take a monitoring system down with the
@@ -315,10 +315,10 @@ class ActuatorApiIT extends IntegrationTest {
     }
 
     private long createProduct(String name, BigDecimal price, int stock) {
-        ProductResponse created = admin.postForEntity(
+        ProductSnapshot created = admin.postForEntity(
                         "/api/products",
-                        new ProductRequest(name, "created by ActuatorApiIT", price, stock, "TEST"),
-                        ProductResponse.class)
+                        new ProductWrite(name, "created by ActuatorApiIT", price, stock, "TEST"),
+                        ProductSnapshot.class)
                 .getBody();
         createdProductIds.add(created.id());
         return created.id();

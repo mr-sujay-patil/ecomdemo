@@ -19,12 +19,13 @@ import com.ecomdemo.customer.User;
 import com.ecomdemo.customer.internal.UserRepository;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.clients.catalog.CatalogGateway;
+import com.ecomdemo.support.InMemoryCatalogConfig;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import com.ecomdemo.shared.InsufficientStockException;
-import com.ecomdemo.inventory.InventoryClient;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.inventory.InventoryClient;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.TestAuthentication;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 
 /**
  * The "Done when" of Phase 6: two checkouts race for the last unit, exactly one wins, and the
@@ -62,6 +64,7 @@ import org.springframework.boot.test.context.SpringBootTest;
  * its assertions to the products it created, and deletes those products afterwards.
  */
 @SpringBootTest
+@Import(InMemoryCatalogConfig.class)
 class ConcurrentCheckoutTest {
 
     /**
@@ -81,7 +84,7 @@ class ConcurrentCheckoutTest {
     private InventoryClient inventory;
 
     @Autowired
-    private ProductService productService;
+    private CatalogGateway catalogue;
 
     @Autowired
     private CartService cartService;
@@ -132,9 +135,9 @@ class ConcurrentCheckoutTest {
     @AfterEach
     void deleteTheProductsThisTestCreated() {
         emptyTheCart();
-        productService.findAll().stream()
+        catalogue.findAll().stream()
                 .filter(product -> product.name().startsWith(PRODUCT_PREFIX))
-                .forEach(product -> productService.delete(product.id()));
+                .forEach(product -> catalogue.delete(product.id()));
         TestAuthentication.clear();
     }
 
@@ -168,8 +171,8 @@ class ConcurrentCheckoutTest {
         // So the claim moves from "the stock came back" to "we asked for it back". That is
         // genuinely weaker, and asserting the weaker thing honestly is better than asserting the
         // stronger thing falsely.
-        ProductResponse plentiful = create(PRODUCT_PREFIX + "Bulk Item", 10);
-        ProductResponse scarce = create(PRODUCT_PREFIX + "Scarce Item", 1);
+        ProductSnapshot plentiful = create(PRODUCT_PREFIX + "Bulk Item", 10);
+        ProductSnapshot scarce = create(PRODUCT_PREFIX + "Scarce Item", 1);
         cartService.addItem(new AddCartItemRequest(plentiful.id(), 2));
         cartService.addItem(new AddCartItemRequest(scarce.id(), 1));
 
@@ -193,8 +196,8 @@ class ConcurrentCheckoutTest {
         // The other half, and the one that actually exercises the synchronisation: both lines pass
         // their availability check and are reserved, and the checkout then fails afterwards. Every
         // reservation that happened must be released, and only those.
-        ProductResponse first = create(PRODUCT_PREFIX + "First", 10);
-        ProductResponse second = create(PRODUCT_PREFIX + "Second", 10);
+        ProductSnapshot first = create(PRODUCT_PREFIX + "First", 10);
+        ProductSnapshot second = create(PRODUCT_PREFIX + "Second", 10);
         cartService.addItem(new AddCartItemRequest(first.id(), 2));
         cartService.addItem(new AddCartItemRequest(second.id(), 3));
 
@@ -234,7 +237,7 @@ class ConcurrentCheckoutTest {
     @Test
     @DisplayName("a successful checkout is audited with the id of the order it created")
     void aSuccessfulCheckoutIsAuditedAgainstItsOrder() {
-        ProductResponse product = create(PRODUCT_PREFIX + "Audited Item", 5);
+        ProductSnapshot product = create(PRODUCT_PREFIX + "Audited Item", 5);
         cartService.addItem(new AddCartItemRequest(product.id(), 2));
 
         OrderResponse placed = orderService.place();
@@ -287,9 +290,9 @@ class ConcurrentCheckoutTest {
         }
     }
 
-    private ProductResponse create(String name, int stock) {
-        return productService.create(
-                new ProductRequest(name, "Created by " + getClass().getSimpleName(),
+    private ProductSnapshot create(String name, int stock) {
+        return catalogue.create(
+                new ProductWrite(name, "Created by " + getClass().getSimpleName(),
                         new BigDecimal("10.00"), stock, "TEST"));
     }
 

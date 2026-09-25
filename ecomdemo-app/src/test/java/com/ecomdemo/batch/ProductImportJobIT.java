@@ -3,7 +3,7 @@ package com.ecomdemo.batch;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.batch.dto.ProductImportResponse;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -17,7 +17,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
-import org.springframework.cache.CacheManager;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -49,9 +48,6 @@ class ProductImportJobIT extends IntegrationTest {
     @Autowired
     private JdbcTemplate jdbc;
 
-    @Autowired
-    private CacheManager cacheManager;
-
     private TestRestTemplate admin;
 
     private final List<Path> writtenFiles = new ArrayList<>();
@@ -76,18 +72,20 @@ class ProductImportJobIT extends IntegrationTest {
     }
 
     private void removeImportedProducts() {
-        jdbc.update("DELETE FROM product WHERE name LIKE ?", PREFIX + "%");
+        // Through the catalogue, not through SQL: `product` is catalog-service's table and this
+        // database no longer has one (V14 dropped it).
+        admin.getForObject("/api/products", ProductSnapshot[].class);
+        java.util.Arrays.stream(admin.getForObject("/api/products", ProductSnapshot[].class))
+                .filter(product -> product.name().startsWith(PREFIX))
+                .forEach(product -> admin.delete("/api/products/" + product.id()));
         // The listing cache would otherwise keep serving the products this class just deleted to
         // whichever test class runs next.
-        evictTheCatalogueListing();
+        // THE MANUAL CACHE EVICTION THAT WAS HERE IS GONE. The catalogue's cache is in
+        // catalog-service now, and this test cannot reach it — which is the right answer rather
+        // than a limitation: the import writes through catalog-service, which evicts its own
+        // caches as part of the same call, so there is nothing left for a caller to remember.
     }
 
-    private void evictTheCatalogueListing() {
-        var listing = cacheManager.getCache(com.ecomdemo.cache.CacheNames.PRODUCT_LIST);
-        if (listing != null) {
-            listing.evict("all");
-        }
-    }
 
     @Test
     @DisplayName("ten thousand rows import, the invalid ones are skipped and listed in the error file")
@@ -113,7 +111,7 @@ class ProductImportJobIT extends IntegrationTest {
 
         // Prime the listing cache, so the assertion at the end is about eviction and not about a
         // cache that happened to be empty.
-        admin.getForEntity("/api/products", ProductResponse[].class);
+        admin.getForEntity("/api/products", ProductSnapshot[].class);
 
         ProductImportResponse response = upload(csv.toString());
 
@@ -153,8 +151,8 @@ class ProductImportJobIT extends IntegrationTest {
 
         // And the catalogue the API serves is the one the import produced, not the cached one
         // from before it.
-        ResponseEntity<ProductResponse[]> listing =
-                admin.getForEntity("/api/products", ProductResponse[].class);
+        ResponseEntity<ProductSnapshot[]> listing =
+                admin.getForEntity("/api/products", ProductSnapshot[].class);
         assertThat(listing.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(listing.getBody())
                 .anyMatch(product -> (PREFIX + "00001").equals(product.name()));
@@ -174,9 +172,14 @@ class ProductImportJobIT extends IntegrationTest {
         assertThat(upload(second).execution().writeCount()).isEqualTo(1);
         assertThat(countImported()).as("still one product, updated in place").isEqualTo(1);
 
-        assertThat(jdbc.queryForObject(
-                        "SELECT description FROM product WHERE name = ?", String.class,
-                        PREFIX + "Repeat"))
+        // Read back through the catalogue for the reason countImported() gives: this database has
+        // no `product` table any more. Asserting the DESCRIPTION is the point of the test - it
+        // proves the second upload UPDATED the row rather than leaving the first one alone.
+        assertThat(java.util.Arrays.stream(admin.getForObject("/api/products", ProductSnapshot[].class))
+                        .filter(product -> (PREFIX + "Repeat").equals(product.name()))
+                        .findFirst()
+                        .orElseThrow()
+                        .description())
                 .isEqualTo("second");
     }
 
@@ -305,10 +308,18 @@ class ProductImportJobIT extends IntegrationTest {
         return csv.toString();
     }
 
+    /**
+     * Counts through the CATALOGUE, not through SQL.
+     *
+     * <p>It used to be {@code SELECT count(*) FROM product}, which worked while the import and the
+     * catalogue shared a database. They do not: {@code product} belongs to catalog-service and V14
+     * dropped this database's copy, so the old query would either fail or - worse, had the table
+     * been left in place - quietly count zero for ever while the import worked perfectly.
+     */
     private long countImported() {
-        Long count = jdbc.queryForObject(
-                "SELECT count(*) FROM product WHERE name LIKE ?", Long.class, PREFIX + "%");
-        return count == null ? 0 : count;
+        ProductSnapshot[] listing = admin.getForObject("/api/products", ProductSnapshot[].class);
+        return listing == null ? 0
+                : java.util.Arrays.stream(listing).filter(p -> p.name().startsWith(PREFIX)).count();
     }
 
     private ProductImportResponse upload(String csv) {

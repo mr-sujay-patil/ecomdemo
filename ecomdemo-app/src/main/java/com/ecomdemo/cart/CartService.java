@@ -5,8 +5,8 @@ import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.shared.NotFoundException;
-import com.ecomdemo.catalog.Product;
-import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.clients.catalog.CatalogGateway;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.customer.CurrentUser;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,13 +31,13 @@ import org.springframework.transaction.annotation.Transactional;
 public class CartService {
 
     private final CartRepository cartRepository;
-    private final ProductService productService;
+    private final CatalogGateway catalogue;
     private final CurrentUser currentUser;
 
     public CartService(
-            CartRepository cartRepository, ProductService productService, CurrentUser currentUser) {
+            CartRepository cartRepository, CatalogGateway catalogue, CurrentUser currentUser) {
         this.cartRepository = cartRepository;
-        this.productService = productService;
+        this.catalogue = catalogue;
         this.currentUser = currentUser;
     }
 
@@ -66,11 +66,16 @@ public class CartService {
     /** Adding a product already in the cart increases that line rather than duplicating it. */
     public CartResponse addItem(AddCartItemRequest request) {
         Cart cart = currentCart();
-        // The catalogue lookup stays here, and it is the line that becomes an HTTP call when the
-        // two are separate services. What it produces is a SNAPSHOT handed to the cart, so
-        // everything downstream of this point works on remembered values.
-        Product product = productService.requireProduct(request.productId());
-        cart.addItem(product.getId(), product.getName(), product.getPrice(), request.quantity());
+        // THE LINE THAT BECAME AN HTTP CALL. Phase 20a wrote, about this exact statement, that it
+        // "becomes an HTTP call when the two are separate services" - and here it is. What it
+        // produces is still a SNAPSHOT handed to the cart, so everything downstream works on
+        // remembered values and nothing else in this class changed.
+        //
+        // It is on a path a shopper waits for, which is the honest cost: adding to a cart now
+        // depends on catalog-service being up. A missing product still surfaces as a clean 404,
+        // because CatalogClient maps the remote 404 back to NotFoundException.
+        ProductSnapshot product = catalogue.requireProduct(request.productId());
+        cart.addItem(product.id(), product.name(), product.price(), request.quantity());
         return saveAndView(cart);
     }
 

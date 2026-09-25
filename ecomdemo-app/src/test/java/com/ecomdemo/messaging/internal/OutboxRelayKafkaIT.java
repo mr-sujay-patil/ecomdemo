@@ -10,8 +10,8 @@ import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.notification.internal.NotificationRepository;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -90,20 +90,20 @@ class OutboxRelayKafkaIT extends IntegrationTest {
         }
     }
 
-    private ProductResponse createProduct(String name, int stock) {
-        ProductResponse created =
+    private ProductSnapshot createProduct(String name, int stock) {
+        ProductSnapshot created =
                 admin.postForObject(
                         "/api/products",
-                        new ProductRequest(
+                        new ProductWrite(
                                 name, name + " description", new BigDecimal("199.00"), stock,
                                 "OUTBOX"),
-                        ProductResponse.class);
+                        ProductSnapshot.class);
         assertThat(created).isNotNull();
         createdProductIds.add(created.id());
         return created;
     }
 
-    private OrderResponse placeAnOrderFor(ProductResponse product, int quantity) {
+    private OrderResponse placeAnOrderFor(ProductSnapshot product, int quantity) {
         shopper.postForEntity(
                 "/api/cart/items", new AddCartItemRequest(product.id(), quantity), String.class);
         var response = shopper.postForEntity("/api/orders", null, OrderResponse.class);
@@ -121,7 +121,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
     @Test
     @DisplayName("a placed order leaves a row in the outbox, and the relay publishes it")
     void theRelayDrainsTheOutbox() {
-        ProductResponse product = createProduct("Outbox Lamp", 5);
+        ProductSnapshot product = createProduct("Outbox Lamp", 5);
 
         OrderResponse order = placeAnOrderFor(product, 2);
 
@@ -155,7 +155,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
     @Test
     @DisplayName("the row carries the order's own event id, and the payload the consumer reads")
     void theRowIsTheMessage() {
-        ProductResponse product = createProduct("Outbox Payload Lamp", 5);
+        ProductSnapshot product = createProduct("Outbox Payload Lamp", 5);
 
         OrderResponse order = placeAnOrderFor(product, 1);
 
@@ -181,7 +181,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
     @Test
     @DisplayName("a rejected checkout leaves NO outbox row, because the transaction rolled back")
     void aRejectedCheckoutWritesNothing() {
-        ProductResponse product = createProduct("Outbox Scarce Lamp", 1);
+        ProductSnapshot product = createProduct("Outbox Scarce Lamp", 1);
         long rowsBefore = outbox.count();
 
         shopper.postForEntity(
@@ -210,7 +210,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
     @Test
     @DisplayName("a republished row costs a duplicate SEND, never a duplicate notification")
     void republicationIsAbsorbedByTheConsumer() {
-        ProductResponse product = createProduct("Outbox Replay Lamp", 5);
+        ProductSnapshot product = createProduct("Outbox Replay Lamp", 5);
         OrderResponse order = placeAnOrderFor(product, 1);
 
         await().atMost(TIMEOUT)

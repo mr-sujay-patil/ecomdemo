@@ -51,11 +51,13 @@ COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY common/pom.xml common/
 COPY inventory-service/pom.xml inventory-service/
+COPY catalog-service/pom.xml catalog-service/
 COPY ecomdemo-app/pom.xml ecomdemo-app/
 RUN ./mvnw -B -q dependency:go-offline
 
 COPY common/src/ common/src/
 COPY inventory-service/src/ inventory-service/src/
+COPY catalog-service/src/ catalog-service/src/
 COPY ecomdemo-app/src/ ecomdemo-app/src/
 
 # -DskipTests, deliberately. Tests run in the build (`./mvnw clean verify`) and in CI, where a

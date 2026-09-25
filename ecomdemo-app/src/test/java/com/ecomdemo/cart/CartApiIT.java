@@ -7,8 +7,8 @@ import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.cart.dto.UpdateCartItemRequest;
 import com.ecomdemo.shared.ApiError;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -66,11 +66,11 @@ class CartApiIT extends IntegrationTest {
         return body;
     }
 
-    private ProductResponse product(String name, String price, int stock) {
-        ProductResponse created = admin.postForObject(
+    private ProductSnapshot product(String name, String price, int stock) {
+        ProductSnapshot created = admin.postForObject(
                 "/api/products",
-                new ProductRequest(name, name + " description", new BigDecimal(price), stock, "IT"),
-                ProductResponse.class);
+                new ProductWrite(name, name + " description", new BigDecimal(price), stock, "IT"),
+                ProductSnapshot.class);
         assertThat(created).isNotNull();
         createdIds.add(created.id());
         return created;
@@ -81,7 +81,7 @@ class CartApiIT extends IntegrationTest {
     void aLineKeepsThePriceItWasAddedAt() {
         // THE BEHAVIOUR CHANGE OF PHASE 20, pinned so it cannot silently revert.
         //
-        // Before this phase a cart line held @ManyToOne Product and priced itself from the live
+        // Before this phase a cart line held @ManyToOne ProductSnapshot and priced itself from the live
         // row, so editing a price repriced every existing cart. The cart is going to order-service
         // and the product to catalog-service, with a database each, so that association cannot
         // survive - a line now remembers the name and price it was added at.
@@ -90,15 +90,15 @@ class CartApiIT extends IntegrationTest {
         // system makes. A cart that repriced itself would need a call to the catalogue on every
         // read of the hottest path there is. It is also arguably the more honest behaviour: the
         // price a shopper was shown is the price they expect at checkout.
-        ProductResponse lamp = product("IT Repricing Lamp", "100.00", 10);
+        ProductSnapshot lamp = product("IT Repricing Lamp", "100.00", 10);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(lamp.id(), 2),
                 CartResponse.class);
 
         // The catalogue changes underneath the cart.
         admin.put("/api/products/" + lamp.id(),
-                new ProductRequest("IT Repricing Lamp", "repriced", new BigDecimal("999.00"), 10,
+                new ProductWrite("IT Repricing Lamp", "repriced", new BigDecimal("999.00"), 10,
                         "IT"));
-        assertThat(admin.getForObject("/api/products/" + lamp.id(), ProductResponse.class).price())
+        assertThat(admin.getForObject("/api/products/" + lamp.id(), ProductSnapshot.class).price())
                 .as("the catalogue really did change")
                 .isEqualByComparingTo("999.00");
 
@@ -120,7 +120,7 @@ class CartApiIT extends IntegrationTest {
     @Test
     @DisplayName("an item added over HTTP is still there on the next request")
     void addItemPersists() {
-        ProductResponse mouse = product("IT Mouse", "25.00", 10);
+        ProductSnapshot mouse = product("IT Mouse", "25.00", 10);
 
         ResponseEntity<CartResponse> response = shopper.postForEntity(
                 "/api/cart/items", new AddCartItemRequest(mouse.id(), 2), CartResponse.class);
@@ -140,7 +140,7 @@ class CartApiIT extends IntegrationTest {
     @Test
     @DisplayName("adding the same product twice adds to the existing line, it does not duplicate it")
     void addingTwiceMergesTheLine() {
-        ProductResponse cable = product("IT Cable", "9.50", 20);
+        ProductSnapshot cable = product("IT Cable", "9.50", 20);
 
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(cable.id(), 1), CartResponse.class);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(cable.id(), 3), CartResponse.class);
@@ -154,8 +154,8 @@ class CartApiIT extends IntegrationTest {
     @Test
     @DisplayName("the total is the sum of the lines across several products")
     void totalsAddUpAcrossLines() {
-        ProductResponse hub = product("IT Hub", "45.00", 5);
-        ProductResponse pad = product("IT Mouse Pad", "12.25", 5);
+        ProductSnapshot hub = product("IT Hub", "45.00", 5);
+        ProductSnapshot pad = product("IT Mouse Pad", "12.25", 5);
 
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(hub.id(), 1), CartResponse.class);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(pad.id(), 2), CartResponse.class);
@@ -168,7 +168,7 @@ class CartApiIT extends IntegrationTest {
     @Test
     @DisplayName("a quantity can be changed and a line removed")
     void updateThenRemove() {
-        ProductResponse stand = product("IT Laptop Stand", "60.00", 8);
+        ProductSnapshot stand = product("IT Laptop Stand", "60.00", 8);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(stand.id(), 1), CartResponse.class);
 
         shopper.put("/api/cart/items/" + stand.id(), new UpdateCartItemRequest(3));
@@ -195,7 +195,7 @@ class CartApiIT extends IntegrationTest {
     @Test
     @DisplayName("a quantity below one is rejected before anything is written")
     void invalidQuantityReturns400() {
-        ProductResponse dock = product("IT Dock", "120.00", 4);
+        ProductSnapshot dock = product("IT Dock", "120.00", 4);
 
         ResponseEntity<ApiError> response = shopper.postForEntity(
                 "/api/cart/items", new AddCartItemRequest(dock.id(), 0), ApiError.class);
@@ -227,7 +227,7 @@ class CartApiIT extends IntegrationTest {
     @DisplayName("two shoppers have two carts, and neither can see the other's")
     void cartsAreNotSharedBetweenAccounts() {
         // Given: one product, and a second shopper with a client of their own
-        ProductResponse hub = product("IT Shared Hub", "45.00", 10);
+        ProductSnapshot hub = product("IT Shared Hub", "45.00", 10);
         TestRestTemplate otherShopper = asCustomer("it-cart-other-shopper");
         otherShopper.getForObject("/api/cart", CartResponse.class).items()
                 .forEach(item -> otherShopper.delete("/api/cart/items/" + item.productId()));

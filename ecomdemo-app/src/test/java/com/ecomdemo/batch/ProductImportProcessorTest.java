@@ -5,8 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.catalog.Product;
-import com.ecomdemo.catalog.ProductService;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
+import com.ecomdemo.clients.catalog.CatalogGateway;
 import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,14 +37,11 @@ class ProductImportProcessorTest {
      * would make {@code setStockLevel} a no-op and every one of those assertions would be checking
      * that the mock was asked politely rather than that the number is right.
      */
-    @Mock
-    private ProductService productService;
-
     private ProductImportProcessor processor;
 
     @BeforeEach
     void setUp() {
-        processor = new ProductImportProcessor(productService);
+        processor = new ProductImportProcessor();
     }
 
     private static ProductCsvRow row(String name, String price, String stock) {
@@ -58,56 +55,49 @@ class ProductImportProcessorTest {
         @Test
         @DisplayName("becomes a new product when nothing of that name exists")
         void createsWhenTheNameIsNew() {
-            when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
             ImportedProduct imported = processor.process(row("Widget", "12.50", "4"));
 
-            assertThat(imported.product().getId()).as("a new product has no id yet").isNull();
-            assertThat(imported.product().getName()).isEqualTo("Widget");
-            assertThat(imported.product().getPrice()).isEqualByComparingTo("12.50");
+            assertThat(imported.product().id()).as("a new product has no id yet").isNull();
+            assertThat(imported.product().name()).isEqualTo("Widget");
+            assertThat(imported.product().price()).isEqualByComparingTo("12.50");
             assertThat(imported.stockQuantity()).isEqualTo(4);
-            assertThat(imported.product().getCategory()).isEqualTo("TEST");
+            assertThat(imported.product().category()).isEqualTo("TEST");
         }
 
-        @Test
-        @DisplayName("updates the existing product of that name, so a re-import is idempotent")
-        void updatesWhenTheNameExists() {
-            Product existing = new Product("Widget", "old", new BigDecimal("1.00"), "OLD");
-            when(productService.findFirstByName("Widget"))
-                    .thenReturn(Optional.of(existing));
-
-            ImportedProduct imported = processor.process(row("Widget", "12.50", "4"));
-
-            // The SAME object comes back, mutated. That is what makes a restart safe: the rows of
-            // a rolled-back chunk are read again, and processing them twice changes nothing.
-            assertThat(imported.product()).isSameAs(existing);
-            assertThat(imported.product().getPrice()).isEqualByComparingTo("12.50");
-            assertThat(imported.stockQuantity()).isEqualTo(4);
-        }
+        // THE "UPDATES THE EXISTING PRODUCT OF THAT NAME" TEST MOVED, it was not deleted.
+        //
+        // It asserted that the processor looked a product up by name and mutated the match, so a
+        // re-import was idempotent. The processor does not look anything up any more: resolving a
+        // name to a product is one HTTP call per ROW if it happens here, so it happens in
+        // catalog-service, once per chunk, inside the write.
+        //
+        // The claim now lives where the behaviour does — `ProductServiceTest` in catalog-service,
+        // "a null id resolves by name, so a re-import updates rather than duplicates". This comment
+        // exists so that the next person to wonder where the idempotency test went does not
+        // conclude there isn't one.
 
         @Test
         @DisplayName("is trimmed, and blank optional columns become null rather than empty text")
         void trimsAndNullsOutBlanks() {
-            when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
             ImportedProduct imported = processor.process(
                     new ProductCsvRow(1, "raw", "  Widget  ", "   ", " 12.50 ", " 4 ", ""));
 
-            assertThat(imported.product().getName()).isEqualTo("Widget");
-            assertThat(imported.product().getDescription()).isNull();
-            assertThat(imported.product().getCategory()).isNull();
+            assertThat(imported.product().name()).isEqualTo("Widget");
+            assertThat(imported.product().description()).isNull();
+            assertThat(imported.product().category()).isNull();
             assertThat(imported.stockQuantity()).isEqualTo(4);
         }
 
         @Test
         @DisplayName("keeps the price at two decimal places, the scale the column stores")
         void normalisesThePriceScale() {
-            when(productService.findFirstByName("Widget")).thenReturn(Optional.empty());
 
             ImportedProduct imported = processor.process(row("Widget", "12.5", "4"));
 
-            assertThat(imported.product().getPrice().scale()).isEqualTo(2);
-            assertThat(imported.product().getPrice()).isEqualByComparingTo("12.50");
+            assertThat(imported.product().price().scale()).isEqualTo(2);
+            assertThat(imported.product().price()).isEqualByComparingTo("12.50");
         }
     }
 
@@ -141,15 +131,10 @@ class ProductImportProcessorTest {
                     .hasMessageContaining("name is longer than 255 characters");
         }
 
-        @Test
-        @DisplayName("and never reaches the database, so a bad row costs no query")
-        void doesNotLookUpAnInvalidRow() {
-            assertThatThrownBy(() -> processor.process(row("Widget", "nope", "4")))
-                    .isInstanceOf(InvalidProductRowException.class);
-
-            org.mockito.Mockito.verify(productService, org.mockito.Mockito.never())
-                    .findFirstByName(anyString());
-        }
+        // "and never reaches the database, so a bad row costs no query" is gone with the lookup
+        // it verified. It is now true by construction rather than by assertion: this class holds no
+        // collaborator at all, so a bad row cannot reach anything. A test that can only pass is not
+        // worth the line it takes up.
 
         @Test
         @DisplayName("and the exception carries the row, which is what the error file writes out")

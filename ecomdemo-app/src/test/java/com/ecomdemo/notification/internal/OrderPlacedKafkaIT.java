@@ -10,8 +10,8 @@ import com.ecomdemo.messaging.KafkaTopics;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.internal.ProcessedEventRepository;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -85,19 +85,19 @@ class OrderPlacedKafkaIT extends IntegrationTest {
         }
     }
 
-    private ProductResponse createProduct(String name, int stock) {
-        ProductResponse created =
+    private ProductSnapshot createProduct(String name, int stock) {
+        ProductSnapshot created =
                 admin.postForObject(
                         "/api/products",
-                        new ProductRequest(
+                        new ProductWrite(
                                 name, name + " description", new BigDecimal("199.00"), stock, "KAFKA"),
-                        ProductResponse.class);
+                        ProductSnapshot.class);
         assertThat(created).isNotNull();
         createdProductIds.add(created.id());
         return created;
     }
 
-    private OrderResponse placeAnOrderFor(ProductResponse product, int quantity) {
+    private OrderResponse placeAnOrderFor(ProductSnapshot product, int quantity) {
         shopper.postForEntity(
                 "/api/cart/items", new AddCartItemRequest(product.id(), quantity), String.class);
         var response = shopper.postForEntity("/api/orders", null, OrderResponse.class);
@@ -109,7 +109,7 @@ class OrderPlacedKafkaIT extends IntegrationTest {
     @Test
     @DisplayName("a placed order produces exactly one notification")
     void aPlacedOrderIsNotified() {
-        ProductResponse product = createProduct("Kafka Notified Lamp", 5);
+        ProductSnapshot product = createProduct("Kafka Notified Lamp", 5);
 
         OrderResponse order = placeAnOrderFor(product, 2);
 
@@ -161,7 +161,7 @@ class OrderPlacedKafkaIT extends IntegrationTest {
     @Test
     @DisplayName("a rejected checkout publishes nothing, because the transaction never committed")
     void aRejectedCheckoutPublishesNothing() {
-        ProductResponse product = createProduct("Kafka Scarce Lamp", 1);
+        ProductSnapshot product = createProduct("Kafka Scarce Lamp", 1);
         long notificationsBefore = notifications.count();
 
         // Ask for more than exists: the cart accepts it, checkout refuses with 409 and rolls back.
@@ -194,7 +194,7 @@ class OrderPlacedKafkaIT extends IntegrationTest {
         // message is still notified — which is precisely what would not happen if the bad record
         // were being retried in place for ever, and it is a stronger statement than reading the
         // DLT, because it is the behaviour anyone would actually notice.
-        ProductResponse product = createProduct("Kafka After Poison", 3);
+        ProductSnapshot product = createProduct("Kafka After Poison", 3);
         OrderResponse order = placeAnOrderFor(product, 1);
 
         await().atMost(TIMEOUT)

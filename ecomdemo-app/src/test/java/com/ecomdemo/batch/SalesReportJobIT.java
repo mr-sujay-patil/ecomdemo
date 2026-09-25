@@ -7,8 +7,8 @@ import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.order.dto.OrderResponse;
-import com.ecomdemo.catalog.dto.ProductRequest;
-import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.clients.catalog.ProductWrite;
+import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -82,10 +82,10 @@ class SalesReportJobIT extends IntegrationTest {
     }
 
     private long createProduct(String name, String price, int stock) {
-        ProductResponse product = admin.postForObject("/api/products",
-                new ProductRequest(PREFIX + name, "for the report", new BigDecimal(price), stock,
+        ProductSnapshot product = admin.postForObject("/api/products",
+                new ProductWrite(PREFIX + name, "for the report", new BigDecimal(price), stock,
                         "REPORT"),
-                ProductResponse.class);
+                ProductSnapshot.class);
         assertThat(product).isNotNull();
         createdProductIds.add(product.id());
         return product.id();
