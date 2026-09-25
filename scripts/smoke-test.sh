@@ -932,8 +932,30 @@ RACE_RESULT="$(curl -sS --parallel --parallel-immediate -X POST \
     "$BASE_URL/api/orders" "$BASE_URL/api/orders" | sort | paste -sd, -)"
 check "two simultaneous checkouts return exactly one 201 and one 409" "201,409" "$RACE_RESULT"
 
-request GET "/api/products/$RACE_ID" >/dev/null
-check "the one unit was sold once, so stock is 0" "0" "$(jget "d['stockQuantity']")"
+# CONVERGES on 0 rather than being 0 immediately, and this check was MISSED when its sibling in the
+# caching section was converted in Phase 20c.
+#
+# It failed once during Phase 20d's merge verification, reading 1 where it wanted 0 - and what it was
+# seeing was the eventual-consistency window, not an oversell. The two checks above prove that: the
+# concurrent checkouts returned exactly one 201 and one 409, and exactly one order holds the product.
+# The sale was correct; only the DISPLAYED figure lagged, because it comes through catalog-service's
+# Redis cache, which is evicted when inventory-service's `inventory.stock-changed` event arrives.
+#
+# So the claim is "the unit was sold once", and it is about inventory - not about how fast a cache
+# hears. Polling states that, and reports the convergence time so a window quietly growing from 200ms
+# to four seconds is visible rather than merely still passing.
+RACE_CONVERGED=false
+RACE_ELAPSED=0
+for _ in $(seq 1 50); do
+    request GET "/api/products/$RACE_ID" >/dev/null
+    if [ "$(jget "d['stockQuantity']")" = "0" ]; then
+        RACE_CONVERGED=true
+        break
+    fi
+    sleep 0.2
+    RACE_ELAPSED=$((RACE_ELAPSED + 200))
+done
+check "the one unit was sold once, so stock converges on 0 (took ${RACE_ELAPSED}ms)" "true" "$RACE_CONVERGED"
 
 # Counted over the orders placed SINCE THIS SECTION STARTED, not over every order the account has
 # ever had. Phase 20c made that distinction matter: product ids are assigned by catalog_db now, and
