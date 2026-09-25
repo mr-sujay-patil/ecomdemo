@@ -8,7 +8,7 @@
 - **Branch:** feature/phase-20d-customer-service
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #29 — https://github.com/mr-sujay-patil/ecomdemo/pull/29
+- **PR:** #29 MERGED (e34330d) · follow-up **#30 OPEN** — https://github.com/mr-sujay-patil/ecomdemo/pull/30
 - **Waiting for user:** YES - review the PR
 
 ## Phase 20c merge verification (PASSED 2026-09-25 — NO TAG, by design)
@@ -57,7 +57,13 @@ the tests written for them now fail automatically for the next service. That is 
 - [x] `./mvnw clean verify`: 10+34+41+12+43+8+8+3+228+53, BUILD SUCCESS, 4 modules running ITs
 - [x] `scripts/smoke-test.sh`: **274 passed / 0 failed**, twice, from cold. **1459 MiB of 3916**
 - [x] `docs/test-reports/phase-20d.md`, README, decisions, RECENT (20b archived), tracker
-- [ ] PR merged and verified - **and ONLY then: tag `phase-20-complete`**
+- [x] PR #29 merged as **e34330d**; structural verification PASSED (ancestor, 0 missing, 0 diffs,
+      branch alive, 26 remote branches). CI on `main`: success. `./mvnw clean verify` on `main`:
+      **BUILD SUCCESS**, tree clean.
+- [ ] ⚠️ **Smoke on `main` found ONE failure** - the race check demanded stock 0 instantly where the
+      figure is eventually consistent. NOT an oversell: the 201/409 check and "exactly one order holds
+      it" both passed. Fixed on the feature branch, raised as **PR #30**.
+- [ ] PR #30 merged and verified - **and ONLY then: tag `phase-20-complete`**
 
 ## ❗ THE FINDING THAT MATTERS MOST (read `docs/test-reports/phase-20d.md` §0)
 The parent declares Failsafe in `<pluginManagement>`, so a module opts in by naming it. `ecomdemo-app`
@@ -72,20 +78,17 @@ RunsThemTest` now fails the build if it recurs.
 **A green build only means the things that ran passed.**
 
 ## Next action
-**WAIT FOR THE USER.** The PR is open and Phase 20 is at its final stop point.
+**WAIT FOR THE USER on PR #30.** Merge verification for #29 passed every check except one smoke
+assertion, so the tag is NOT yet applied - correctly. `git tag --list "phase-*"` still ends at
+`phase-19-complete`.
 
-After `approved, merge it`: `gh pr merge <n> --merge` (never squash, never `--delete-branch`), then
-merge verification per `docs/process/execution-protocol.md` §5 - and **THIS TIME THE TAG IS CORRECT**:
-once verification passes, `git tag phase-20-complete` and push it. Phase 20 ends with the fifth
-service, and the fifth service is out.
+After `approved, merge it` on #30: `gh pr merge 30 --merge`, then merge verification per
+`execution-protocol.md` §5 - and THEN `git tag phase-20-complete && git push origin phase-20-complete`.
 
-Then Phase 21 (API Gateway) is next, and it has two jobs waiting for it that this phase created: it
-replaces both hand-written proxies, and it removes the plaintext password from the application's
-memory on login.
-
-Also outstanding, oldest first: the Phase 19 dashboard defect (`fix/dashboard-stat-reducers`), a failed
-compensating release leaking a reservation, the CSV import's partial-failure window, the HS256 shared
-secret, and renaming `ecomdemo-app` to `order-service`.
+⚠️ **Run `docker compose --profile tools down` BEFORE `./mvnw clean verify`.** The first attempt at
+verification on `main` failed with seventeen containers running: Testcontainers timed out on Ryuk and
+on topic creation, and `OrderApiIT` took 780 seconds. Nothing was wrong with the code. This is now the
+most expensive instance of a trap already in the list below.
 
 
 ## Known traps (do not rediscover)
