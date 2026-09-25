@@ -2,6 +2,11 @@
 |===
 |Base package
 |`com.ecomdemo.identity`
+|Spring components
+|_Controllers_
+
+* `c.e.i.AuthProxyController`
+* `c.e.i.CustomerProxyController`
 |Bean references
 |* `c.e.c.customer.CustomerGateway` (in Service clients)
 |===

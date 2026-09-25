@@ -12,6 +12,33 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete, PR #TBD)
+**What exists now:** FIVE deployables, sixteen containers, five databases. `customer-service` owns
+`users` (customer_db, 8083/5435) and is the only issuer of user tokens; `notification-service` owns
+`notification` + `processed_event` (notification_db, 8085/5436) and has no business API at all;
+`catalog-service` and `inventory-service` as before; `ecomdemo-app` is order-service in all but name,
+keeping only cart/orders/outbox/batch plus two public proxies. Smoke **274 passed / 0 failed** twice
+from cold; **1459 MiB of 3916**.
+**Key code:** `common/.../jwt/CurrentUser` (reads CLAIMS, no repository); `common/.../clients/customer/`;
+`ecomdemo-app/.../identity/` (the auth + customer proxies); `customer-service/` and
+`notification-service/` whole modules; V15 (snapshot + backfill username, drop the user FKs) and V16
+(drop users/notification/processed_event).
+**Config & infrastructure:** `CUSTOMER_BASE_URL`; customer-db 5435, notification-db 5436; 320M caps on
+the two new services; Alloy and Prometheus cover all five; the Dockerfile copies five module poms.
+**Tests:** OrderPlacedConsumerIT (publishes a MAP, not its own record), CustomerIntegrationTest (the one
+base that CAN log in), ProductProxyAccessTest, EveryModuleWithIntegrationTestsRunsThemTest.
+**❗ Gotchas - read `docs/test-reports/phase-20d.md` §0 first.** Failsafe was never bound in the four
+extracted services, so their *IT tests had NOT RUN since 20b - `verify` printed BUILD SUCCESS the whole
+time, because an unbound plugin reports nothing. Binding them found five real defects. Also: a
+package-private `@BeforeEach` is not inherited across packages; the resource server needs its OWN
+authenticationEntryPoint or a bad token returns an empty body; `TokenView` guessed its field names and
+produced a 400 that blamed the caller for a response-side error; and the outbox relay stops the batch at
+the first failure, so a warm-up row left pending during an outage starves the row under test.
+**Follow-ups (not done):** rename `ecomdemo-app` to order-service (cosmetic, touches every image tag);
+Phase 21's gateway replaces both proxies and removes the plaintext password from the app's memory; the
+Phase 19 dashboard defect is now the oldest open item; a failed compensating release still leaks a
+reservation; HS256 shared secret.
+
 ## Phase 20c: Microservices Split - catalog-service (tag: NONE - see below, PR #28)
 **What exists now:** THREE deployables. `catalog-service` owns `product` in `catalog_db` (Flyway
 V1-V2) and the Redis cache that serves it; `inventory-service` owns stock; `ecomdemo-app` is the
@@ -38,33 +65,3 @@ holding "the same" product.
 `order-service` is the residue. That is 20d. Still open: the CSV import's partial-failure window, a
 failed compensating release leaking a reservation, the HS256 shared secret, and the Phase 19
 dashboard defect.
-
-## Phase 20b: Microservices Split - EXTRACTION, first service (tag: NONE - see below, PR #27, MERGED)
-**What exists now:** TWO deployables. `inventory-service` owns stock in its own `inventory_db`
-(Flyway V1-V2), exposes a REST API, publishes `inventory.stock-changed`, and validates JWTs with its
-own filter chain. `ecomdemo-app` reaches it over HTTP behind `InventoryGateway`. 437 tests
-(5 + 34 + 317 + 81), smoke test **270 - UNCHANGED**, eleven containers healthy.
-**ONE of five services is extracted. Phase 20 is NOT complete and `phase-20-complete` is NOT tagged.**
-**Key code:** `common/.../jwt/` (JwtKeyConfig, JwtAuthorities, ServiceTokenProvider, ServiceTokens -
-validation is shared, ISSUING stays in the app); `inventory-service/` whole module;
-`ecomdemo-app/.../inventory/` (InventoryGateway, InventoryClient, InventoryClientConfig);
-`cache/StockChangedListenerConfig`; `order/internal/OrderPlacementService` (the saga).
-**Config & infrastructure:** `inventory-db` (5433) + `inventory-service` (8082), 384M limit each;
-`INVENTORY_BASE_URL`, `JWT_SECRET` shared by both services; `kafka-ui` behind `--profile tools`;
-Prometheus scrapes both as ONE job so `sum by (service)` works; Alloy ships both new containers.
-Dockerfile: `ARG MODULE` is NOT read by the build stage - that is what keeps one reactor build.
-`common` publishes a **test-jar** (ProjectRoot).
-**Tests:** InventorySecurityTest, InventoryApiValidationTest, SeededStockAgreesWithTheCatalogueTest,
-ServiceTokenProviderTest, StockChangedListenerConfigTest,
-LoggingStackConfigTest.alloyShipsEveryServiceThisRepositoryBuilds. All mutation-checked.
-**Gotchas:** four failures got past `clean verify` - no filter chain (everything 401 while HEALTHY),
-empty seed data (all stock zero, silently), a GLOBAL `spring.json.value.default.type` deserialising
-the stock event as an OrderPlacedEvent **with zero consumer lag**, and Alloy shipping no logs for
-the new containers. Cache eviction is now EVENTUALLY consistent (it crosses a broker); the smoke
-check polls and reports the convergence time. `@PreAuthorize("hasRole('ADMIN')")` inside a service
-called with a SERVICE token can only answer 403 - and was inert anyway without
-`@EnableMethodSecurity`.
-**Follow-ups (not done, out of scope):** extract catalog-service (takes `cache`), customer-service,
-notification-service; `order-service` is the residue. **Recommended one service per PR** - see
-`docs/test-reports/phase-20b.md` §8. Also open: a failed release call leaks a reservation, nothing
-reconciles it; HS256 shared secret; the Phase 19 dashboard defect.

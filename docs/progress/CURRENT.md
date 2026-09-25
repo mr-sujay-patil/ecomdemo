@@ -6,10 +6,10 @@
 - **Phase:** 20d: Microservices Split — extract `customer-service` and `notification-service` (the
   LAST PR of Phase 20)
 - **Branch:** feature/phase-20d-customer-service
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** raised, see below
+- **Waiting for user:** YES - review the PR
 
 ## Phase 20c merge verification (PASSED 2026-09-25 — NO TAG, by design)
 PR #28 merged as merge commit **34f17f0** (parents d120607 + c222420). Every checklist item passed:
@@ -42,47 +42,51 @@ the tests written for them now fail automatically for the next service. That is 
 - **"Everyone verifies, only callers sign"** is enforced by package placement: `com.ecomdemo.jwt` is
   scanned by every service, `com.ecomdemo.clients` only by services that call one.
 
-## Checklist for 20d — plan APPROVED 2026-09-25, implementing
-- [x] Plan approved (`docs/phases/phase-20d-plan.md`), with both open decisions settled:
-      **§2.1 identity comes from the TOKEN** — `CurrentUser` reads `uid`/`roles` from the claims
-      rather than loading a `User`, because otherwise every authenticated request becomes an HTTP
-      call to learn what the request already carried. Accepted cost: a cart holds a `userId` with no
-      foreign key, so a deleted account leaves orphaned carts.
-      **Tests MINT a token** rather than logging in, following `CatalogIntegrationTest` from 20c — a
-      service with no login endpoint should not have tests that log in.
-- [x] **`CurrentUser` reads the token instead of loading a User** — DONE (212ed66). Cart and order
-      hold a `userId`; V15 drops both foreign keys AND snapshots/backfills `orders.username`.
-      Verified against **686 real orders**: `./mvnw clean verify` 5 + 34 + 41 + 283 + 65, smoke
-      **273 passed / 0 failed**.
-      **The backfill was the part with a deadline and the plan had not spotted it.**
-      `Order.getUsername()` read through the association and that name shows in the API response and
-      the audit row. New orders can take it from a claim; existing ones have it nowhere, and after
-      the split NO query can fill it in. V15 is the last migration that can see both tables.
-- [ ] `customer-service`: `users` in `customer_db` at V1, register/profile, login, the JWT **encoder**
-- [ ] `notification-service`: `notification` + `processed_event` at V1, the consumer, the deduplicator
-- [ ] Compose, Alloy, Prometheus, the Dockerfile's COPY list (a test guards that one)
-- [ ] Fix the cold-start flake in the broker-timing smoke check (§5 of the plan)
-- [ ] Smoke test across five services; full protocol; `docs/test-reports/phase-20d.md`; docs; PR
-- [ ] **ONLY after that PR merges and verifies: tag `phase-20-complete`**
+## Checklist for 20d - ALL DONE
+- [x] Plan approved; identity from the TOKEN; tests MINT tokens
+- [x] **V15**: cart/orders hold a `userId`, both FKs dropped, and `orders.username` snapshotted +
+      backfilled across **686 real rows** - the migration with a deadline, which the plan missed
+- [x] **customer-service**: `users` in customer_db V1, seeded admin at **id 1**, login, the JWT encoder
+- [x] **notification-service**: `notification` + `processed_event` in notification_db V1, the consumer,
+      `EventDeduplicator` moved with the table it guards; its own OrderPlacedEvent and topic names
+- [x] **V16**: drops users/notification/processed_event; what remains is order-service's own, by name
+- [x] The app is a resource server + two proxies (`identity`, `catalog`). No PasswordEncoder anywhere
+- [x] Compose: 16 containers, Alloy + Prometheus cover all five, Dockerfile copies five module poms
+- [x] **❗ Failsafe bound in every service - four modules' ITs had never run.** See the finding below
+- [x] Cold-start flake fixed in the broker-timing check (warm up, and DRAIN before the outage)
+- [x] `./mvnw clean verify`: 10+34+41+12+43+8+8+3+228+53, BUILD SUCCESS, 4 modules running ITs
+- [x] `scripts/smoke-test.sh`: **274 passed / 0 failed**, twice, from cold. **1459 MiB of 3916**
+- [x] `docs/test-reports/phase-20d.md`, README, decisions, RECENT (20b archived), tracker
+- [ ] PR merged and verified - **and ONLY then: tag `phase-20-complete`**
+
+## ❗ THE FINDING THAT MATTERS MOST (read `docs/test-reports/phase-20d.md` §0)
+The parent declares Failsafe in `<pluginManagement>`, so a module opts in by naming it. `ecomdemo-app`
+did. The four extracted services did NOT - so their `*IT` tests had not run since Phase 20b, and
+`verify` printed BUILD SUCCESS the entire time, because an unbound plugin reports nothing at all: no
+"0 tests" line, no warning, no skip count.
+
+**This is a correction to the 20b and 20c test reports**, which described those tests as part of a
+passing suite. Binding them found five real defects within minutes. `EveryModuleWithIntegrationTests
+RunsThemTest` now fails the build if it recurs.
+
+**A green build only means the things that ran passed.**
 
 ## Next action
-Steps 1, 2, 3 and 5 are done, verified and pushed. **The UNIT suites are green; the INTEGRATION
-suites have not been run since the extraction** — that is the immediate next thing, because
-`IntegrationTest` now mints tokens instead of logging in and nothing has exercised that yet.
+**WAIT FOR THE USER.** The PR is open and Phase 20 is at its final stop point.
 
-Then, in order:
-1. `./mvnw clean verify` (the ITs) and fix what the minted-token change broke.
-2. **Step 4: `notification-service`** — `notification` + `processed_event` in `notification_db` at V1,
-   the Kafka consumer, and `EventDeduplicator` moving with the table it guards. `messaging` keeps the
-   outbox and stays in order-service. notification-service declares its OWN copy of
-   `OrderPlacedEvent`, as 20b's stock event did: a message contract is not a shared jar.
-3. **Step 6: compose** — two more databases and two more services, plus Alloy's keep rule, the
-   Prometheus targets, and the Dockerfile COPY list (a test guards that last one and has now caught
-   it twice).
-4. **Step 7** — fix the cold-start flake in the broker-timing smoke check, run the smoke suite across
-   five services, write `docs/test-reports/phase-20d.md`, update the README/decisions/RECENT/tracker,
-   raise the PR.
-5. **ONLY after that PR merges and verifies: tag `phase-20-complete`.**
+After `approved, merge it`: `gh pr merge <n> --merge` (never squash, never `--delete-branch`), then
+merge verification per `docs/process/execution-protocol.md` §5 - and **THIS TIME THE TAG IS CORRECT**:
+once verification passes, `git tag phase-20-complete` and push it. Phase 20 ends with the fifth
+service, and the fifth service is out.
+
+Then Phase 21 (API Gateway) is next, and it has two jobs waiting for it that this phase created: it
+replaces both hand-written proxies, and it removes the plaintext password from the application's
+memory on login.
+
+Also outstanding, oldest first: the Phase 19 dashboard defect (`fix/dashboard-stat-reducers`), a failed
+compensating release leaking a reservation, the CSV import's partial-failure window, the HS256 shared
+secret, and renaming `ecomdemo-app` to `order-service`.
+
 
 ## Known traps (do not rediscover)
 - **A test classpath richer than the runtime classpath.** `spring-boot-restclient` at TEST scope let

@@ -8,29 +8,42 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 20c: Microservices Split — the catalogue is out too.** Three services now.
-`catalog-service` owns the products and the Redis cache that serves them; `inventory-service` owns
-stock; `ecomdemo-app` is everything not yet extracted. Each has its own PostgreSQL database and its
-own Flyway history.
+**Phase 20: Microservices Split — complete. Five services.**
 
-Three things are worth knowing before reading further, because they are the split's real cost:
+| Service | Owns | Port |
+|---|---|---|
+| `ecomdemo-app` | carts, orders, the outbox, the batch jobs — and the public API | 8080 |
+| `catalog-service` | products, and the Redis cache that serves them | 8081 |
+| `inventory-service` | stock, and the only code that may change one | 8082 |
+| `customer-service` | accounts — the only place a password is checked or a token issued | 8083 |
+| `notification-service` | notifications. Nobody calls it; it reacts to a topic | 8085 |
 
-- **Checkout is a saga.** Reserving stock is an HTTP call, so it cannot share the order's
-  transaction. If the order rolls back after the reservation succeeded, a compensating *release*
-  puts the stock back — and that call can itself fail, leaving stock reserved for an order that
-  never existed. Logged, and not yet reconciled by anything.
-- **The catalogue's stock figure is eventually consistent.** A sale changes it in
-  inventory-service, which publishes an event; catalog-service evicts its cache when the event
-  arrives. **What cannot go wrong is the sale itself** — the reservation is synchronous and holds
-  the row lock, so a shopper is never sold stock that is not there. Stale display, correct sale.
-- **The CSV import is a distributed write.** It creates products in one service and sets stock in
-  another, with no shared transaction. A failure between the two leaves products with no stock. The
-  import is restartable and idempotent, so the repair is to run it again.
+A database each. Sixteen containers in total, idling at **1.46 GB**.
 
-`/api/products` has not moved: the application keeps the public endpoint and forwards to
-catalog-service, so nothing a shopper can see has changed. Two services remain inside
-`ecomdemo-app`. See [`docs/test-reports/phase-20c.md`](docs/test-reports/phase-20c.md) for what this
-extraction cost.
+Four things are worth knowing before reading further, because they are what the split actually cost:
+
+- **Checkout is a saga.** Reserving stock is an HTTP call, so it cannot share the order's transaction.
+  A rollback after a successful reservation triggers a compensating *release* — and that call can
+  itself fail, leaving stock reserved for an order that never existed. Logged, and not reconciled.
+- **The catalogue's stock figure is eventually consistent.** A sale changes it in inventory-service,
+  which publishes an event; catalog-service evicts its cache when it arrives. **The sale itself
+  cannot go wrong** — the reservation is synchronous and holds the row lock. Stale display, correct
+  sale.
+- **Nothing guarantees a cart belongs to a real account any more.** `cart.user_id` and
+  `orders.user_id` lost their foreign keys, because a key cannot span two databases. Deleting an
+  account leaves its cart behind.
+- **The CSV import is a distributed write** across two services with no shared transaction. It is
+  restartable and idempotent, so the repair is to run it again.
+
+Every service verifies tokens locally with a shared key; **only customer-service can issue one**. That
+asymmetry is the security model, and it is a convention rather than a constraint while the algorithm is
+HS256 — the honest fix is asymmetric keys and a JWKS endpoint, which is a phase of its own.
+
+`ecomdemo-app` is order-service in everything but its name. The rename touches every image tag,
+compose service and CI reference, so it is left as its own change.
+
+See [`docs/test-reports/phase-20d.md`](docs/test-reports/phase-20d.md) — **especially §0**, which
+records that four services' integration tests had never once run while the build reported success.
 
 <details>
 <summary>Phase 14: Batch Processing</summary>
@@ -169,6 +182,17 @@ ecomdemo/
 │       └── metrics/         # common meter tags, the checkout counters
 │   └── src/test/…/support/  # ProjectRoot, published as a TEST-JAR for every service to share
 │
+├── customer-service/        # A SEPARATE DEPLOYABLE (Phase 20d). Accounts, login, the JWT ENCODER.
+│   └── src/main/java/com/ecomdemo/
+│       ├── customer/        # User, CustomerService, the profile API, its own SecurityConfig
+│       ├── auth/            # POST /api/auth/login - the only issuer of a user token
+│       └── security/        # AppUserDetailsService, the AuthenticationManager, the encoder
+│
+├── notification-service/    # A SEPARATE DEPLOYABLE (Phase 20d). No business API at all.
+│   └── src/main/java/com/ecomdemo/notification/
+│       ├── internal/        # the Kafka consumer, EventDeduplicator, its own OrderPlacedEvent
+│       └── SecurityConfig   # denyAll on everything but the probes
+│
 ├── catalog-service/         # A SEPARATE DEPLOYABLE (Phase 20c). Products, and the cache.
 │   └── src/main/java/com/ecomdemo/
 │       ├── catalog/         # Product, ProductService, ProductController, its own SecurityConfig
@@ -185,9 +209,8 @@ ecomdemo/
 │
 └── ecomdemo-app/            # everything not yet extracted
     └── src/main/java/com/ecomdemo/
-        ├── security/        # the filter chain, the JWT ENCODER (issuing stays here), handlers
-        ├── auth/            # POST /api/auth/login
-        ├── customer/        # accounts, roles, profile, CurrentUser
+        ├── security/        # the filter chain ONLY - it can no longer check a password
+        ├── identity/        # the PUBLIC /api/auth and /api/customers, forwarding to customer-service
         ├── catalog/         # the PUBLIC /api/products, forwarding to catalog-service
         ├── inventory/       # the CLIENT: InventoryGateway + InventoryClient over RestClient
         ├── cart/            # one cart per account; lines snapshot the product
@@ -241,7 +264,7 @@ cp .env.example .env            # then put a real JWT_SECRET in it
 docker compose up --build       # add -d to detach
 ```
 
-That builds **three** images and starts twelve containers on a private network. Each service waits
+That builds **five** images and starts sixteen containers on a private network. Each service waits
 for its own PostgreSQL to be genuinely *ready*, not merely started, applies its own migrations, and
 comes up:
 
@@ -250,9 +273,13 @@ comes up:
 | `ecomdemo-app` | <http://localhost:8080> | everything not yet extracted, and the public API |
 | `ecomdemo-catalog-service` | <http://localhost:8081> | products, and the cache that serves them |
 | `ecomdemo-inventory-service` | <http://localhost:8082> | stock, and only stock |
+| `ecomdemo-customer-service` | <http://localhost:8083> | accounts, and the only issuer of tokens |
+| `ecomdemo-notification-service` | <http://localhost:8085> | notifications. No business API |
 | `ecomdemo-db` | 5432 | the application's database |
 | `ecomdemo-catalog-db` | 5434 | `catalog_db` |
 | `ecomdemo-inventory-db` | 5433 | `inventory_db` |
+| `ecomdemo-customer-db` | 5435 | `customer_db` |
+| `ecomdemo-notification-db` | 5436 | `notification_db` |
 
 Plus Redis, Kafka, Prometheus, Grafana, Loki and Alloy.
 
@@ -265,6 +292,8 @@ docker compose ps                       # every row should say (healthy)
 docker compose logs -f app              # follow the application log
 docker compose logs -f catalog-service
 docker compose logs -f inventory-service
+docker compose logs -f customer-service
+docker compose logs -f notification-service
 docker compose --profile tools up -d    # ...and Kafka UI on :8090, which costs 242 MiB
 docker compose down                     # stop and remove, KEEPING both databases
 docker compose down -v                  # ...and delete both volumes too
@@ -272,7 +301,7 @@ docker compose down -v                  # ...and delete both volumes too
 
 `docker compose down` is not destructive: the database lives in a named volume that outlives the
 containers, so `up` again finds the schema already migrated. Only `-v` throws it away — and note
-that there are now **three** volumes, one per database, which `down -v` removes together.
+that there are now **five** volumes, one per database, which `down -v` removes together.
 
 **`.env` is gitignored**; `.env.example` is the documented template. Every value has a working
 default, so an empty `.env` starts a usable stack — but set `JWT_SECRET` (at least 32 characters;
