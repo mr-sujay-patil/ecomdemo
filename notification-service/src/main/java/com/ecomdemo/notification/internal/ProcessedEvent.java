@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.notification.internal;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;

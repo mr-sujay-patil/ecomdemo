@@ -68,7 +68,21 @@ public class SecurityConfig {
                         // rather than a breach.
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
-                        .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter())))
+                        .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))
+                        // THE RESOURCE SERVER HAS AN ENTRY POINT OF ITS OWN, and it is the one used
+                        // when a token is PRESENT but bad - expired, tampered with, or not a JWT at
+                        // all. The `exceptionHandling` block below covers the other case, where there
+                        // is no token and the denial comes from the authorization rules.
+                        //
+                        // Both paths have to be wired, and it is easy to get half right: without this
+                        // line a tampered token comes back with an EMPTY body and a
+                        // `WWW-Authenticate: Bearer error="invalid_token"` header instead of the
+                        // ApiError shape every other failure uses. The application's chain carries a
+                        // comment saying exactly that, written in Phase 9 - and this service still
+                        // reproduced the bug, because a comment on one class does not configure
+                        // another. AuthApiIT caught it the first time it ran.
+                        .authenticationEntryPoint(entryPoint)
+                        .accessDeniedHandler(accessDenied))
                 // The same ApiError shape for 401 and 403 that every other service produces, from the
                 // handlers that moved into `common` with this split - so a client cannot tell which
                 // service refused it from the shape of the refusal.

@@ -199,6 +199,19 @@
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
 			</plugin>
+			<!--
+				Failsafe, which this module did NOT name until Phase 20d - and the omission meant its
+				*IT tests had never once been executed. The parent declares it in <pluginManagement>,
+				so a module opts in by naming it, exactly like Surefire. `mvn verify` reported BUILD
+				SUCCESS throughout, because a plugin that is not bound runs nothing and says nothing.
+				`DockerfileCoversEveryModuleTest`'s sibling, `EveryModuleWithIntegrationTestsRunsThem`,
+				now fails the build if this is ever left out again.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+			</plugin>
+
 		</plugins>
 	</build>
 </project>

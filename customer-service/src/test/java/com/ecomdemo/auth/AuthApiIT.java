@@ -16,6 +16,8 @@ import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -46,6 +48,9 @@ class AuthApiIT extends CustomerIntegrationTest {
 
     @Autowired
     private JwtEncoder jwtEncoder;
+
+    @Autowired
+    private JwtDecoder jwtDecoder;
 
     private TestRestTemplate shopper;
 
@@ -192,18 +197,30 @@ class AuthApiIT extends CustomerIntegrationTest {
     }
 
     @Test
-    @DisplayName("the roles in the token decide what it may do")
-    void aCustomerTokenCannotActAsAnAdmin() {
-        // Authorization is read from the token's claims, with no database lookup — so this is
-        // really a test that the roles claim reached the filter chain intact.
-        // Read as String: a 200 here carries a cart, not an ApiError, and asking the client to
-        // deserialise one as the other fails on the shape rather than on the status.
-        ResponseEntity<String> asShopper = shopper.getForEntity("/api/cart", String.class);
-        assertThat(asShopper.getStatusCode()).as("a CUSTOMER may use a cart").isEqualTo(HttpStatus.OK);
+    @DisplayName("the roles a login writes into the token are the roles it carries")
+    void theTokenCarriesTheAccountsRole() {
+        // WHAT THIS TEST USED TO DO, and why it could not stay: it called `/api/cart` with a customer's
+        // token expecting 200, and with an administrator's expecting 403. Neither endpoint is here.
+        // Phase 20d left customer-service with accounts and login; carts belong to the application.
+        //
+        // The claim splits cleanly along the same line. What THIS service is responsible for is putting
+        // the right roles into the token it issues - asserted below, by decoding one. What the roles
+        // then permit is the edge's business, and `ProductProxyAccessTest` in the application asserts
+        // that a CUSTOMER token is refused an ADMIN path with a 403 and the standard error body.
+        //
+        // Reading the claim back is a stronger test of this service than calling a cart ever was: the
+        // old version could fail because the cart broke, which said nothing about the token.
+        TokenResponse token = rest.postForObject(
+                "/api/auth/login", new LoginRequest(SHOPPER, IT_PASSWORD), TokenResponse.class);
+        assertThat(token).isNotNull();
 
-        ResponseEntity<ApiError> adminOnCart = asAdmin().getForEntity("/api/cart", ApiError.class);
-        assertThat(adminOnCart.getStatusCode()).as("an ADMIN has no cart").isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(adminOnCart.getBody()).isNotNull();
-        assertThat(adminOnCart.getBody().status()).isEqualTo(403);
+        Jwt decoded = jwtDecoder.decode(token.accessToken());
+        assertThat(decoded.getClaimAsStringList(TokenClaims.ROLES))
+                .as("a registered shopper gets CUSTOMER, and only CUSTOMER")
+                .containsExactly("CUSTOMER");
+        assertThat(decoded.getSubject()).isEqualTo(SHOPPER);
+
+        Jwt asAdmin = jwtDecoder.decode(login(ADMIN_USERNAME, ADMIN_PASSWORD));
+        assertThat(asAdmin.getClaimAsStringList(TokenClaims.ROLES)).containsExactly("ADMIN");
     }
 }

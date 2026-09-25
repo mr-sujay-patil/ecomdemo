@@ -1,7 +1,5 @@
-package com.ecomdemo.messaging;
+package com.ecomdemo.notification.internal;
 
-import com.ecomdemo.messaging.internal.ProcessedEventRepository;
-import com.ecomdemo.messaging.internal.ProcessedEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;

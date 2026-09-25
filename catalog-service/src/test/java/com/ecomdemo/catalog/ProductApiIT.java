@@ -39,12 +39,11 @@ class ProductApiIT extends CatalogIntegrationTest {
     private final List<Long> createdIds = new ArrayList<>();
 
     private TestRestTemplate admin;
-    private TestRestTemplate customer;
 
     @BeforeEach
     void signIn() {
+        // One caller: this service cannot distinguish an administrator from a shopper.
         admin = asService();
-        customer = asService();
     }
 
     @AfterEach
@@ -155,41 +154,28 @@ class ProductApiIT extends CatalogIntegrationTest {
     }
 
     @Test
-    @DisplayName("browsing the catalogue needs no account at all")
-    void readsArePublic() {
-        // `rest` is the unauthenticated template: no Authorization header is sent
-        assertThat(rest.getForEntity("/api/products", ProductResponse[].class).getStatusCode())
-                .isEqualTo(HttpStatus.OK);
+    @DisplayName("every path needs a token, including the reads")
+    void nothingIsPublicHere() {
+        // THESE TWO TESTS REPLACED "browsing needs no account" AND "writes require an admin", and the
+        // swap is the boundary in one method.
+        //
+        // The catalogue was the shop window: reads open to the world, writes ADMIN-only. Those rules
+        // still exist - they are just not THIS service's any more. It is internal now, its only caller
+        // is another service presenting a SERVICE token, and it cannot tell an administrator from a
+        // shopper. The shop-window rules live at the edge, on the application's own /api/products, and
+        // are asserted there in ProductProxyAccessTest.
+        //
+        // What is left to assert here is the rule this service actually has, which the old pair would
+        // have hidden: nothing is open, not even a GET.
+        assertThat(anonymous.getForEntity("/api/products", ApiError.class).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(anonymous.getForEntity("/api/products/1", ApiError.class).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
 
-        ProductResponse created = create("IT Public Item", "9.99", 1, "IT");
-        assertThat(rest.getForEntity("/api/products/" + created.id(), ProductResponse.class)
-                        .getStatusCode())
-                .isEqualTo(HttpStatus.OK);
-    }
-
-    @Test
-    @DisplayName("changing the catalogue anonymously is 401, and as a customer 403")
-    void writesRequireAnAdmin() {
         ProductRequest body =
                 new ProductRequest("IT Forbidden Item", "1.00", new BigDecimal("1.00"), 1, "IT");
-
-        // 401: the server does not know who this is. Sending credentials could change the answer.
-        ResponseEntity<ApiError> anonymous = rest.postForEntity("/api/products", body, ApiError.class);
-        assertThat(anonymous.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
-        assertThat(anonymous.getBody()).isNotNull();
-        assertThat(anonymous.getBody().status()).isEqualTo(401);
-
-        // 403: the server knows exactly who this is, and the answer is still no. Repeating the
-        // request with the same credentials will never help.
-        ResponseEntity<ApiError> asCustomer = customer.postForEntity("/api/products", body, ApiError.class);
-        assertThat(asCustomer.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
-        assertThat(asCustomer.getBody()).isNotNull();
-        assertThat(asCustomer.getBody().status()).isEqualTo(403);
-
-        // and nothing was created by either attempt
-        ResponseEntity<ProductResponse[]> all = rest.getForEntity("/api/products", ProductResponse[].class);
-        assertThat(all.getBody()).isNotNull();
-        assertThat(all.getBody()).extracting(ProductResponse::name).doesNotContain("IT Forbidden Item");
+        assertThat(anonymous.postForEntity("/api/products", body, ApiError.class).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
 }

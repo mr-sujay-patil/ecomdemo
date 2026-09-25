@@ -7,8 +7,8 @@
 		<artifactId>ecomdemo-parent</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>catalog-service</artifactId>
-	<name>catalog-service</name>
+	<artifactId>notification-service</artifactId>
+	<name>notification-service</name>
 	<description>How many of each product there are, and the only thing allowed to change it</description>
 
 	<!--
@@ -65,21 +65,6 @@
 			<artifactId>spring-boot-starter-kafka</artifactId>
 		</dependency>
 
-		<!--
-			Redis and the cache abstraction, because the `cache` module moves in with the
-			catalogue. 20a established why it could not live in `common`: it reads catalog's DTOs
-			and listens for inventory's stock event, so a shared library holding it would have to
-			depend on both. It is not a general facility - it exists to make THIS service's reads
-			fast, and it belongs to the service whose reads they are.
-		-->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-cache</artifactId>
-		</dependency>
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-redis</artifactId>
-		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
@@ -182,6 +167,19 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			A real BROKER in the integration tests, and for this service more than any other: its whole
+			job is consuming, and the claims worth making about a consumer - that a redelivery writes
+			nothing twice, that a poison message goes to the DLT instead of stopping the partition - are
+			behaviours of Kafka's delivery semantics and Spring Kafka's error handling. Neither can be
+			demonstrated against a stub.
+		-->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-kafka</artifactId>
 			<scope>test</scope>
 		</dependency>
 

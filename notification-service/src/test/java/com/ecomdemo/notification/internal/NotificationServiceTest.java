@@ -8,8 +8,6 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.ecomdemo.messaging.EventDeduplicator;
-import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.notification.Notification;
 import java.math.BigDecimal;
 import java.time.Instant;

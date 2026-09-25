@@ -1,5 +1,6 @@
-package com.ecomdemo.catalog;
+package com.ecomdemo;
 
+import com.ecomdemo.catalog.SecurityConfig;
 import com.ecomdemo.metrics.MetricsConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

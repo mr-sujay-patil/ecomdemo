@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.notification.internal;
 
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;

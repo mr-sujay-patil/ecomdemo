@@ -1,8 +1,6 @@
 package com.ecomdemo.notification.internal;
 
 import com.ecomdemo.notification.Notification;
-import com.ecomdemo.messaging.OrderPlacedEvent;
-import com.ecomdemo.messaging.EventDeduplicator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -28,7 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
  * insert violates the key and that transaction rolls back, leaving exactly one notification. The
  * check is the cheap path for the common case; the constraint is what makes it correct.
  *
- * <p>Since Phase 19 that mechanism lives behind {@code EventDeduplicator} in the messaging module,
+ * <p>Since Phase 19 that mechanism lives behind {@code EventDeduplicator}, which moved into THIS service
+ * in Phase 20d along with the {@code processed_event} table it guards — the two had sat in
+ * {@code messaging} next to the outbox, and that grouping was always slightly wrong: an outbox is about
+ * publishing durably, this is about consuming exactly once. {@code messaging} kept the outbox,
  * which is where it belongs: this class knows that an event may arrive twice and that it must act
  * once, and no longer knows which table records the fact or in what order the two writes happen.
  * The second consumer this application grows inherits the rule instead of copying it.

@@ -1,7 +1,5 @@
 package com.ecomdemo.notification.internal;
 
-import com.ecomdemo.messaging.KafkaTopics;
-import com.ecomdemo.messaging.OrderPlacedEvent;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,12 +105,12 @@ public class OrderPlacedListener {
             backOff = @BackOff(delay = 1000, multiplier = 2.0, jitter = 250),
             sameIntervalTopicReuseStrategy = SameIntervalTopicReuseStrategy.SINGLE_TOPIC,
             topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,
-            retryTopicSuffix = KafkaTopics.RETRY_SUFFIX,
-            dltTopicSuffix = KafkaTopics.DLT_SUFFIX,
+            retryTopicSuffix = Topics.RETRY_SUFFIX,
+            dltTopicSuffix = Topics.DLT_SUFFIX,
             kafkaTemplate = "kafkaTemplate")
     @KafkaListener(
-            topics = KafkaTopics.ORDERS_PLACED,
-            groupId = KafkaTopics.NOTIFICATION_GROUP)
+            topics = Topics.ORDERS_PLACED,
+            groupId = Topics.NOTIFICATION_GROUP)
     public void onOrderPlaced(
             OrderPlacedEvent event,
             @Header(KafkaHeaders.RECEIVED_TOPIC) String topic,

@@ -29,6 +29,11 @@ import java.util.stream.Collectors;
  * that can actually make it: a contract test against a stubbed HTTP server, and the smoke test
  * once Compose runs both. This class is honest about being a stand-in for the BEHAVIOUR and not
  * for the transport.
+ *
+ * <p><strong>It moved to {@code common}'s test-jar in Phase 20d</strong>, because catalog-service needs
+ * it too and for a reason that only showed up when its integration tests were first actually run: that
+ * service calls inventory-service on every product write and every product read. Without a fake, every
+ * create returned 500 from a connection refused - and the tests had never run, so nothing said so.
  */
 public class InMemoryInventory implements InventoryGateway {
 
