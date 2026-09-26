@@ -12,13 +12,13 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete on merge, PR #29)
+## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete, PRs #29-#32)
 **What exists now:** FIVE deployables, sixteen containers, five databases. `customer-service` owns
 `users` (customer_db, 8083/5435) and is the only issuer of user tokens; `notification-service` owns
 `notification` + `processed_event` (notification_db, 8085/5436) and has no business API at all;
 `catalog-service` and `inventory-service` as before; `ecomdemo-app` is order-service in all but name,
-keeping only cart/orders/outbox/batch plus two public proxies. Smoke **274 passed / 0 failed** twice
-from cold; **1459 MiB of 3916**.
+keeping only cart/orders/outbox/batch plus two public proxies. Smoke **275 passed / 0 failed** from a
+COLD stack on `main`; **1459 MiB of 3916**. Verified and tagged 2026-09-26 at `f819d3e`.
 **Key code:** `common/.../jwt/CurrentUser` (reads CLAIMS, no repository); `common/.../clients/customer/`;
 `ecomdemo-app/.../identity/` (the auth + customer proxies); `customer-service/` and
 `notification-service/` whole modules; V15 (snapshot + backfill username, drop the user FKs) and V16
