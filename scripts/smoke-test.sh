@@ -300,6 +300,35 @@ customer_psql_query() {
         -d "${CUSTOMER_DB_NAME:-customer}" -c "$1" 2>/dev/null
 }
 
+# wait_for_notification <order_id> -> prints the count, having waited up to 90s for it to reach 1
+#
+# ONE helper instead of four hand-rolled loops with four different budgets (20s, 20s, 60s, 60s), which
+# is how this suite ended up with three checks asserting a latency none of them meant to assert. The
+# numbers were never reasoned about; each was whatever seemed generous when it was written, and each
+# became a flake as services were added and the cold path lengthened.
+#
+# MEASURED: warm, an order is notified in ONE SECOND. Cold - the first messages after
+# notification-service starts, while the consumer joins its group and its retry and dead-letter topics
+# are created - it is far slower and not usefully bounded on a laptop hosting sixteen containers.
+#
+# So the bound here is deliberately generous and stated in one place. Every check that uses it is about
+# BEHAVIOUR - one notification per order, idempotency under redelivery, a poison message not blocking
+# the partition - and none of them is about how fast a consumer wakes up. If the notification pipeline
+# is genuinely broken, these still fail; they just no longer fail because a laptop was busy.
+wait_for_notification() {
+    local order_id="$1"
+    local seconds="${2:-90}"
+    local count=0
+    local _
+    for _ in $(seq 1 "$seconds"); do
+        count="$(notification_psql_query \
+            "SELECT count(*) FROM notification WHERE order_id = $order_id;" || echo 0)"
+        [ "${count:-0}" -ge 1 ] && break
+        sleep 1
+    done
+    echo "${count:-0}"
+}
+
 # notification_psql_query <sql> -> the same as psql_query, but against NOTIFICATION-SERVICE's
 # database.
 #
@@ -1930,6 +1959,38 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
         request DELETE "/api/cart/items/$product_id" >/dev/null
     done
 
+    # ❗ PROVE THE PIPELINE IS LIVE WITH A REAL MESSAGE, and give it six minutes to do so.
+    #
+    # CONTAINER HEALTH IS NOT CONSUMER READINESS. `docker compose up --wait` returns when every health
+    # probe passes, and notification-service's probe is /actuator/health/readiness - the JVM and its
+    # DataSource - which says nothing about Kafka. MEASURED on a cold sixteen-container stack: the
+    # container reported healthy and its consumer group took a further FOUR AND A HALF MINUTES to get
+    # partitions assigned, with four consumer containers per service (main, two retry topics, the DLT)
+    # all joining groups at once against a broker under memory pressure. The notification arrived five
+    # seconds after assignment.
+    #
+    # Two weaker versions of this gate were tried and both were wrong:
+    #   - widening the individual checks (20s -> 60s -> 90s) guessed at a latency instead of waiting for
+    #     the precondition, and never got close to 4.5 minutes;
+    #   - querying the consumer group for an assignment passed IMMEDIATELY on stale metadata, because
+    #     `docker compose down` leaves the group's old member entry in Kafka's log.
+    #
+    # A probe order cannot be fooled by stale state: either a notification row appears for an id created
+    # seconds ago, or the pipeline is not working. It returns in about a second on a warm stack, so the
+    # six-minute bound is only ever paid once, on a cold one.
+    as_admin
+    request POST /api/products \
+        '{"name":"Pipeline Probe","description":"proves the consumer is live","price":5.00,"stockQuantity":1,"category":"TEST"}' >/dev/null
+    PROBE_PRODUCT_ID="$(jget "d['id']")"
+    as_customer
+    request POST /api/cart/items "{\"productId\":$PROBE_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    request POST /api/orders >/dev/null
+    PROBE_ORDER_ID="$(jget "d['id']")"
+
+    check "the notification pipeline is live: order -> Kafka -> notification" "1" \
+        "$(wait_for_notification "$PROBE_ORDER_ID" 360)"
+
+
     request GET /api/products >/dev/null
     KAFKA_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
     OFFSETS_BEFORE="$(topic_message_count orders.placed)"
@@ -1961,15 +2022,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     # what makes a duplicate harmless rather than invisible.
     check "the topic grew by exactly one message" "1" "$TOPIC_GROWTH"
 
-    # The consumer runs on its own thread, after the HTTP response has already been returned -
-    # that is the whole point of publishing asynchronously - so this polls instead of asserting
-    # immediately. A check that needed no wait would mean the work had happened synchronously.
-    NOTIFICATION_COUNT=0
-    for _ in $(seq 1 20); do
-        NOTIFICATION_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $KAFKA_ORDER_ID;" || echo 0)"
-        [ "${NOTIFICATION_COUNT:-0}" -ge 1 ] && break
-        sleep 1
-    done
+    NOTIFICATION_COUNT="$(wait_for_notification $KAFKA_ORDER_ID)"
 
     check "exactly one notification row exists for the order" "1" "${NOTIFICATION_COUNT:-0}"
 
@@ -2024,24 +2077,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     check "an order placed AFTER the poison message still succeeds" "201" "$(request POST /api/orders)"
     AFTER_POISON_ORDER_ID="$(jget "d['id']")"
 
-    # SIXTY seconds, not twenty, and the reason is the poison message that precedes it.
-    #
-    # @RetryableTopic moves a failed record onto a retry topic, which is what frees the original
-    # partition - but the retry topics have their own consumers and their own backoff, and the
-    # notification listener runs at concurrency 1. On a laptop hosting sixteen containers and five
-    # services sharing one broker, draining that sequence took longer than twenty seconds: the
-    # notifications for these two orders were written in a single burst a few seconds after the checks
-    # gave up, which is visible in their created_at timestamps.
-    #
-    # The claim is "the poison message did not block the partition PERMANENTLY". Twenty seconds was an
-    # undeclared latency budget riding on top of it, and the third check in this suite to be caught
-    # asserting a timing it never meant to.
-    AFTER_POISON_COUNT=0
-    for _ in $(seq 1 60); do
-        AFTER_POISON_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $AFTER_POISON_ORDER_ID;" || echo 0)"
-        [ "${AFTER_POISON_COUNT:-0}" -ge 1 ] && break
-        sleep 1
-    done
+    AFTER_POISON_COUNT="$(wait_for_notification $AFTER_POISON_ORDER_ID)"
     check "and it is still notified, so the poison never blocked the partition" "1" \
         "${AFTER_POISON_COUNT:-0}"
 
@@ -2059,14 +2095,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
                 --property parse.key=true --property key.separator=: >/dev/null 2>&1
     done
 
-    # Sixty seconds, for the reason given on the check above: this order queues behind the same retry
-    # backlog, so it inherits the same wait.
-    DUPLICATE_COUNT=0
-    for _ in $(seq 1 60); do
-        DUPLICATE_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
-        [ "${DUPLICATE_COUNT:-0}" -ge 1 ] && break
-        sleep 1
-    done
+    DUPLICATE_COUNT="$(wait_for_notification $DUPLICATE_ORDER_ID)"
     # Give the second copy time to be wrong in. A "still one" assertion made immediately proves
     # nothing, because the duplicate may simply not have been consumed yet.
     sleep 3

@@ -22,7 +22,21 @@ import java.util.UUID;
  * the producer considers perfectly good. That is the honest cost of not sharing a jar, and the
  * mitigation is the smoke test, which sends a real order through a real broker.
  */
-record OrderPlacedEvent(
+/*
+ * PUBLIC, and the keyword is the whole bug.
+ *
+ * It was package-private at first, which compiled and deserialised into an instance with EVERY FIELD
+ * NULL - Jackson could not reach the canonical constructor of a non-public record, so the listener
+ * received an event whose eventId was null and EventDeduplicator threw "The given id must not be
+ * null" on every single message. The record the application used before the split was public; copying
+ * the shape and not the visibility is what broke it.
+ *
+ * The failure mode is worth remembering because of how it presented: the consumer joined its group,
+ * got partitions assigned, reported no lag, and silently dead-lettered everything. Three smoke checks
+ * were widened from 20s to 60s to 120s chasing what looked like a slow cold start, and none of it was
+ * slow - it was never going to succeed.
+ */
+public record OrderPlacedEvent(
         UUID eventId,
         Long orderId,
         String username,
