@@ -46,30 +46,48 @@ limiter; CORS; a correlation ID filter; a Spring Cloud release train matching Bo
    edge removes the app from that path entirely. This is the one security-relevant win of the phase.
 
 ## Next action
-Implementation is DONE and committed; `./mvnw clean verify` is the gate in progress. Then: bring the
-stack up (`docker compose up --build --wait`), run `scripts/smoke-test.sh` COLD, measure memory with
-six services, write `docs/test-reports/phase-21.md`, and raise the PR.
+**Everything is implemented and committed; `./mvnw clean verify` PASSES on the branch. What remains is
+the cold smoke run, which was interrupted by the HOST RUNNING OUT OF MEMORY, not by a defect.**
 
-### Done so far (commits on `feature/phase-21-gateway`)
-- `248f456` tracker + checkpoint · `1a2226e` the plan · `824532a` checkpoint
-- `13d6bcb` the gateway module, compose, Dockerfile, Prometheus, Alloy
-- `ea00358` 4 unit + 15 integration tests, every one mutation-checked
-- `7844f6e` the three proxies deleted, 12 test files migrated to `CatalogGateway`
-- `04f1f56` the smoke suite: BASE_URL is the gateway, APP_URL is white-box
+Resume with, in order:
+1. `docker compose --profile tools down --remove-orphans` — free the 17 containers first.
+2. `docker compose build gateway-service` — the image still has the pre-`ServiceIdentityFilter` jar.
+   Build it ALONE; `docker compose up --build -d gateway-service` also rebuilds `app` and BuildKit
+   died with "frontend grpc server closed unexpectedly" while both ran.
+3. `docker compose up --wait` then `./scripts/smoke-test.sh`.
+4. Measure memory with six services (`docker stats --no-stream`), write
+   `docs/test-reports/phase-21.md`, raise the PR.
 
-### Settled by measurement, not assumption (2026-09-26)
-- **No GA Spring Cloud train exists for Boot 4.1.x.** 2025.1.3 is GA but baselined on Boot **4.0.8**;
-  2026.0.0-M1 (Boot 4.2.0-M2) is a milestone, and the conventions require GA.
-- **Chosen: 2025.1.3 + Boot 4.1.1**, probed in a throwaway project: one Framework version (7.0.9), one
-  Boot version (4.1.1), **zero** 4.0.8 anywhere, and it started and really proxied (`Server:
-  cloudflare` from the upstream; the gateway's own 404 on an unrouted path).
-- **The gateway takes 8080; `ecomdemo-app` moves to 8084.** The smoke test uses exactly one `BASE_URL`
-  and makes **zero** direct calls to 8081–8085, so ~200 existing checks start flowing through the
-  gateway unchanged. The ~25 white-box `/actuator/**` checks need a new `APP_URL` helper — to be
-  edited deliberately, NOT by bulk regex.
-- **A correlation ID already exists** (`common/.../logging/CorrelationId`, `X-Correlation-Id`, MDC
-  `correlation_id`) as a **servlet** filter, which does nothing in a reactive gateway. The phase needs
-  a WebFlux filter reusing the SAME constants, not a second spelling.
+⚠️ **Do not run a Docker build while the full stack is up on this machine.** Six JVMs plus a reactor
+build inside BuildKit exceeded the host's memory: three background commands were killed and one
+BuildKit frontend crashed. Bring the stack down, build, then bring it up.
+
+### Verified so far
+- `./mvnw clean verify`, full reactor: **10 + 34 + 41+12 + 43+8 + 8+3 + 7+15 + 218+53**, BUILD SUCCESS.
+- 17 containers healthy, gateway on **8080**, app moved to **8084** (container port still 8080).
+- Cold smoke run reached its FIRST check and failed there — `GET /api/products -> 401`. That defect is
+  FIXED (`2f532f8`) but the fix is not yet in the running image. See step 2.
+
+### Findings this phase (for the test report)
+1. **No GA Spring Cloud train for Boot 4.1.x.** Chose 2025.1.3 (GA, Boot 4.0.8 baseline) after probing:
+   one Framework version, one Boot version, zero 4.0.8, and it really proxied.
+2. **Optional dependencies broke four services.** `OpenApiConfig` is a component-scanned
+   `@Configuration` whose bean method returns springdoc's type; an absent annotation is ignored, an
+   absent method-signature type is not. Reverted to per-declaration exclusions in gateway-service.
+3. **Exclusions are per DECLARATION.** The `test-jar` declaration of the same artifact inherited none,
+   so Tomcat arrived at test scope, Boot built a SERVLET context, and `@EnableWebFluxSecurity` clashed
+   over `conversionServicePostProcessor`. It passed standalone (stale `common` in `~/.m2`) and failed
+   in the reactor — only `./mvnw clean verify` told the truth.
+4. **`@AutoConfigureWebTestClient` is for MOCK slices** — on RANDOM_PORT it force-imports the servlet
+   security auto-configuration. `WebTestClient` is now bound to the port by hand.
+5. **Deleting the proxies removed the SERVICE TOKEN nobody was thinking about.** catalog-service and
+   inventory-service require an authenticated caller; the proxy signed for them. No IT could catch it,
+   because by design no upstream runs in them — only a cold stack could.
+6. **`.env.example` pinned `APP_PORT=8080`**, overriding compose's default: the gateway died with
+   "port is already allocated". `.env` (gitignored) needed the same one-line change — done locally.
+7. **A correlation id still cannot be followed across the hop.** Only `ecomdemo-app` configures
+   structured logging, so the other five write the id to the MDC and never to the line. Documented in
+   the smoke script where the check would have gone. Follow-up, not this phase.
 
 ## ⚠️ Carried, not fixed (oldest first)
 - **Phase 19 dashboard defect** — two `EcomDemo Overview` stat panels reduce an instantaneous rate with
