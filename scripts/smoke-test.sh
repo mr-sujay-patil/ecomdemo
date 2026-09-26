@@ -679,13 +679,29 @@ check "removing a product that is not in the cart returns 404" "404" "$STATUS"
 # --------------------------------------------------------------------------------------------
 section "API documentation"
 
-STATUS="$(request GET /v3/api-docs)"
+# ON APP_URL, NOT THROUGH THE GATEWAY, and the failure that forced this is worth keeping.
+#
+# The first run after Phase 21 failed all fourteen checks here with 404. `/v3/api-docs` and
+# `/swagger-ui/**` are served by springdoc inside the APPLICATION; the gateway has no springdoc (it is
+# excluded deliberately - there is nothing there to document) and no route for those paths. So the
+# section was asking the wrong server, and getting an honest answer.
+#
+# ⚠️ This section now describes ONE service's document. That is the uncomfortable part of the phase:
+# nothing describes the whole API any more. See the note on the path list below.
+STATUS="$(app_request GET /v3/api-docs)"
 check "GET /v3/api-docs returns 200" "200" "$STATUS"
 check "the spec is titled EcomDemo API" "EcomDemo API" "$(jget "d['info']['title']")"
 
-# Every path the API serves must appear in the spec. Listed explicitly rather than derived from
-# the spec itself, so that an endpoint springdoc fails to pick up is caught instead of ignored.
-API_PATHS="/api/products /api/products/{id} /api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id}"
+# Every path THIS APPLICATION serves must appear in its spec. Listed explicitly rather than derived
+# from the spec itself, so that an endpoint springdoc fails to pick up is caught instead of ignored.
+#
+# /api/products and /api/products/{id} LEFT this list in Phase 21, and their absence is not a
+# documentation bug in this service - the application no longer serves them. It is a gap in the system,
+# though: catalog-service does not declare springdoc, so the catalogue is now documented NOWHERE. A
+# gateway can aggregate its services' specifications, which is the real fix and its own piece of work.
+# OpenApiDocumentationTest asserts the same absence in a unit test, so the day somebody closes the gap,
+# both it and this list fail and say what to update.
+API_PATHS="/api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id}"
 for path in $API_PATHS; do
     check "the spec documents $path" "True" "$(jget "'$path' in d['paths']")"
 done
@@ -698,16 +714,16 @@ check "every error response uses the ApiError schema" "True" \
     "$(jget "all(r['content']['application/json']['schema'][chr(36) + 'ref'].endswith('/ApiError') for ops in d['paths'].values() for op in ops.values() for c, r in op['responses'].items() if c >= '400')")"
 
 # curl does not follow redirects here, so a 302 to /swagger-ui/index.html is the raw status.
-STATUS="$(request GET /swagger-ui.html)"
+STATUS="$(app_request GET /swagger-ui.html)"
 case "$STATUS" in
     200 | 30*) pass "GET /swagger-ui.html returns 200 or a redirect (got $STATUS)" ;;
     *) fail "GET /swagger-ui.html returns 200 or a redirect" "200 or 3xx" "$STATUS" ;;
 esac
 
-STATUS="$(request GET /swagger-ui/index.html)"
+STATUS="$(app_request GET /swagger-ui/index.html)"
 check "the Swagger UI page itself returns 200" "200" "$STATUS"
 
-STATUS="$(request GET /swagger-ui/swagger-ui-bundle.js)"
+STATUS="$(app_request GET /swagger-ui/swagger-ui-bundle.js)"
 check "the Swagger UI javascript bundle is served" "200" "$STATUS"
 
 # --------------------------------------------------------------------------------------------
@@ -2533,23 +2549,48 @@ check "and it keeps one the caller supplied, rather than minting a second" "$SUP
 # the failure surfaced in an unrelated test class and took a while to understand. $OTHER_USER exists
 # for ownership checks and nothing after this point needs it.
 BURST_TOKEN="$OTHER_TOKEN"
-BURST_429=0
-BURST_OK=0
-for _ in $(seq 1 250); do
-    code="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/products" \
-        -H "Authorization: Bearer $BURST_TOKEN")"
-    if [ "$code" = "429" ]; then
-        BURST_429=$((BURST_429 + 1))
-    elif [ "$code" = "200" ]; then
-        BURST_OK=$((BURST_OK + 1))
-    fi
-done
-check "a burst of 250 requests from one caller is rate limited" "True" \
-    "$(python3 -c "import sys; print(int(sys.argv[1]) > 0)" "$BURST_429")"
-check "but the first requests were served - it throttles, it does not ban" "True" \
-    "$(python3 -c "import sys; print(int(sys.argv[1]) > 50)" "$BURST_OK")"
 
-# And the limit LIFTS. A limiter that refused everything until a restart would satisfy the check
+# ONE curl PROCESS, MANY REQUESTS, IN PARALLEL - and getting here took two wrong versions.
+#
+# Version one sent 250 requests in a sequential shell loop and NOTHING was refused. The limiter was
+# working perfectly: spawning a `curl` costs tens of milliseconds, so the loop managed 20-30 requests a
+# second, comfortably below the 50 a second the bucket refills at. Tokens were replenished as fast as
+# they were spent.
+#
+# Version two used `xargs -P 20`, and still nothing was refused - measured at almost exactly 50 requests
+# a second, because 20 workers each paying the process-spawn cost happens to land on the refill rate.
+# The limiter was not the slow part; the client was.
+#
+# What works is one curl process reusing one connection across 300 requests, 40 in flight at a time:
+# roughly 150 requests a second, which genuinely outruns the refill. Measured live: 171 served, 129
+# refused, in 2.1 seconds.
+#
+# The lesson is the one Phase 20d kept re-learning from the other direction: when a check about
+# behaviour quietly becomes a check about throughput, it stops testing what it names. gateway-service's
+# RateLimitIT tripped the limit with a plain sequential loop only because WebTestClient runs in-process
+# and is an order of magnitude faster than spawning curl.
+BURST_ARGS=""
+for _ in $(seq 1 300); do
+    BURST_ARGS="$BURST_ARGS -o /dev/null $BASE_URL/api/products"
+done
+BURST_RESULTS="$(mktemp)"
+# Unquoted on purpose: $BURST_ARGS must word-split into curl's argument list.
+# shellcheck disable=SC2086
+curl -sS -w '%{http_code}\n' --parallel --parallel-max 40 \
+    -H "Authorization: Bearer $BURST_TOKEN" $BURST_ARGS > "$BURST_RESULTS" 2>/dev/null
+BURST_429="$(grep -c '^429$' "$BURST_RESULTS" 2>/dev/null || true)"
+BURST_OK="$(grep -c '^200$' "$BURST_RESULTS" 2>/dev/null || true)"
+BURST_429="${BURST_429:-0}"
+BURST_OK="${BURST_OK:-0}"
+rm -f "$BURST_RESULTS"
+
+check "a concurrent burst of 300 requests from one caller is rate limited" "True" \
+    "$(python3 -c "import sys; print(int(sys.argv[1]) > 0)" "$BURST_429")"
+# Not a ban: the bucket's capacity is served before anything is refused. "More than 50 served" rather
+# than "exactly 100" on purpose - the bucket refills DURING the burst, so the number served depends on
+# how long the burst took, and pinning it would be a performance assertion wearing a correctness name.
+check "but plenty were served first - it throttles, it does not ban" "True" \
+    "$(python3 -c "import sys; print(int(sys.argv[1]) > 50)" "$BURST_OK")"
 # above and be useless. 50 tokens a second replenish, so a short wait is enough - polled rather
 # than slept, because a fixed sleep is a performance assertion in disguise.
 RECOVERED=no
