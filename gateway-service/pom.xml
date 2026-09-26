@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.ecomdemo</groupId>
+		<artifactId>ecomdemo-parent</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+	<artifactId>gateway-service</artifactId>
+	<name>gateway-service</name>
+	<description>The single door clients knock on: routing, edge authentication, and rate limits</description>
+
+	<!--
+		THE ONLY REACTIVE MODULE IN THE REACTOR, and that is not a style preference.
+
+		Spring Cloud Gateway's server is built on Netty and WebFlux because a gateway holds a great
+		many mostly-idle connections at once - it spends its life waiting for someone else's
+		response, which is the one workload where a thread per request is the wrong shape. The
+		Redis rate limiter is a reactive filter for the same reason, and has no servlet equivalent.
+
+		The consequence to remember: `ecomdemo-common` is shared, but its FILTERS and its security
+		configuration are servlet code and do nothing here. This module scans only its own package
+		(see GatewayApplication) and rebuilds those few pieces against the reactive API, reusing
+		the SHARED CONSTANTS so that one contract does not acquire a second spelling at the edge.
+	-->
+
+	<dependencyManagement>
+		<dependencies>
+			<!--
+				Declared here and not in the parent, deliberately: the parent has no
+				dependencyManagement block at all today, and one module needing a BOM is not a
+				reason for all six to consult it. Phase 22 may well move it up.
+			-->
+			<dependency>
+				<groupId>org.springframework.cloud</groupId>
+				<artifactId>spring-cloud-dependencies</artifactId>
+				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
+	<dependencies>
+		<!--
+			The shared CONTRACTS - ApiError's shape, the correlation ID's spelling, the claim names,
+			the JWT properties. Since Phase 21 this arrives WITHOUT a servlet stack, because
+			`common` marks the webmvc starter optional; see the comment there for why that had to
+			change before this module could exist.
+		-->
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-common</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
+		</dependency>
+
+		<!--
+			The rate limiter's store. REACTIVE Redis, and a different logical database from the
+			catalogue cache - see application.yml.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+		</dependency>
+
+		<!--
+			Validates tokens at the EDGE. Every service still validates the token it receives, so
+			this is defence in depth rather than a transfer of responsibility: a misconfigured route
+			must not be able to make a service unsafe.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-registry-prometheus</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-common</artifactId>
+			<version>${project.version}</version>
+			<type>test-jar</type>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
+			A real Redis for the rate limiter's integration test. The limiter is a Lua script
+			executed inside Redis; a mocked store would prove that the filter was wired and
+			nothing about whether a burst is actually refused.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!--
+			Testcontainers CORE only. `common`'s test-jar already declares the one Redis container
+			this project uses (RedisContainerConfig, a GenericContainer with a @ServiceConnection
+			name) - there is no Testcontainers module for Redis because an image and a port is all it
+			needs. Reusing that class rather than starting a second Redis keeps the shared context
+			cache key intact, which is the Phase 7 lesson.
+		-->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+			</plugin>
+			<!--
+				NAMED, not assumed. The parent declares Failsafe in <pluginManagement>, so a module
+				that does not name it runs no *IT tests and says nothing about it - which is exactly
+				how four services' integration tests went unexecuted for two phases. See
+				docs/test-reports/phase-20d.md section 0, and EveryModuleWithIntegrationTestsRunsThemTest,
+				which now fails the build over this omission.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+</project>

@@ -171,7 +171,17 @@ services:
       # runtime user - which is what makes the volume inherit that ownership instead of root's.
       - batch-data:/var/lib/ecomdemo/batch
     ports:
-      - "${APP_PORT:-8080}:8080"
+      # 8084 ON THE HOST SINCE PHASE 21, and 8080 inside the container still.
+      #
+      # The gateway now owns host port 8080, because that is the port every client and every smoke
+      # check has used since Phase 1 - moving the GATEWAY to a new port instead would have left ~200
+      # checks talking to the application directly and proving nothing about routing.
+      #
+      # Only the mapping changed. In-network the application is still `app:8080`, so Prometheus's
+      # scrape target, Alloy's log discovery and the gateway's own route needed no edit at all. What
+      # 8084 is for is the WHITE-BOX checks - /actuator/health, /actuator/prometheus, heapdump -
+      # which are about this service and must not be answered by the gateway.
+      - "${APP_PORT:-8084}:8080"
     # A limit matters here even locally, because it is what MaxRAMPercentage is a percentage OF.
     # Without one the JVM sizes its heap against the whole host, and the "75% of the container"
     # setting in the Dockerfile silently means "75% of your laptop".
@@ -481,6 +491,74 @@ services:
           # table and one topic; it does not need what a monolith needed.
           memory: ${INVENTORY_MEMORY_LIMIT:-384M}
     restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # gateway-service (Phase 21) - the single door, and the only port a client needs
+  # -------------------------------------------------------------------------------------------
+  # It publishes 8080, which the application used to. Everything a client does now arrives here:
+  # routing, token validation at the edge, a Redis-backed rate limit and the correlation ID that
+  # every service downstream logs under.
+  #
+  # The one REACTIVE container in the stack. Netty rather than Tomcat, because a gateway's work is
+  # holding many mostly-idle connections while somebody else answers - and because the Redis rate
+  # limiter has no servlet equivalent.
+  gateway-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: gateway-service
+    image: ecomdemo-gateway:latest
+    container_name: ecomdemo-gateway-service
+    depends_on:
+      cache:
+        # The rate limiter's store. The limiter fails OPEN if Redis is unreachable - a gateway that
+        # refused every request because its counter was down would be a worse outage than the one it
+        # is protecting against - so this is about a clean start rather than correctness.
+        condition: service_healthy
+      # Every route's target. `service_healthy` on all four means the first request after
+      # `docker compose up --wait` meets a service that can answer, instead of the 503 a route to a
+      # starting container produces.
+      app:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      customer-service:
+        condition: service_healthy
+      inventory-service:
+        condition: service_healthy
+    environment:
+      # The route targets, by compose service name on the internal network. The application is
+      # still `app:8080` in here - only its HOST mapping moved to 8084.
+      APP_BASE_URL: http://app:8080
+      CATALOG_BASE_URL: http://catalog-service:8081
+      CUSTOMER_BASE_URL: http://customer-service:8083
+      INVENTORY_BASE_URL: http://inventory-service:8082
+
+      SPRING_DATA_REDIS_HOST: cache
+      SPRING_DATA_REDIS_PORT: 6379
+
+      # The same secret as everyone else: the edge VALIDATES tokens, and customer-service remains
+      # the only service that issues them.
+      JWT_SECRET: ${JWT_SECRET:-}
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          # 320M, the cap the two smallest services get. A gateway holds no database connections and
+          # no JPA metamodel; it is routing tables and buffers. To be MEASURED at the end of the
+          # phase rather than asserted here - 20a's projection of 296 MiB per service overshot the
+          # real 72-187 MiB by more than double, and the error flattered the guess.
+          memory: ${GATEWAY_MEMORY_LIMIT:-320M}
+    restart: unless-stopped
+
 
   # -------------------------------------------------------------------------------------------
   # Prometheus (Phase 15) - scrapes the application and stores the numbers

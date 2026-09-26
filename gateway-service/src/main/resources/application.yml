@@ -1,0 +1,119 @@
+# THE ONLY YAML CONFIGURATION IN THE PROJECT, and the reason is the routes.
+#
+# Every other module uses .properties, and consistency is worth something. But a route is a nested
+# object with a list of predicates and a list of filters, and in properties that becomes
+# `spring.cloud.gateway.server.webflux.routes[0].predicates[0]=...` repeated forty times, where a
+# mistyped index silently creates a route nobody asked for. This file is read far more often than it
+# is written; readability wins.
+#
+# The property NAMESPACE is worth noting too: `spring.cloud.gateway.server.webflux.*`, not the
+# `spring.cloud.gateway.*` of older guides. Gateway 5.x nests configuration under the server flavour
+# because a webmvc server now exists alongside the reactive one. These names were read out of the
+# jar's own spring-configuration-metadata.json rather than recalled.
+
+spring:
+  application:
+    name: gateway-service
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      # DATABASE 1, and this is not fussiness. The catalogue cache owns database 0 of this same
+      # Redis, and the smoke test runs `redis-cli FLUSHDB` against it to prove cache eviction. A
+      # rate-limiter bucket sharing that keyspace would be erased halfway through a burst test, and
+      # the check that failed would be the rate limiter's - pointing at the wrong code entirely.
+      database: 1
+
+  cloud:
+    gateway:
+      server:
+        webflux:
+          # Applied to EVERY route. A rate limit that protects four routes and not the fifth is a
+          # rate limit with a hole in it, and the hole is whichever route was added most recently.
+          default-filters:
+            - name: RequestRateLimiter
+              args:
+                key-resolver: "#{@rateLimitKeyResolver}"
+                # 50 a second sustained, 100 in a burst. Chosen against the smoke suite, which makes
+                # a few hundred sequential requests as a handful of users and must never trip this:
+                # its fastest stretch is well under 10 a second, so there is an order of magnitude of
+                # headroom. The burst check therefore has to send traffic no normal client would.
+                redis-rate-limiter.replenishRate: 50
+                redis-rate-limiter.burstCapacity: 100
+                redis-rate-limiter.requestedTokens: 1
+
+          routes:
+            # catalog-service. The GET half is anonymous and the write half is ADMIN - enforced in
+            # GatewaySecurityConfig, not here: a predicate decides WHERE a request goes, never
+            # whether it is allowed.
+            - id: catalog
+              uri: ${CATALOG_BASE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/products/**
+
+            # customer-service, which owns accounts and is the only issuer of tokens. Routing login
+            # here is THE security win of this phase: until now /api/auth/login was proxied by the
+            # application, which meant a plaintext password passed through the memory of a service
+            # that has no business seeing one.
+            - id: customer
+              uri: ${CUSTOMER_BASE_URL:http://localhost:8083}
+              predicates:
+                - Path=/api/auth/**,/api/customers/**
+
+            # inventory-service. Reachable only in-network until this phase; ADMIN-only now that it
+            # is not.
+            - id: inventory
+              uri: ${INVENTORY_BASE_URL:http://localhost:8082}
+              predicates:
+                - Path=/api/inventory/**
+
+            # The application - cart, orders, batch imports, reports. Last, and deliberately the
+            # BROADEST predicate: a route list is evaluated in order, so a catch-all placed earlier
+            # would swallow the three above it.
+            #
+            # notification-service has no route, and that is not an omission. It has no business API
+            # at all - it consumes Kafka and writes its own table. Inventing a path to satisfy
+            # "routes to all services" would be fiction, and a route to nothing is worse than no
+            # route because it returns 503 instead of 404.
+            - id: app
+              uri: ${APP_BASE_URL:http://localhost:8084}
+              predicates:
+                - Path=/api/**
+
+          globalcors:
+            cors-configurations:
+              "[/**]":
+                # A browser application does not exist yet, so this is the honest minimum: the
+                # methods and headers this API actually uses, and an origin list that has to be set
+                # deliberately. `allowed-origins: "*"` with credentials is the mistake this avoids -
+                # the browser rejects that combination anyway, which is a confusing way to learn it.
+                allowedOrigins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+                allowedMethods: [GET, POST, PUT, DELETE, OPTIONS]
+                allowedHeaders: ["Authorization", "Content-Type", "X-Correlation-Id"]
+                exposedHeaders: ["X-Correlation-Id"]
+                allowCredentials: false
+                maxAge: 3600
+
+server:
+  port: ${GATEWAY_PORT:8080}
+
+ecomdemo:
+  jwt:
+    # Validates at the edge; issues nothing. customer-service remains the only issuer.
+    secret: ${JWT_SECRET:}
+    issuer: ecomdemo
+  metrics:
+    # Read by MetricsConfig in `common`, imported explicitly by GatewayApplication. Without it this
+    # service's http_server_requests meters would merge with another's under an untagged name.
+    application: gateway-service
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true

@@ -69,6 +69,17 @@ scrape_configs:
         labels:
           service: notification-service
 
+      # gateway-service, added in Phase 21. Scraped on 8080 IN-NETWORK, which is also the port it
+      # publishes - unlike the application, whose host mapping moved to 8084 while its container port
+      # stayed 8080, so the target above needed no edit.
+      #
+      # This is the one target whose metrics describe traffic rather than a service's own work: every
+      # client request now passes through here, so `http_server_requests` on this target is the
+      # system's front door and the others are what happened behind it.
+      - targets: ["gateway-service:8080"]
+        labels:
+          service: gateway-service
+
   # --- Prometheus itself ----------------------------------------------------------------------
   # A monitoring system that does not monitor itself cannot tell you that it stopped working.
   # This is one line and it is the difference between "no alerts, everything is fine" and "no
