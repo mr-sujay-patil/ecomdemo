@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-26
 - **Phase:** 21: API Gateway (Spring Cloud Gateway)
 - **Branch:** feature/phase-21-gateway
-- **Step:** BRANCHED
+- **Step:** PLANNING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES — approve `docs/phases/phase-21-plan.md`
 
 ## Phase 20 merge verification (PASSED 2026-09-26) — `phase-20-complete` IS TAGGED
 Four PRs: #29 `e34330d`, #30 `380ad6f`, #31 `a588d4b`, #32 `f819d3e`. All MERGED, no open PRs, the
@@ -46,9 +46,24 @@ limiter; CORS; a correlation ID filter; a Spring Cloud release train matching Bo
    edge removes the app from that path entirely. This is the one security-relevant win of the phase.
 
 ## Next action
-PLANNING. First: establish which Spring Cloud release train is GA for Boot 4.1.1 — check Maven Central,
-do not guess a version. Then write `docs/phases/phase-21-plan.md` and get the user's approval before
-implementing, following the 20c/20d rhythm.
+`docs/phases/phase-21-plan.md` is written and committed (1a2226e). **Waiting for the user's approval**,
+per the 20c/20d rhythm. On approval, implement in this order: module + compose + the port move, then
+routes, then JWT at the edge with `ApiError` parity, then the rate limiter, then CORS and the reactive
+correlation filter, then delete the two proxies, then extend the three guard tests.
+
+### Settled by measurement, not assumption (2026-09-26)
+- **No GA Spring Cloud train exists for Boot 4.1.x.** 2025.1.3 is GA but baselined on Boot **4.0.8**;
+  2026.0.0-M1 (Boot 4.2.0-M2) is a milestone, and the conventions require GA.
+- **Chosen: 2025.1.3 + Boot 4.1.1**, probed in a throwaway project: one Framework version (7.0.9), one
+  Boot version (4.1.1), **zero** 4.0.8 anywhere, and it started and really proxied (`Server:
+  cloudflare` from the upstream; the gateway's own 404 on an unrouted path).
+- **The gateway takes 8080; `ecomdemo-app` moves to 8084.** The smoke test uses exactly one `BASE_URL`
+  and makes **zero** direct calls to 8081–8085, so ~200 existing checks start flowing through the
+  gateway unchanged. The ~25 white-box `/actuator/**` checks need a new `APP_URL` helper — to be
+  edited deliberately, NOT by bulk regex.
+- **A correlation ID already exists** (`common/.../logging/CorrelationId`, `X-Correlation-Id`, MDC
+  `correlation_id`) as a **servlet** filter, which does nothing in a reactive gateway. The phase needs
+  a WebFlux filter reusing the SAME constants, not a second spelling.
 
 ## ⚠️ Carried, not fixed (oldest first)
 - **Phase 19 dashboard defect** — two `EcomDemo Overview` stat panels reduce an instantaneous rate with
