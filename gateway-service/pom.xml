@@ -111,6 +111,19 @@
 		</dependency>
 
 		<!--
+			WebTestClient, the reactive counterpart of the webmvc-test starter every other module
+			declares. `spring-boot-starter-test` alone does NOT auto-configure it, and the failure is
+			a NoSuchBeanDefinitionException at injection time rather than anything that names the
+			missing starter - the same shape of omission as the RestClient.Builder that kept
+			catalog-service's container from starting in Phase 20c.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webflux-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+
+		<!--
 			A real Redis for the rate limiter's integration test. The limiter is a Lua script
 			executed inside Redis; a mocked store would prove that the filter was wired and
 			nothing about whether a burst is actually refused.
