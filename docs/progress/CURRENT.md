@@ -8,7 +8,7 @@
 - **Branch:** feature/phase-20d-customer-service
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #29 MERGED (e34330d) · #30 MERGED (380ad6f) · follow-up **#31 OPEN** — https://github.com/mr-sujay-patil/ecomdemo/pull/31
+- **PR:** #29, #30, #31 MERGED · follow-up **#32 OPEN** — https://github.com/mr-sujay-patil/ecomdemo/pull/32
 - **Waiting for user:** YES - review the PR
 
 ## Phase 20c merge verification (PASSED 2026-09-25 — NO TAG, by design)
@@ -70,7 +70,31 @@ the tests written for them now fail automatically for the next service. That is 
       created_at timestamps show it. `@RetryableTopic` frees the original partition but the retry
       topics have their own consumers and backoff, and five services now share one broker. Widened to
       60s; raised as **PR #31**.
-- [ ] PR #31 merged and verified - **and ONLY then: tag `phase-20-complete`**
+- [x] PR #31 merged as **a588d4b**; structural checks passed, CI success, `verify` on `main` BUILD
+      SUCCESS with a clean tree.
+- [ ] ⚠️ **Smoke on `main` found TWO REAL DEFECTS** (not timing) once run against a COLD stack - see
+      the section below. Fixed and raised as **PR #32**. Smoke now **275 passed** cold AND warm.
+- [ ] PR #32 merged and verified - **and ONLY then: tag `phase-20-complete`**
+
+## ❗ TWO DEFECTS A WARM STACK HID (Phase 20d, found during merge verification)
+**1. The consumer's event record was PACKAGE-PRIVATE.** Jackson cannot reach the canonical constructor
+of a non-public record, so every message deserialised with EVERY FIELD NULL and `EventDeduplicator`
+threw "The given id must not be null" - 70 errors in one run. The pre-split record was public; its
+shape was copied and its visibility was not. **It presented as health:** the consumer joined its group,
+got partitions assigned, reported NO LAG, and silently dead-lettered everything.
+
+**2. `docker compose up --wait` does not mean the consumer is ready.** notification-service's readiness
+probe is the JVM and its DataSource; it says nothing about Kafka. MEASURED cold: healthy container,
+then **four and a half minutes** before partitions were assigned (four consumer containers per service
+all joining at once against a memory-pressured broker). The notification landed five seconds later.
+
+Three weaker fixes were tried and are recorded at the call site so nobody repeats them: widening
+individual checks (20s->60s->90s) guessed at a latency instead of waiting for a precondition; a warm-up
+that ASSERTED on its own result became the only check failing cold; and querying the consumer group for
+an assignment passed instantly on STALE metadata, because `down` leaves the old member entry in Kafka's
+log. What works is a probe order whose notification proves the pipeline live (bounded at six minutes,
+paid only cold - the warm suite runs in 91s) plus one `wait_for_notification` helper replacing four
+hand-rolled loops.
 
 ## ⚠️ A PATTERN WORTH NAMING: three checks asserting a timing they never meant to
 The outbox relay's retry window (15s -> 40s), the race check's stock figure (instant -> converges), and
