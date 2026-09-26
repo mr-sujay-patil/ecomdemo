@@ -52,7 +52,7 @@ class ActuatorApiIT extends IntegrationTest {
 
     @AfterEach
     void cleanUp() {
-        createdProductIds.forEach(id -> admin.delete("/api/products/" + id));
+        createdProductIds.forEach(catalogue::delete);
         createdProductIds.clear();
     }
 
@@ -257,18 +257,26 @@ class ActuatorApiIT extends IntegrationTest {
         assertThat(scrape()).doesNotContain("uri=\"/actuator");
     }
 
+    /**
+     * The cardinality claim, now made against an endpoint this application still owns.
+     *
+     * <p>It used to fetch {@code /api/products/{id}} — the proxy the gateway replaced in Phase 21 — so
+     * it now uses {@code /api/orders/{id}}, which is genuinely the application's. The order does not
+     * exist, and that is fine: the claim is about the TAG Micrometer records, not about the outcome of
+     * the request. A 404 is timed and tagged exactly like a 200.
+     */
     @Test
     void httpRequestsAreTimedByUriTemplate_notByRealPath() {
-        long productId = createProduct("IT template widget", new BigDecimal("3.00"), 3);
+        long unknownOrderId = 99_999_999L;
 
-        shopper.getForEntity("/api/products/" + productId, ProductSnapshot.class);
+        shopper.getForEntity("/api/orders/" + unknownOrderId, String.class);
 
-        // The id is NOT in the series. Were it interpolated, every product ever fetched would be
+        // The id is NOT in the series. Were it interpolated, every order ever fetched would be
         // its own time series — the textbook way to take a monitoring system down with the
         // cardinality of the thing it is monitoring.
         String scrape = scrape();
-        assertThat(scrape).contains("uri=\"/api/products/{id}\"");
-        assertThat(scrape).doesNotContain("uri=\"/api/products/" + productId + "\"");
+        assertThat(scrape).contains("uri=\"/api/orders/{id}\"");
+        assertThat(scrape).doesNotContain("uri=\"/api/orders/" + unknownOrderId + "\"");
     }
 
     // -------------------------------------------------------------------------------------
@@ -314,12 +322,13 @@ class ActuatorApiIT extends IntegrationTest {
         return total;
     }
 
+    /**
+     * Through the catalogue gateway: the application's {@code /api/products} proxy was replaced by
+     * Phase 21's gateway, and this is how the application's own code reaches the catalogue.
+     */
     private long createProduct(String name, BigDecimal price, int stock) {
-        ProductSnapshot created = admin.postForEntity(
-                        "/api/products",
-                        new ProductWrite(name, "created by ActuatorApiIT", price, stock, "TEST"),
-                        ProductSnapshot.class)
-                .getBody();
+        ProductSnapshot created = catalogue.create(
+                new ProductWrite(name, "created by ActuatorApiIT", price, stock, "TEST"));
         createdProductIds.add(created.id());
         return created.id();
     }

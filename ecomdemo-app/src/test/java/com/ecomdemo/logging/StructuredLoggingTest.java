@@ -152,7 +152,7 @@ class StructuredLoggingTest {
                     encode(
                             "com.ecomdemo.logging.RequestLogFilter",
                             Level.INFO,
-                            "GET /api/products -> 200 in 4ms",
+                            "GET /api/orders -> 200 in 4ms",
                             Map.of(CorrelationId.MDC_KEY, "abc123def456"));
             String alloy = Files.readString(ALLOY_CONFIG);
 

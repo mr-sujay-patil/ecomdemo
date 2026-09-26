@@ -33,10 +33,18 @@ class CorrelationIdApiIT extends IntegrationTest {
         return rest.exchange(path, HttpMethod.GET, new HttpEntity<>(headers), String.class);
     }
 
+    /**
+     * An ANONYMOUS, successful request — and since Phase 21 that is no longer an API path.
+     *
+     * <p>This used to be {@code GET /api/products}, which the application served as a proxy to
+     * catalog-service. The gateway owns that path now, so the application's only anonymous 200 is
+     * Actuator's. The claim is unchanged and still worth making: a response to a caller who presented
+     * no credentials still carries an ID, because those are the requests somebody investigates.
+     */
     @Test
-    @DisplayName("every response carries one, including a public GET")
-    void publicEndpointsCarryTheHeader() {
-        ResponseEntity<String> response = get("/api/products", null);
+    @DisplayName("every response carries one, including an anonymous GET")
+    void anonymousResponsesCarryTheHeader() {
+        ResponseEntity<String> response = get("/actuator/health", null);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getHeaders().getFirst(CorrelationId.HEADER))
@@ -72,7 +80,12 @@ class CorrelationIdApiIT extends IntegrationTest {
     @Test
     @DisplayName("a 404 carries one, which is the response most often being investigated")
     void notFoundCarriesTheHeader() {
-        ResponseEntity<String> response = get("/api/products/99999999", null);
+        // An order this shopper does not have, rather than a product: `/api/orders` is the
+        // application's own, and a 404 needs a path it actually serves.
+        ResponseEntity<String> response =
+                asCustomer("it-correlation-shopper")
+                        .exchange("/api/orders/99999999", HttpMethod.GET,
+                                new HttpEntity<>(new HttpHeaders()), String.class);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(response.getHeaders().getFirst(CorrelationId.HEADER)).isNotNull();
@@ -81,7 +94,7 @@ class CorrelationIdApiIT extends IntegrationTest {
     @Test
     @DisplayName("the caller's own ID is echoed back unchanged")
     void echoesTheCallersId() {
-        ResponseEntity<String> response = get("/api/products", "customer-support-ticket-8814");
+        ResponseEntity<String> response = get("/actuator/health", "customer-support-ticket-8814");
 
         assertThat(response.getHeaders().getFirst(CorrelationId.HEADER))
                 .isEqualTo("customer-support-ticket-8814");
@@ -92,7 +105,7 @@ class CorrelationIdApiIT extends IntegrationTest {
     void replacesAnUnsafeId() {
         String unsafe = "../../etc/passwd";
 
-        ResponseEntity<String> response = get("/api/products", unsafe);
+        ResponseEntity<String> response = get("/actuator/health", unsafe);
 
         // Not a 400: the ID exists for our diagnostics, and failing a client's request over it
         // would make a logging feature into an availability problem.
@@ -105,8 +118,8 @@ class CorrelationIdApiIT extends IntegrationTest {
     @Test
     @DisplayName("two requests get two IDs")
     void eachRequestGetsItsOwnId() {
-        String first = get("/api/products", null).getHeaders().getFirst(CorrelationId.HEADER);
-        String second = get("/api/products", null).getHeaders().getFirst(CorrelationId.HEADER);
+        String first = get("/actuator/health", null).getHeaders().getFirst(CorrelationId.HEADER);
+        String second = get("/actuator/health", null).getHeaders().getFirst(CorrelationId.HEADER);
 
         assertThat(first).isNotEqualTo(second);
     }

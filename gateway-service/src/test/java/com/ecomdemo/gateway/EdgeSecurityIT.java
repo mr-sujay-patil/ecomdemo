@@ -95,6 +95,36 @@ class EdgeSecurityIT extends GatewayTest {
                 .expectStatus().is5xxServerError();
     }
 
+    /**
+     * The two claims that came here from {@code ProductProxyAccessTest} when the application's
+     * {@code /api/products} proxy was deleted.
+     *
+     * <p>That class proved the catalogue's access rules at the application's edge, which was the only
+     * edge there was. Both claims are the same; the owner changed. They are asserted here BEFORE the
+     * old class was removed, so the coverage was never absent even momentarily.
+     */
+    @Test
+    @DisplayName("writing the catalogue anonymously is 401, and never reaches catalog-service")
+    void writingTheCatalogueAnonymouslyIsRefused() {
+        web.post().uri("/api/products")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"name\":\"Lamp\",\"price\":9.99}")
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectBody()
+                .jsonPath("$.status").isEqualTo(HttpStatus.UNAUTHORIZED.value())
+                .jsonPath("$.message").isEqualTo(AuthMessages.NO_TOKEN);
+    }
+
+    @Test
+    @DisplayName("but a customer may still browse - opening writes to ADMIN closed nothing else")
+    void aCustomerMayStillBrowseTheCatalogue() {
+        web.get().uri("/api/products")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithRoles("shopper", "CUSTOMER"))
+                .exchange()
+                .expectStatus().is5xxServerError();
+    }
+
     @Test
     @DisplayName("login is reachable without a token, or nobody could ever get one")
     void loginIsAnonymous() {

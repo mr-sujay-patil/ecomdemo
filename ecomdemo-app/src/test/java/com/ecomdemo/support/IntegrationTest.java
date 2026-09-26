@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import com.ecomdemo.clients.catalog.CatalogGateway;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -80,6 +81,25 @@ import org.springframework.test.context.ActiveProfiles;
         InMemoryInventoryConfig.class, InMemoryCatalogConfig.class})
 @ActiveProfiles("it")
 public abstract class IntegrationTest {
+
+    /**
+     * The catalogue, reached the way production reaches it.
+     *
+     * <p>Until Phase 21 these tests created their fixtures by POSTing to {@code /api/products} — the
+     * application's own proxy to catalog-service. The gateway replaced that proxy, so the endpoint is
+     * gone and the tests now call the gateway interface directly, which is what {@code CartService} and
+     * the batch jobs have always done.
+     *
+     * <p>This is a better test than the one it replaces, not merely an equivalent one. A fixture
+     * created over HTTP was exercising the proxy on its way in, so a proxy defect could mask or
+     * manufacture a cart failure. The dependency under test is now the one the code actually has.
+     *
+     * <p>In this context the implementation is {@code InMemoryCatalog}, a fake rather than a mock —
+     * see its own note on why. It is autowired as the interface so a test cannot accidentally depend
+     * on the fake's extra methods.
+     */
+    @org.springframework.beans.factory.annotation.Autowired
+    protected CatalogGateway catalogue;
 
     /**
      * The seeded administrator from migration V5. This password is a documented throwaway

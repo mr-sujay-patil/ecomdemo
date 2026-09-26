@@ -83,10 +83,24 @@ class RequestLogFilterTest {
         assertThat(events().get(0).getFormattedMessage()).contains("401");
     }
 
+    /**
+     * The path here is {@code /api/orders} and used to be {@code /api/auth/login}, which this
+     * application no longer serves — Phase 21 routes login at the gateway, precisely so that a
+     * plaintext password stops passing through this service's memory.
+     *
+     * <p>The claim is unchanged, because this filter never depended on the path: it logs no body and no
+     * {@code Authorization} header for ANY request, which is why a login body was only ever the most
+     * vivid example. It is still the most vivid example, so the body below is left as it was.
+     *
+     * <p><strong>What this test can no longer cover:</strong> the login request itself. It is handled by
+     * the gateway, which has no {@code RequestLogFilter} — that class is servlet code. Spring Cloud
+     * Gateway logs no request bodies by default, so nothing leaks today, but the protection at the edge
+     * is an absence rather than a decision. Recorded as a follow-up.
+     */
     @Test
     @DisplayName("never logs the Authorization header or the request body")
     void logsNoCredentials() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/auth/login");
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/orders");
         request.addHeader("Authorization", "Bearer eyJhbGciOiJIUzI1NiJ9.super-secret-token");
         request.addHeader("Cookie", "session=another-secret");
         request.setContent("{\"username\":\"alice\",\"password\":\"hunter2\"}".getBytes());
@@ -106,7 +120,7 @@ class RequestLogFilterTest {
     @Test
     @DisplayName("never logs the query string, where API keys end up")
     void logsNoQueryString() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/products");
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/orders");
         request.setQueryString("api_key=leaked-in-a-url&page=2");
         MockHttpServletResponse response = new MockHttpServletResponse();
         response.setStatus(200);

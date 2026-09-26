@@ -75,7 +75,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
     @AfterEach
     void cleanUp() {
         emptyTheCart();
-        createdProductIds.forEach(id -> admin.delete("/api/products/" + id));
+        createdProductIds.forEach(catalogue::delete);
         createdProductIds.clear();
     }
 
@@ -86,14 +86,16 @@ class OutboxRelayKafkaIT extends IntegrationTest {
         }
     }
 
+    /**
+     * Created through the catalogue gateway, not over HTTP: the application's {@code /api/products}
+     * proxy was replaced by Phase 21's gateway, and this is the path production code uses.
+     */
     private ProductSnapshot createProduct(String name, int stock) {
         ProductSnapshot created =
-                admin.postForObject(
-                        "/api/products",
+                catalogue.create(
                         new ProductWrite(
                                 name, name + " description", new BigDecimal("199.00"), stock,
-                                "OUTBOX"),
-                        ProductSnapshot.class);
+                                "OUTBOX"));
         assertThat(created).isNotNull();
         createdProductIds.add(created.id());
         return created;

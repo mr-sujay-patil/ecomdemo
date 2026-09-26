@@ -3,7 +3,6 @@ package com.ecomdemo.security;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -115,17 +114,19 @@ public class SecurityConfig {
                         // Registration must be reachable by someone who has no account yet:
                         // requiring authentication to create an account is a closed loop. The
                         // same is true of logging in — you cannot present a token to get a token.
-                        // Still open, and still here even though neither is SERVED here any more:
-                        // both forward to customer-service. The rule is about what a caller may
-                        // reach, not about which process answers - and a person with no account
-                        // cannot authenticate as one, while login exists to hand out the token.
-                        .requestMatchers(HttpMethod.POST, "/api/customers/register").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
-
-                        // The catalogue is the shop window. Browsing needs no account; changing
-                        // the catalogue is the shopkeeper's job. Order matters here — see above.
-                        .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**").permitAll()
-                        .requestMatchers("/api/products/**").hasRole("ADMIN")
+                        // FIVE RULES WERE DELETED HERE IN PHASE 21, and deleting them was the
+                        // point rather than a tidy-up.
+                        //
+                        // They were `permitAll` on /api/customers/register and /api/auth/login, and
+                        // the anonymous-read / ADMIN-write pair on /api/products. All five described
+                        // paths this application served only as a hand-written proxy, and the gateway
+                        // serves them now. Leaving a `permitAll` behind for a path that no longer
+                        // exists is worse than untidy: the next person reading this chain would
+                        // believe this service still has an anonymous surface, and `anyRequest()
+                        // .authenticated()` below now genuinely covers everything.
+                        //
+                        // The rules themselves live in gateway-service's GatewaySecurityConfig, and
+                        // EdgeSecurityIT asserts them. A rule that moved is not a rule that went.
 
                         // Batch jobs are operations, not shopping. The whole prefix is ADMIN
                         // in one rule rather than per endpoint, so an endpoint added to

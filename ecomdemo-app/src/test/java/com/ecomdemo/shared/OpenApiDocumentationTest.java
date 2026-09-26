@@ -33,18 +33,25 @@ import tools.jackson.databind.ObjectMapper;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class OpenApiDocumentationTest {
 
-    /** Every path the API serves. Written out so a path that drops out of the spec is noticed. */
+    /**
+     * Every path THIS APPLICATION serves. Written out so a path that drops out of the spec is noticed.
+     *
+     * <p><strong>Five paths left this list in Phase 21</strong>, and that is the phase working rather
+     * than a regression: {@code /api/products}, {@code /api/products/{id}}, {@code /api/auth/login},
+     * {@code /api/customers/register} and {@code /api/customers/me} were hand-written proxies to
+     * catalog-service and customer-service, kept only so that the split stayed invisible to clients.
+     * The gateway routes them now, so those services document their own.
+     *
+     * <p>A client sees no difference — same URLs, same bodies, on the same port 8080. What changed is
+     * that the application no longer claims to own them, and this document is the place that claim was
+     * written down.
+     */
     private static final List<String> API_PATHS = List.of(
-            "/api/products",
-            "/api/products/{id}",
             "/api/cart",
             "/api/cart/items",
             "/api/cart/items/{productId}",
             "/api/orders",
             "/api/orders/{id}",
-            "/api/customers/register",
-            "/api/customers/me",
-            "/api/auth/login",
             "/api/admin/batch/product-import",
             "/api/admin/batch/executions/{id}",
             "/api/admin/batch/executions/{id}/restart");
@@ -141,8 +148,9 @@ class OpenApiDocumentationTest {
     @Test
     void apiDocs_everyRequestSchemaProperty_carriesAnExample() {
         // Given: the schemas a client has to fill in by hand
-        List<String> requestSchemas =
-                List.of("ProductWrite", "AddCartItemRequest", "UpdateCartItemRequest");
+        // ProductWrite left this list in Phase 21 along with the proxy that exposed it. See the
+        // note on the test below for where the catalogue's schema now is - and is not.
+        List<String> requestSchemas = List.of("AddCartItemRequest", "UpdateCartItemRequest");
 
         // When / Then
         requestSchemas.forEach(name -> schema(name).path("properties").properties()
@@ -151,20 +159,29 @@ class OpenApiDocumentationTest {
                         .isTrue()));
     }
 
+    /**
+     * ⚠️ THE CATALOGUE'S SCHEMA IS NOW DOCUMENTED NOWHERE, and this test is the evidence.
+     *
+     * <p>It used to assert that {@code ProductWrite} carried its validation constraints into the
+     * document. That schema appeared in THIS application's spec only because the application proxied
+     * {@code /api/products}; the gateway routes it now, and {@code ProductWrite} is gone from here.
+     *
+     * <p>It has not reappeared elsewhere. Of the six modules only {@code ecomdemo-app} declares
+     * springdoc, so catalog-service publishes no OpenAPI document of its own and there is no document
+     * that describes the catalogue any more. A gateway can aggregate its services' specifications into
+     * one, which is the real fix and a piece of work in its own right.
+     *
+     * <p>So this asserts what is TRUE rather than what we would like: the schema is absent. A test that
+     * silently dropped the claim would leave the gap invisible; one that fails would block the phase
+     * over documentation. This one fails the day somebody adds it back, which is when this comment
+     * needs deleting.
+     */
     @Test
-    void apiDocs_theProductRequestSchema_repeatsTheValidationConstraints() {
-        // Given / When: springdoc reads the Bean Validation annotations already on the record,
-        // which is why @Schema does not restate them
-        JsonNode productRequest = schema("ProductWrite");
-
-        // Then
-        assertThat(productRequest.path("required").values())
-                .extracting(node -> node.asString(""))
-                .containsExactlyInAnyOrder("name", "price", "stockQuantity");
-        assertThat(productRequest.path("properties").path("name").path("maxLength").asInt(0))
-                .isEqualTo(255);
-        assertThat(productRequest.path("properties").path("price").path("minimum").asDouble(0))
-                .isEqualTo(0.01);
+    void apiDocs_theCatalogueSchemaIsNoLongerThisApplicationsToDocument() {
+        assertThat(schema("ProductWrite").isMissingNode())
+                .as("ProductWrite belongs to catalog-service since Phase 21 - if this fails, the "
+                        + "catalogue is documented again and the follow-up is resolved")
+                .isTrue();
     }
 
     private JsonNode schema(String name) {
@@ -204,22 +221,19 @@ class OpenApiDocumentationTest {
 
     @Test
     void apiDocs_marksTheProtectedOperationsAndLeavesThePublicOnesOpen() {
-        // The document doubles as a readable statement of what needs an account, so the two
-        // genuinely public operations must NOT carry a security requirement...
-        assertThat(requiresAuth("/api/products", "get")).as("browsing is public").isFalse();
-        assertThat(requiresAuth("/api/customers/register", "post"))
-                .as("registering cannot require an account")
-                .isFalse();
-        assertThat(requiresAuth("/api/auth/login", "post"))
-                .as("you cannot present a token in order to get a token")
-                .isFalse();
-
-        // ...and everything else must.
-        assertThat(requiresAuth("/api/products", "post")).as("creating a product").isTrue();
-        assertThat(requiresAuth("/api/products/{id}", "delete")).as("deleting a product").isTrue();
+        // EVERY remaining operation requires an account, and that is itself the Phase 21 change:
+        // the three genuinely public ones - browsing, registering and logging in - were the proxied
+        // paths, and they are the gateway's now. What is left in this application is a shopper's cart,
+        // their orders and an administrator's batch jobs, none of which a stranger may touch.
+        //
+        // The public/private distinction did not disappear with them; it moved. EdgeSecurityIT in
+        // gateway-service asserts that anonymous browsing is permitted and an anonymous write is not.
         assertThat(requiresAuth("/api/cart", "get")).as("viewing the cart").isTrue();
         assertThat(requiresAuth("/api/orders", "post")).as("checking out").isTrue();
-        assertThat(requiresAuth("/api/customers/me", "get")).as("your own profile").isTrue();
+        assertThat(requiresAuth("/api/orders/{id}", "get")).as("reading one order").isTrue();
+        assertThat(requiresAuth("/api/admin/batch/product-import", "post"))
+                .as("an administrator's import")
+                .isTrue();
     }
 
     private boolean requiresAuth(String path, String method) {
