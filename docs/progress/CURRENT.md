@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-26
 - **Phase:** 21: API Gateway (Spring Cloud Gateway)
 - **Branch:** feature/phase-21-gateway
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO — plan approved, implementing
+- **Waiting for user:** YES — review the PR
 
 ## Phase 20 merge verification (PASSED 2026-09-26) — `phase-20-complete` IS TAGGED
 Four PRs: #29 `e34330d`, #30 `380ad6f`, #31 `a588d4b`, #32 `f819d3e`. All MERGED, no open PRs, the
@@ -46,48 +46,37 @@ limiter; CORS; a correlation ID filter; a Spring Cloud release train matching Bo
    edge removes the app from that path entirely. This is the one security-relevant win of the phase.
 
 ## Next action
-**Everything is implemented and committed; `./mvnw clean verify` PASSES on the branch. What remains is
-the cold smoke run, which was interrupted by the HOST RUNNING OUT OF MEMORY, not by a defect.**
+**Phase 21 is complete and verified. PR raised; waiting for review.**
+On `approved, merge it`: `gh pr merge <n> --merge`, then merge verification per
+`docs/process/execution-protocol.md` §5 with the compose stack **down** before `./mvnw clean verify`,
+then `git tag phase-21-complete && git push origin phase-21-complete`.
 
-Resume with, in order:
-1. `docker compose --profile tools down --remove-orphans` — free the 17 containers first.
-2. `docker compose build gateway-service` — the image still has the pre-`ServiceIdentityFilter` jar.
-   Build it ALONE; `docker compose up --build -d gateway-service` also rebuilds `app` and BuildKit
-   died with "frontend grpc server closed unexpectedly" while both ran.
-3. `docker compose up --wait` then `./scripts/smoke-test.sh`.
-4. Measure memory with six services (`docker stats --no-stream`), write
-   `docs/test-reports/phase-21.md`, raise the PR.
+### Verified
+- `./mvnw clean verify`, full reactor: **10 + 34 + 41+12 + 43+8 + 8+3 + 7+15 + 218+53**, BUILD SUCCESS
+  in 3:25.
+- `scripts/smoke-test.sh` → **295 passed, 0 failed, 0 skipped** against 17 live containers.
+- Memory **1387 MiB of 3916 with SIX services** — less than the 1459 five services cost.
+- Full write-up: `docs/test-reports/phase-21.md`.
 
-⚠️ **Do not run a Docker build while the full stack is up on this machine.** Six JVMs plus a reactor
-build inside BuildKit exceeded the host's memory: three background commands were killed and one
-BuildKit frontend crashed. Bring the stack down, build, then bring it up.
+### The five defects only running found (detail in the report)
+1. **Optional deps broke four services** — `OpenApiConfig` is a scanned `@Configuration` whose bean
+   method returns springdoc's type; a missing annotation is ignored, a missing signature type is not.
+2. **Exclusions are per DECLARATION** — the `test-jar` declaration inherited none, so Tomcat arrived at
+   test scope, Boot built a SERVLET context, and `@EnableWebFluxSecurity` clashed. Passed standalone
+   (stale `common` in `~/.m2`), failed in the reactor.
+3. **`@AutoConfigureWebTestClient` is for MOCK slices** — bound `WebTestClient` to the port by hand.
+4. **Deleting the proxies removed a SERVICE TOKEN** — `GET /api/products` returned 401 from
+   catalog-service for a path the gateway had permitted. No IT could catch it (they run no upstream).
+   `ServiceIdentityFilter`, ordered AFTER security, restores it.
+5. **The rate-limit check was testing its own client** — sequential curl runs below the refill rate, and
+   `xargs -P 20` landed on exactly 50/s. One curl, one connection, 300 requests, 40 in flight: 171
+   served / 129 refused in 2.1s.
 
-### Verified so far
-- `./mvnw clean verify`, full reactor: **10 + 34 + 41+12 + 43+8 + 8+3 + 7+15 + 218+53**, BUILD SUCCESS.
-- 17 containers healthy, gateway on **8080**, app moved to **8084** (container port still 8080).
-- Cold smoke run reached its FIRST check and failed there — `GET /api/products -> 401`. That defect is
-  FIXED (`2f532f8`) but the fix is not yet in the running image. See step 2.
-
-### Findings this phase (for the test report)
-1. **No GA Spring Cloud train for Boot 4.1.x.** Chose 2025.1.3 (GA, Boot 4.0.8 baseline) after probing:
-   one Framework version, one Boot version, zero 4.0.8, and it really proxied.
-2. **Optional dependencies broke four services.** `OpenApiConfig` is a component-scanned
-   `@Configuration` whose bean method returns springdoc's type; an absent annotation is ignored, an
-   absent method-signature type is not. Reverted to per-declaration exclusions in gateway-service.
-3. **Exclusions are per DECLARATION.** The `test-jar` declaration of the same artifact inherited none,
-   so Tomcat arrived at test scope, Boot built a SERVLET context, and `@EnableWebFluxSecurity` clashed
-   over `conversionServicePostProcessor`. It passed standalone (stale `common` in `~/.m2`) and failed
-   in the reactor — only `./mvnw clean verify` told the truth.
-4. **`@AutoConfigureWebTestClient` is for MOCK slices** — on RANDOM_PORT it force-imports the servlet
-   security auto-configuration. `WebTestClient` is now bound to the port by hand.
-5. **Deleting the proxies removed the SERVICE TOKEN nobody was thinking about.** catalog-service and
-   inventory-service require an authenticated caller; the proxy signed for them. No IT could catch it,
-   because by design no upstream runs in them — only a cold stack could.
-6. **`.env.example` pinned `APP_PORT=8080`**, overriding compose's default: the gateway died with
-   "port is already allocated". `.env` (gitignored) needed the same one-line change — done locally.
-7. **A correlation id still cannot be followed across the hop.** Only `ecomdemo-app` configures
-   structured logging, so the other five write the id to the MDC and never to the line. Documented in
-   the smoke script where the check would have gone. Follow-up, not this phase.
+### ⚠️ Environment notes for the next session
+- **Gateway 8080, app 8084.** `.env` was updated locally (it is gitignored); `.env.example` is committed.
+- **Never build a Docker image while the stack is up on this machine** — six JVMs plus BuildKit running a
+  reactor build exhausted the host; three commands were killed and BuildKit's frontend crashed.
+- **catalog-service peaked at 98% of its 384M cap** after the burst check, settling to 88%. No OOM.
 
 ## ⚠️ Carried, not fixed (oldest first)
 - **Phase 19 dashboard defect** — two `EcomDemo Overview` stat panels reduce an instantaneous rate with
@@ -96,3 +85,10 @@ BuildKit frontend crashed. Bring the stack down, build, then bring it up.
 - The CSV import is a distributed write with no shared transaction (restartable, idempotent).
 - **HS256 with a shared secret** — every service can mint as well as verify. Wants asymmetric keys + JWKS.
 - `ecomdemo-app` is not yet named `order-service` (cosmetic; touches every image tag and compose ref).
+- **NEW: the catalogue is documented nowhere** — catalog-service declares no springdoc, and the app's
+  spec only had `/api/products` because it proxied it. A gateway can aggregate specifications.
+- **NEW: a correlation ID cannot be followed across the hop** — only `ecomdemo-app` configures
+  structured logging, so the other five never write the ID to the log line.
+- **NEW: the gateway does no request logging**, so no credential redaction either — and login now
+  passes through it. Nothing leaks today (Gateway logs no bodies by default); it is an absence, not a
+  decision.
