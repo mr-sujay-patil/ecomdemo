@@ -2024,8 +2024,20 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     check "an order placed AFTER the poison message still succeeds" "201" "$(request POST /api/orders)"
     AFTER_POISON_ORDER_ID="$(jget "d['id']")"
 
+    # SIXTY seconds, not twenty, and the reason is the poison message that precedes it.
+    #
+    # @RetryableTopic moves a failed record onto a retry topic, which is what frees the original
+    # partition - but the retry topics have their own consumers and their own backoff, and the
+    # notification listener runs at concurrency 1. On a laptop hosting sixteen containers and five
+    # services sharing one broker, draining that sequence took longer than twenty seconds: the
+    # notifications for these two orders were written in a single burst a few seconds after the checks
+    # gave up, which is visible in their created_at timestamps.
+    #
+    # The claim is "the poison message did not block the partition PERMANENTLY". Twenty seconds was an
+    # undeclared latency budget riding on top of it, and the third check in this suite to be caught
+    # asserting a timing it never meant to.
     AFTER_POISON_COUNT=0
-    for _ in $(seq 1 20); do
+    for _ in $(seq 1 60); do
         AFTER_POISON_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $AFTER_POISON_ORDER_ID;" || echo 0)"
         [ "${AFTER_POISON_COUNT:-0}" -ge 1 ] && break
         sleep 1
@@ -2047,8 +2059,10 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
                 --property parse.key=true --property key.separator=: >/dev/null 2>&1
     done
 
+    # Sixty seconds, for the reason given on the check above: this order queues behind the same retry
+    # backlog, so it inherits the same wait.
     DUPLICATE_COUNT=0
-    for _ in $(seq 1 20); do
+    for _ in $(seq 1 60); do
         DUPLICATE_COUNT="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $DUPLICATE_ORDER_ID;" || echo 0)"
         [ "${DUPLICATE_COUNT:-0}" -ge 1 ] && break
         sleep 1
