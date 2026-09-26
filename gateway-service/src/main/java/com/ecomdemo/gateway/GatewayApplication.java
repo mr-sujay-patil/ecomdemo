@@ -1,5 +1,6 @@
 package com.ecomdemo.gateway;
 
+import com.ecomdemo.clients.ServiceIdentityConfig;
 import com.ecomdemo.jwt.JwtKeyConfig;
 import com.ecomdemo.metrics.MetricsConfig;
 import org.springframework.boot.SpringApplication;
@@ -22,6 +23,11 @@ import org.springframework.context.annotation.Import;
  * constants ({@code AuthMessages}, {@code CorrelationId}, {@code TokenClaims}, {@code ApiError})
  * which are plain classes and need no context at all.
  *
+ * <p>{@link ServiceIdentityConfig} supplies the {@code ServiceTokenProvider} that
+ * {@link ServiceIdentityFilter} signs with. Its own javadoc explains why it lives in
+ * {@code com.ecomdemo.clients} rather than {@code com.ecomdemo.jwt}: everyone verifies, only callers
+ * sign — and a gateway is a caller.
+ *
  * <p>{@link MetricsConfig} is the one an explicit import is easiest to forget, and forgetting it is
  * invisible: it stamps {@code application=<name>} onto every meter, and without it this service's
  * {@code http_server_requests} series merges with another service's under the same name. Prometheus
@@ -36,7 +42,7 @@ import org.springframework.context.annotation.Import;
  * actually validates with is in {@link GatewayJwtConfig}.
  */
 @SpringBootApplication(scanBasePackages = "com.ecomdemo.gateway")
-@Import({JwtKeyConfig.class, MetricsConfig.class})
+@Import({JwtKeyConfig.class, MetricsConfig.class, ServiceIdentityConfig.class})
 public class GatewayApplication {
 
     public static void main(String[] args) {
