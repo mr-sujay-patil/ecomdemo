@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-26
 - **Phase:** 21: API Gateway (Spring Cloud Gateway)
 - **Branch:** feature/phase-21-gateway
-- **Step:** PLANNING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES — approve `docs/phases/phase-21-plan.md`
+- **Waiting for user:** NO — plan approved, implementing
 
 ## Phase 20 merge verification (PASSED 2026-09-26) — `phase-20-complete` IS TAGGED
 Four PRs: #29 `e34330d`, #30 `380ad6f`, #31 `a588d4b`, #32 `f819d3e`. All MERGED, no open PRs, the
@@ -46,10 +46,16 @@ limiter; CORS; a correlation ID filter; a Spring Cloud release train matching Bo
    edge removes the app from that path entirely. This is the one security-relevant win of the phase.
 
 ## Next action
-`docs/phases/phase-21-plan.md` is written and committed (1a2226e). **Waiting for the user's approval**,
-per the 20c/20d rhythm. On approval, implement in this order: module + compose + the port move, then
-routes, then JWT at the edge with `ApiError` parity, then the rate limiter, then CORS and the reactive
-correlation filter, then delete the two proxies, then extend the three guard tests.
+Implementation is DONE and committed; `./mvnw clean verify` is the gate in progress. Then: bring the
+stack up (`docker compose up --build --wait`), run `scripts/smoke-test.sh` COLD, measure memory with
+six services, write `docs/test-reports/phase-21.md`, and raise the PR.
+
+### Done so far (commits on `feature/phase-21-gateway`)
+- `248f456` tracker + checkpoint · `1a2226e` the plan · `824532a` checkpoint
+- `13d6bcb` the gateway module, compose, Dockerfile, Prometheus, Alloy
+- `ea00358` 4 unit + 15 integration tests, every one mutation-checked
+- `7844f6e` the three proxies deleted, 12 test files migrated to `CatalogGateway`
+- `04f1f56` the smoke suite: BASE_URL is the gateway, APP_URL is white-box
 
 ### Settled by measurement, not assumption (2026-09-26)
 - **No GA Spring Cloud train exists for Boot 4.1.x.** 2025.1.3 is GA but baselined on Boot **4.0.8**;

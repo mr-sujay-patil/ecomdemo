@@ -9,7 +9,6 @@ import java.time.Instant;
 import java.util.List;
 import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webtestclient.autoconfigure.AutoConfigureWebTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -45,15 +44,39 @@ import org.springframework.test.web.reactive.server.WebTestClient;
  * subclasses lived in another package. Every member here is reachable from a subclass anywhere.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@AutoConfigureWebTestClient
 @ActiveProfiles("test")
 @Import(RedisContainerConfig.class)
 public abstract class GatewayTest {
 
     private static final Duration FALLBACK_EXPIRY = Duration.ofMinutes(15);
 
-    @Autowired
+    /**
+     * Bound to the real port, by hand.
+     *
+     * <p><strong>Why not {@code @Autowired} with {@code @AutoConfigureWebTestClient}.</strong> That is
+     * the annotation for a MOCK environment slice, and using it on a {@code RANDOM_PORT} test drags in
+     * a fixed set of auto-configurations — including the SERVLET security one. The servlet and reactive
+     * security configurations both register a bean called {@code conversionServicePostProcessor}, so
+     * the context failed to start with a {@code BeanDefinitionOverrideException} naming neither this
+     * class nor anything in the application.
+     *
+     * <p>Building the client from the port asks for exactly what is needed: a real HTTP client pointed
+     * at a real server. The response timeout is raised because {@code RateLimitIT} sends hundreds of
+     * requests in a row and the default five seconds is a performance assumption hiding in a test
+     * fixture.
+     */
     protected WebTestClient web;
+
+    @org.springframework.boot.test.web.server.LocalServerPort
+    private int port;
+
+    @org.junit.jupiter.api.BeforeEach
+    void bindTheClientToTheRunningServer() {
+        web = WebTestClient.bindToServer()
+                .baseUrl("http://localhost:" + port)
+                .responseTimeout(Duration.ofSeconds(30))
+                .build();
+    }
 
     @Autowired
     private SecretKey jwtSigningKey;

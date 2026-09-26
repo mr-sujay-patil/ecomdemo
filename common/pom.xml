@@ -27,23 +27,23 @@
 		<!--
 			@RestControllerAdvice, ResponseEntity, the servlet filters.
 
-			OPTIONAL SINCE PHASE 21, and the reason is a whole module that could not otherwise exist.
-			An optional dependency is on this module's own compile classpath but is NOT passed on to
-			anything that depends on it. All five services declare this starter themselves already, so
-			nothing changed for them - but `gateway-service` is REACTIVE, and inheriting a servlet
-			stack here is not a wasted jar, it is a broken application: Boot picks the web type from
-			the classpath and would start Tomcat instead of Netty, and Spring Cloud Gateway's server
-			would never come up.
+			NOT optional, though Phase 21 tried that first. Making it optional gave the reactive
+			gateway a clean classpath and broke the other five services: `OpenApiConfig` in
+			`shared.internal` is a @Configuration they all COMPONENT-SCAN, and its bean method
+			returns springdoc's `OpenAPI`. Spring introspects a scanned class's method signatures, so
+			the missing jar surfaced as NoClassDefFoundError at context startup - in four modules at
+			once.
 
-			The alternative was to force the type with `spring.main.web-application-type=reactive` and
-			carry a servlet container that a property keeps switched off. A shared module should not
-			decide which web framework its consumers run; it should share the things that are true of
-			all of them.
+			The lesson is narrower than "optional dependencies are risky": an unused ANNOTATION is
+			safely absent, because nothing looks it up. A scanned class's method SIGNATURE is not.
+			The reasoning that made optional look safe was about the wrong one of the two.
+
+			gateway-service excludes this instead - see its pom. An exclusion sits where it applies
+			and leaves every other consumer's dependency tree untouched.
 		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
-			<optional>true</optional>
 		</dependency>
 
 		<!-- GlobalExceptionHandler translates MethodArgumentNotValidException. -->
@@ -77,22 +77,14 @@
 		</dependency>
 
 		<!--
-			OpenApiConfig: the document every service publishes.
-
-			OPTIONAL for the same reason, and necessarily so: this artifact depends on the servlet web
-			starter, so leaving it non-optional would drag the servlet stack back in through the side
-			door and undo the line above. `ecomdemo-app` declares it directly and keeps its Swagger UI.
-
-			ApiError still carries springdoc's @Schema. That compiles here because an optional
-			dependency IS on this module's compile classpath, and it is safe at runtime without the
-			jar: the JVM silently ignores an annotation whose class is absent unless something asks
-			for it by name, and only springdoc does.
+			OpenApiConfig: the document every service publishes. NOT optional - see the note above on
+			the attempt that was reverted; this artifact is exactly the one whose absence broke four
+			services, because the class that needs it is component-scanned.
 		-->
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
 			<version>${springdoc.version}</version>
-			<optional>true</optional>
 		</dependency>
 
 		<!-- MetricsConfig tags every meter with the application name. -->

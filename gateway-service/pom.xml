@@ -45,14 +45,43 @@
 	<dependencies>
 		<!--
 			The shared CONTRACTS - ApiError's shape, the correlation ID's spelling, the claim names,
-			the JWT properties. Since Phase 21 this arrives WITHOUT a servlet stack, because
-			`common` marks the webmvc starter optional; see the comment there for why that had to
-			change before this module could exist.
+			the JWT properties. It arrives here WITHOUT a servlet stack, by the exclusions below.
 		-->
 		<dependency>
 			<groupId>com.ecomdemo</groupId>
 			<artifactId>ecomdemo-common</artifactId>
 			<version>${project.version}</version>
+			<!--
+				THE SERVLET STACK IS EXCLUDED, and without this the application does not start as a
+				gateway at all.
+
+				Boot chooses its web type from the classpath. With Tomcat and spring-webmvc present it
+				builds a SERVLET context, Netty never starts, and Spring Cloud Gateway's server - which
+				exists only for the reactive stack - is simply absent. The symptom is not an error; it
+				is an application that comes up healthy and routes nothing.
+
+				springdoc is excluded because it depends on the servlet starter and would drag it back
+				in. Nothing here is lost: this service has no controllers to document.
+
+				`common`'s own servlet classes remain on the classpath as bytecode - CorrelationIdFilter,
+				ApiErrorWriter, the exception handler - and are never loaded, because
+				GatewayApplication scans only `com.ecomdemo.gateway`. A class is loaded when something
+				references it, and nothing here does.
+
+				Excluding here rather than marking OPTIONAL in `common` is deliberate, and the reverse
+				was tried: optional broke the other four services, whose component scan introspects
+				`OpenApiConfig` and needs springdoc's types on the classpath to do it.
+			-->
+			<exclusions>
+				<exclusion>
+					<groupId>org.springframework.boot</groupId>
+					<artifactId>spring-boot-starter-webmvc</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.springdoc</groupId>
+					<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 
 		<dependency>
@@ -98,6 +127,36 @@
 			<version>${project.version}</version>
 			<type>test-jar</type>
 			<scope>test</scope>
+			<!--
+				THE SAME EXCLUSIONS AGAIN, and forgetting them here cost a confusing hour.
+				
+				Exclusions are per DEPENDENCY DECLARATION, not per artifact. The declaration above
+				keeps the servlet stack out of the main classpath; this one is a second declaration of
+				the same artifact and inherited nothing from it, so Tomcat and spring-webmvc arrived at
+				TEST scope only.
+				
+				The consequence was not a missing class, it was the opposite: Boot saw a servlet
+				container on the test classpath, built a SERVLET context, and the unconditional
+				@EnableWebFluxSecurity then registered `conversionServicePostProcessor` a second time -
+				a BeanDefinitionOverrideException naming two Spring Security classes and nothing of
+				ours. The production jar was correct the whole time; only the tests ran against the
+				wrong web stack.
+				
+				It also hid for a while behind the local repository: running this module alone resolved
+				an EARLIER `common` from ~/.m2 whose starters were still optional, so the tests passed
+				standalone and failed in the reactor. `./mvnw clean verify` on the whole reactor is the
+				only build that told the truth.
+			-->
+			<exclusions>
+				<exclusion>
+					<groupId>org.springframework.boot</groupId>
+					<artifactId>spring-boot-starter-webmvc</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.springdoc</groupId>
+					<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+				</exclusion>
+			</exclusions>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
