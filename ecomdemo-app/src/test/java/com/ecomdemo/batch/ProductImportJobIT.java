@@ -74,10 +74,10 @@ class ProductImportJobIT extends IntegrationTest {
     private void removeImportedProducts() {
         // Through the catalogue, not through SQL: `product` is catalog-service's table and this
         // database no longer has one (V14 dropped it).
-        admin.getForObject("/api/products", ProductSnapshot[].class);
-        java.util.Arrays.stream(admin.getForObject("/api/products", ProductSnapshot[].class))
+        catalogue.findAll().stream()
                 .filter(product -> product.name().startsWith(PREFIX))
-                .forEach(product -> admin.delete("/api/products/" + product.id()));
+                .map(ProductSnapshot::id)
+                .forEach(catalogue::delete);
         // The listing cache would otherwise keep serving the products this class just deleted to
         // whichever test class runs next.
         // THE MANUAL CACHE EVICTION THAT WAS HERE IS GONE. The catalogue's cache is in
@@ -111,7 +111,7 @@ class ProductImportJobIT extends IntegrationTest {
 
         // Prime the listing cache, so the assertion at the end is about eviction and not about a
         // cache that happened to be empty.
-        admin.getForEntity("/api/products", ProductSnapshot[].class);
+        catalogue.findAll();
 
         ProductImportResponse response = upload(csv.toString());
 
@@ -151,10 +151,7 @@ class ProductImportJobIT extends IntegrationTest {
 
         // And the catalogue the API serves is the one the import produced, not the cached one
         // from before it.
-        ResponseEntity<ProductSnapshot[]> listing =
-                admin.getForEntity("/api/products", ProductSnapshot[].class);
-        assertThat(listing.getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(listing.getBody())
+        assertThat(catalogue.findAll())
                 .anyMatch(product -> (PREFIX + "00001").equals(product.name()));
     }
 
@@ -175,7 +172,7 @@ class ProductImportJobIT extends IntegrationTest {
         // Read back through the catalogue for the reason countImported() gives: this database has
         // no `product` table any more. Asserting the DESCRIPTION is the point of the test - it
         // proves the second upload UPDATED the row rather than leaving the first one alone.
-        assertThat(java.util.Arrays.stream(admin.getForObject("/api/products", ProductSnapshot[].class))
+        assertThat(catalogue.findAll().stream()
                         .filter(product -> (PREFIX + "Repeat").equals(product.name()))
                         .findFirst()
                         .orElseThrow()
@@ -317,9 +314,7 @@ class ProductImportJobIT extends IntegrationTest {
      * been left in place - quietly count zero for ever while the import worked perfectly.
      */
     private long countImported() {
-        ProductSnapshot[] listing = admin.getForObject("/api/products", ProductSnapshot[].class);
-        return listing == null ? 0
-                : java.util.Arrays.stream(listing).filter(p -> p.name().startsWith(PREFIX)).count();
+        return catalogue.findAll().stream().filter(p -> p.name().startsWith(PREFIX)).count();
     }
 
     private ProductImportResponse upload(String csv) {

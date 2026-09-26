@@ -45,6 +45,7 @@
 		<module>catalog-service</module>
 		<module>customer-service</module>
 		<module>notification-service</module>
+		<module>gateway-service</module>
 		<module>ecomdemo-app</module>
 	</modules>
 
@@ -73,6 +74,21 @@
 			rule - so the version is declared here and the dependency named where it is used.
 		-->
 		<archunit.version>1.4.1</archunit.version>
+
+		<!--
+			Spring Cloud, for Phase 21's gateway. There is NO GA release train baselined on Boot 4.1.x:
+			2025.1.3 is GA but built against Boot 4.0.8, and the next train (2026.0.0-M1, Boot 4.2.0-M2)
+			is a milestone, which the project's conventions rule out. So this is the GA train running one
+			Boot minor ahead of its baseline - a deliberate choice, tested before it was made:
+
+			  * the resolved tree has ONE Spring Framework version and ONE Boot version, and no trace of
+			    4.0.8 - this parent's dependencyManagement wins over the imported BOM, as it must;
+			  * a throwaway gateway on Boot 4.1.1 started and really proxied an upstream request.
+
+			The residual risk is a 4.1-only internal change on a path the probe did not exercise. That is
+			what gateway-service's integration tests are for.
+		-->
+		<spring-cloud.version>2025.1.3</spring-cloud.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
 		<!--

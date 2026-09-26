@@ -24,7 +24,23 @@
 		executable application, and this jar has no main class to be executable with.
 	-->
 	<dependencies>
-		<!-- @RestControllerAdvice, ResponseEntity, the servlet filters. -->
+		<!--
+			@RestControllerAdvice, ResponseEntity, the servlet filters.
+
+			NOT optional, though Phase 21 tried that first. Making it optional gave the reactive
+			gateway a clean classpath and broke the other five services: `OpenApiConfig` in
+			`shared.internal` is a @Configuration they all COMPONENT-SCAN, and its bean method
+			returns springdoc's `OpenAPI`. Spring introspects a scanned class's method signatures, so
+			the missing jar surfaced as NoClassDefFoundError at context startup - in four modules at
+			once.
+
+			The lesson is narrower than "optional dependencies are risky": an unused ANNOTATION is
+			safely absent, because nothing looks it up. A scanned class's method SIGNATURE is not.
+			The reasoning that made optional look safe was about the wrong one of the two.
+
+			gateway-service excludes this instead - see its pom. An exclusion sits where it applies
+			and leaves every other consumer's dependency tree untouched.
+		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-webmvc</artifactId>
@@ -60,7 +76,11 @@
 			<artifactId>spring-tx</artifactId>
 		</dependency>
 
-		<!-- OpenApiConfig: the document every service publishes. -->
+		<!--
+			OpenApiConfig: the document every service publishes. NOT optional - see the note above on
+			the attempt that was reverted; this artifact is exactly the one whose absence broke four
+			services, because the class that needs it is component-scanned.
+		-->
 		<dependency>
 			<groupId>org.springdoc</groupId>
 			<artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>

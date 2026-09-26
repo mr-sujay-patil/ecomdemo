@@ -35,7 +35,22 @@
 
 set -uo pipefail
 
+# 8080 IS THE GATEWAY SINCE PHASE 21, and BASE_URL deliberately did not change.
+#
+# Every client-facing check below has always talked to this one variable, so pointing 8080 at the
+# gateway means the ~200 checks that already existed now travel through it - routing, edge token
+# validation and the rate limiter included - without a single one being rewritten to agree with the
+# new code. That is the phase's "clients only use the gateway" proven by a suite written before the
+# gateway existed, which is worth far more than new checks written alongside it.
 BASE_URL="${BASE_URL:-http://localhost:8080}"
+
+# The APPLICATION directly, for the WHITE-BOX checks only.
+#
+# Its container still listens on 8080; only the host mapping moved to 8084. Checks that ask this
+# service about ITSELF - /actuator/health, its own Prometheus scrape, its heapdump, its env - must
+# reach the application and not the gateway, which has an actuator of its own and would answer
+# every one of them plausibly and wrongly.
+APP_URL="${APP_URL:-http://localhost:8084}"
 BODY="$(mktemp)"
 # A whole Prometheus scrape, kept in a file rather than a variable: it is a few hundred lines and
 # the same snapshot is read several times per check, so re-fetching it per assertion would both
@@ -137,6 +152,30 @@ request() {
     fi
 }
 
+# app_request <method> <path> [data] -> status code, straight at the APPLICATION on 8084.
+#
+# The white-box twin of `request`. Same contract - writes the body to $BODY, echoes the status - and
+# the only difference is which door it knocks on. It exists because ~25 checks below are about the
+# application's own instrumentation rather than about the API a client uses, and after Phase 21 those
+# are two different servers.
+app_request() {
+    local method="$1" path="$2" data="${3:-}"
+    if [ -n "$AUTH" ]; then
+        if [ -n "$data" ]; then
+            curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$APP_URL$path" \
+                -H "Authorization: Bearer $AUTH" -H 'Content-Type: application/json' -d "$data"
+        else
+            curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$APP_URL$path" \
+                -H "Authorization: Bearer $AUTH"
+        fi
+    elif [ -n "$data" ]; then
+        curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$APP_URL$path" \
+            -H 'Content-Type: application/json' -d "$data"
+    else
+        curl -sS -o "$BODY" -w '%{http_code}' -X "$method" "$APP_URL$path"
+    fi
+}
+
 # login <username> <password> -> echoes the access token, or nothing on failure.
 # The only place in the script a password is sent.
 login() {
@@ -218,7 +257,12 @@ print("MISSING" if total is None else ("%.12g" % total))
 
 # scrape -> takes a fresh snapshot of /actuator/prometheus into $SCRAPE
 scrape() {
-    curl -sS -o "$SCRAPE" "$BASE_URL/actuator/prometheus"
+    # THE APPLICATION's scrape, on 8084. The meters these checks assert on - orders placed, cart
+    # operations, the outbox gauge - are registered by this service. The gateway publishes its own
+    # /actuator/prometheus with http_server_requests in it and none of those business meters, so
+    # scraping the wrong one would leave every assertion below looking for a series that is simply
+    # not there.
+    curl -sS -o "$SCRAPE" "$APP_URL/actuator/prometheus"
 }
 
 # metric <name> [label=value ...] -> the summed value, or the literal MISSING
@@ -635,13 +679,29 @@ check "removing a product that is not in the cart returns 404" "404" "$STATUS"
 # --------------------------------------------------------------------------------------------
 section "API documentation"
 
-STATUS="$(request GET /v3/api-docs)"
+# ON APP_URL, NOT THROUGH THE GATEWAY, and the failure that forced this is worth keeping.
+#
+# The first run after Phase 21 failed all fourteen checks here with 404. `/v3/api-docs` and
+# `/swagger-ui/**` are served by springdoc inside the APPLICATION; the gateway has no springdoc (it is
+# excluded deliberately - there is nothing there to document) and no route for those paths. So the
+# section was asking the wrong server, and getting an honest answer.
+#
+# ⚠️ This section now describes ONE service's document. That is the uncomfortable part of the phase:
+# nothing describes the whole API any more. See the note on the path list below.
+STATUS="$(app_request GET /v3/api-docs)"
 check "GET /v3/api-docs returns 200" "200" "$STATUS"
 check "the spec is titled EcomDemo API" "EcomDemo API" "$(jget "d['info']['title']")"
 
-# Every path the API serves must appear in the spec. Listed explicitly rather than derived from
-# the spec itself, so that an endpoint springdoc fails to pick up is caught instead of ignored.
-API_PATHS="/api/products /api/products/{id} /api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id}"
+# Every path THIS APPLICATION serves must appear in its spec. Listed explicitly rather than derived
+# from the spec itself, so that an endpoint springdoc fails to pick up is caught instead of ignored.
+#
+# /api/products and /api/products/{id} LEFT this list in Phase 21, and their absence is not a
+# documentation bug in this service - the application no longer serves them. It is a gap in the system,
+# though: catalog-service does not declare springdoc, so the catalogue is now documented NOWHERE. A
+# gateway can aggregate its services' specifications, which is the real fix and its own piece of work.
+# OpenApiDocumentationTest asserts the same absence in a unit test, so the day somebody closes the gap,
+# both it and this list fail and say what to update.
+API_PATHS="/api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id}"
 for path in $API_PATHS; do
     check "the spec documents $path" "True" "$(jget "'$path' in d['paths']")"
 done
@@ -654,16 +714,16 @@ check "every error response uses the ApiError schema" "True" \
     "$(jget "all(r['content']['application/json']['schema'][chr(36) + 'ref'].endswith('/ApiError') for ops in d['paths'].values() for op in ops.values() for c, r in op['responses'].items() if c >= '400')")"
 
 # curl does not follow redirects here, so a 302 to /swagger-ui/index.html is the raw status.
-STATUS="$(request GET /swagger-ui.html)"
+STATUS="$(app_request GET /swagger-ui.html)"
 case "$STATUS" in
     200 | 30*) pass "GET /swagger-ui.html returns 200 or a redirect (got $STATUS)" ;;
     *) fail "GET /swagger-ui.html returns 200 or a redirect" "200 or 3xx" "$STATUS" ;;
 esac
 
-STATUS="$(request GET /swagger-ui/index.html)"
+STATUS="$(app_request GET /swagger-ui/index.html)"
 check "the Swagger UI page itself returns 200" "200" "$STATUS"
 
-STATUS="$(request GET /swagger-ui/swagger-ui-bundle.js)"
+STATUS="$(app_request GET /swagger-ui/swagger-ui-bundle.js)"
 check "the Swagger UI javascript bundle is served" "200" "$STATUS"
 
 # --------------------------------------------------------------------------------------------
@@ -1407,27 +1467,34 @@ as_customer
 # that silently stopped being registered fails here rather than on a graph nobody is watching.
 section "Metrics and monitoring"
 
+# EVERY CHECK IN THIS BLOCK GOES STRAIGHT TO THE APPLICATION ON 8084, not through the gateway.
+#
+# This matters more than it looks. The gateway has an actuator too, exposed under exactly the same
+# rules - health and prometheus open, metrics ADMIN-only, env and heapdump not exposed at all. So
+# every assertion below would still PASS against the gateway, while silently testing the wrong
+# process: "the database is one of the components" would be false, and the meters an order moves
+# would be missing. A check that passes for the wrong reason is worse than one that fails.
 # --- The probes -------------------------------------------------------------------------------
 as_anonymous
-check "GET /actuator/health returns 200" "200" "$(request GET /actuator/health)"
+check "GET /actuator/health returns 200" "200" "$(app_request GET /actuator/health)"
 check "and it reports UP" "UP" "$(jget "d['status']")"
 # The two groups are what make the probes useful; without probes.enabled these are 404.
 check "liveness is UP" "UP" \
-    "$(request GET /actuator/health/liveness >/dev/null; jget "d['status']")"
+    "$(app_request GET /actuator/health/liveness >/dev/null; jget "d['status']")"
 check "readiness is UP" "UP" \
-    "$(request GET /actuator/health/readiness >/dev/null; jget "d['status']")"
+    "$(app_app_request GET /actuator/health/readiness >/dev/null; jget "d['status']")"
 # An anonymous caller gets the verdict and nothing else. The component names alone ("db",
 # "redis") would map the infrastructure for whoever asked.
-request GET /actuator/health >/dev/null
+app_request GET /actuator/health >/dev/null
 check "an anonymous health body carries no component details" "False" \
     "$(jget "'components' in d")"
 as_admin
-request GET /actuator/health >/dev/null
+app_request GET /actuator/health >/dev/null
 check "an ADMIN sees the per-component breakdown" "True" "$(jget "'components' in d")"
 check "and the database is one of the components" "True" "$(jget "'db' in d['components']")"
 # Redis is deliberately absent from readiness: a cache outage must not take the app out of
 # rotation, since every read still works without it.
-request GET /actuator/health/readiness >/dev/null
+app_request GET /actuator/health/readiness >/dev/null
 check "readiness includes the database" "True" "$(jget "'db' in d.get('components', {})")"
 check "but NOT redis - a cache outage is a slowdown, not an outage" "False" \
     "$(jget "'redis' in d.get('components', {})")"
@@ -1435,24 +1502,24 @@ check "but NOT redis - a cache outage is a slowdown, not an outage" "False" \
 # --- Who may read what --------------------------------------------------------------------------
 as_anonymous
 check "anonymous /actuator/prometheus returns 200 - Prometheus has no token" "200" \
-    "$(request GET /actuator/prometheus)"
-check "anonymous /actuator/info returns 200" "200" "$(request GET /actuator/info)"
-check "anonymous /actuator/metrics returns 401" "401" "$(request GET /actuator/metrics)"
+    "$(app_request GET /actuator/prometheus)"
+check "anonymous /actuator/info returns 200" "200" "$(app_request GET /actuator/info)"
+check "anonymous /actuator/metrics returns 401" "401" "$(app_request GET /actuator/metrics)"
 as_customer
 check "a CUSTOMER may not read /actuator/metrics either" "403" \
-    "$(request GET /actuator/metrics)"
+    "$(app_request GET /actuator/metrics)"
 as_admin
-check "an ADMIN may" "200" "$(request GET /actuator/metrics)"
+check "an ADMIN may" "200" "$(app_request GET /actuator/metrics)"
 # Not in management.endpoints.web.exposure.include, so it does not exist over HTTP at all - the
 # allow-list, not an authorization rule, is what keeps the environment (and JWT_SECRET) off the
 # wire. Even the administrator gets a 404.
 check "/actuator/env is not exposed at all, not even to an ADMIN" "404" \
-    "$(request GET /actuator/env)"
-check "and neither is /actuator/heapdump" "404" "$(request GET /actuator/heapdump)"
+    "$(app_request GET /actuator/env)"
+check "and neither is /actuator/heapdump" "404" "$(app_request GET /actuator/heapdump)"
 
 # --- Which build is running ---------------------------------------------------------------------
 as_anonymous
-request GET /actuator/info >/dev/null
+app_request GET /actuator/info >/dev/null
 # `ecomdemo-app` since Phase 20 made the build a reactor: the deployable is a MODULE now, and
 # the artifact name is the module's. That is the check working rather than the check being wrong -
 # the whole point of this endpoint is that it says which build is running, so the day the answer
@@ -1741,10 +1808,16 @@ if [ "$LOKI_READY" = true ]; then
     # can arrive in separate batches: stopping at the first line would hand the check below a
     # count of 1 and fail an assertion that asks for 2. A wait loop must wait for the strongest
     # condition asserted after it, or it is not a wait loop, it is a coin toss.
-    as_anonymous
-    header GET /api/products "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
-    header GET /api/products/99999999 "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
+    # THE PATHS CHANGED IN PHASE 21, and the query below is why they had to.
+    #
+    # These were /api/products, which the application proxied. The gateway routes that path to
+    # catalog-service now, so the application would log NOTHING for it and a query of
+    # {service_name="app"} would come back empty - a check failing because the request went where it
+    # was supposed to. Two paths the application genuinely owns, so the service being queried is the
+    # service being asked.
     as_customer
+    header GET /api/cart "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
+    header GET /api/orders/99999999 "$CORRELATION_HEADER" "$SMOKE_CORRELATION_ID" >/dev/null
 
     LINES_FOR_ID=0
     for _ in 1 2 3 4 5 6 7 8 9 10; do
@@ -2352,6 +2425,192 @@ if command -v docker >/dev/null 2>&1 \
 else
     skip "Outbox checks" "needs both the Kafka container ($KAFKA_CONTAINER) and database access"
 fi
+
+as_customer
+
+# --------------------------------------------------------------------------------------------
+# 15. The API gateway (Phase 21)
+# --------------------------------------------------------------------------------------------
+# EVERY CHECK ABOVE THIS LINE ALREADY WENT THROUGH THE GATEWAY. BASE_URL is 8080 and 8080 is the
+# gateway, so the two hundred-odd checks in the sections before this one have been exercising
+# routing, edge token validation and the rate limiter for the whole run. That is the phase's main
+# claim, and it is proven by a suite written before the gateway existed rather than by anything
+# below.
+#
+# What is left for this section is the handful of claims that only a gateway can make.
+section "API gateway"
+
+# --- The gateway is a different process from the application ------------------------------------
+# Worth establishing first, because it is what gives the rest of the section meaning: if 8080 and
+# 8084 were the same server, every check here would be vacuous.
+as_anonymous
+check "the gateway answers on 8080" "200" "$(request GET /actuator/health)"
+check "and the application answers separately on 8084" "200" "$(app_request GET /actuator/health)"
+request GET /actuator/info >/dev/null
+check "8080 identifies itself as the gateway" "gateway-service" "$(jget "d['build']['artifact']")"
+app_request GET /actuator/info >/dev/null
+check "and 8084 as the application - two builds, two processes" "ecomdemo-app" \
+    "$(jget "d['build']['artifact']")"
+
+# --- The routes reach four different services ---------------------------------------------------
+# One request per routed service, each asserting something only that service can answer. A route
+# pointing at the wrong host would still return 200 for some of these, so each check reads a field
+# that belongs to the service it is aimed at.
+check "/api/products routes to catalog-service" "200" "$(request GET /api/products)"
+check "and the response is a product listing, not something else's 200" "True" \
+    "$(jget "isinstance(d, list)")"
+
+# The application's own path, through the gateway. A CUSTOMER token is required, which also proves
+# the edge relays the token rather than swallowing it - catalog-service and the app both validate
+# what they receive.
+as_customer
+check "/api/cart routes to the application AND arrives authenticated" "200" \
+    "$(request GET /api/cart)"
+
+# customer-service, reached through the gateway at the path the application used to proxy.
+request GET /api/customers/me >/dev/null
+check "/api/customers/me routes to customer-service and knows who is asking" "$CUSTOMER_USER" \
+    "$(jget "d['username']")"
+
+# inventory-service, which was reachable only inside the Docker network until this phase.
+#
+# This section creates its OWN product rather than reusing $PROBE_PRODUCT_ID from the messaging
+# section. That variable is assigned inside a conditional block, and under `set -u` a run where Kafka
+# was unavailable would abort here with an unbound variable - a gateway check failing because of a
+# broker. Creating the product also proves a routed WRITE works, not merely a routed read.
+as_admin
+check "an ADMIN can create a product THROUGH the gateway" "201" \
+    "$(request POST /api/products '{"name":"Gateway Route Widget","description":"created through the gateway","price":12.34,"stockQuantity":7,"category":"GATEWAY"}')"
+GATEWAY_PRODUCT_ID="$(jget "d['id']")"
+check "/api/inventory is routed, and ADMIN-only" "200" \
+    "$(request GET /api/inventory/$GATEWAY_PRODUCT_ID)"
+check "and inventory reports the stock the catalogue was created with" "7" "$(jget "d['quantity']")"
+as_customer
+check "a CUSTOMER is refused stock, at the edge" "403" \
+    "$(request GET /api/inventory/$GATEWAY_PRODUCT_ID)"
+as_admin
+request DELETE "/api/products/$GATEWAY_PRODUCT_ID" >/dev/null
+
+# notification-service has NO route, deliberately: it has no business API. A 404 from the gateway
+# is the right answer - it means no route matched, rather than a route matching and failing.
+as_admin
+check "notification-service is not routed at all" "404" "$(request GET /api/notifications)"
+
+# --- Login is the gateway's now, and that is the security change --------------------------------
+# The application no longer sees a password. This check is the same login every earlier section
+# already used - what is different is that nothing but the gateway and customer-service ever holds
+# the credential.
+as_anonymous
+check "login is served through the gateway" "200" \
+    "$(request POST /api/auth/login "$(printf '{"username":"%s","password":"%s"}' "$CUSTOMER_USER" "$CUSTOMER_PASSWORD")")"
+check "and it returns a token" "True" "$(jget "len(d['accessToken']) > 20")"
+check "the application does NOT serve login any more - the proxy is gone" "401" \
+    "$(app_request POST /api/auth/login "$(printf '{"username":"%s","password":"%s"}' "$CUSTOMER_USER" "$CUSTOMER_PASSWORD")")"
+
+# --- The correlation ID is minted at the edge ---------------------------------------------------
+# It existed before this phase, in every service. What changed is where it STARTS: the gateway
+# stamps it, so one id covers the whole fan-out instead of each service inventing its own.
+correlation_header() {
+    curl -sS -o /dev/null -D - "$BASE_URL$1" ${AUTH:+-H "Authorization: Bearer $AUTH"} 2>/dev/null \
+        | tr -d '\r' | awk -F': ' 'tolower($1) == "x-correlation-id" { print $2 }' | head -1
+}
+as_anonymous
+GATEWAY_CORRELATION="$(correlation_header /api/products)"
+check "the gateway returns a correlation id" "True" \
+    "$(python3 -c "import re,sys; print(bool(re.fullmatch(r'[A-Za-z0-9_-]{8,64}', sys.argv[1])))" "$GATEWAY_CORRELATION")"
+SUPPLIED_CORRELATION="smoke-gateway-correlation-1"
+check "and it keeps one the caller supplied, rather than minting a second" "$SUPPLIED_CORRELATION" \
+    "$(curl -sS -o /dev/null -D - -H "X-Correlation-Id: $SUPPLIED_CORRELATION" "$BASE_URL/api/products" \
+        | tr -d '\r' | awk -F': ' 'tolower($1) == "x-correlation-id" { print $2 }' | head -1)"
+
+# ⚠️ WHAT IS DELIBERATELY *NOT* CHECKED HERE: that one id can be followed ACROSS the hop, from the
+# gateway into the service that answered. That is the claim a gateway-minted id exists to support,
+# and it cannot be made yet.
+#
+# Only `ecomdemo-app` configures `logging.structured.format.console`. The other four services log
+# plain text, so their correlation id lives in the MDC and is never written to the line - Loki has
+# nothing to filter on, and `| correlation_id = ...` matches zero lines however correct the id is.
+# A check written anyway would fail; one written to pass would have to grep for a string that is not
+# there.
+#
+# This gap arrived in Phase 20b and was invisible until now, because nothing had asked a
+# cross-service question of the logs before. Recorded as a follow-up rather than fixed here: giving
+# four services structured logging is its own change, and it is not an API gateway.
+
+# --- The rate limit, which is the phase's "done when" -------------------------------------------
+# 50 tokens a second with a burst capacity of 100, keyed per caller. So a burst well past 100 from
+# ONE caller must be refused, and the refusal must be a 429.
+#
+# THE BURST USES $OTHER_USER, and picking the identity carefully is the whole trick.
+#
+# The limiter keys on the authenticated username, so whoever sends 250 requests is throttled for the
+# next few seconds. Bursting as $CUSTOMER_USER would leave the account every other section depends on
+# refusing requests - which is precisely what happened inside gateway-service's own RateLimitIT, where
+# the failure surfaced in an unrelated test class and took a while to understand. $OTHER_USER exists
+# for ownership checks and nothing after this point needs it.
+BURST_TOKEN="$OTHER_TOKEN"
+
+# ONE curl PROCESS, MANY REQUESTS, IN PARALLEL - and getting here took two wrong versions.
+#
+# Version one sent 250 requests in a sequential shell loop and NOTHING was refused. The limiter was
+# working perfectly: spawning a `curl` costs tens of milliseconds, so the loop managed 20-30 requests a
+# second, comfortably below the 50 a second the bucket refills at. Tokens were replenished as fast as
+# they were spent.
+#
+# Version two used `xargs -P 20`, and still nothing was refused - measured at almost exactly 50 requests
+# a second, because 20 workers each paying the process-spawn cost happens to land on the refill rate.
+# The limiter was not the slow part; the client was.
+#
+# What works is one curl process reusing one connection across 300 requests, 40 in flight at a time:
+# roughly 150 requests a second, which genuinely outruns the refill. Measured live: 171 served, 129
+# refused, in 2.1 seconds.
+#
+# The lesson is the one Phase 20d kept re-learning from the other direction: when a check about
+# behaviour quietly becomes a check about throughput, it stops testing what it names. gateway-service's
+# RateLimitIT tripped the limit with a plain sequential loop only because WebTestClient runs in-process
+# and is an order of magnitude faster than spawning curl.
+BURST_ARGS=""
+for _ in $(seq 1 300); do
+    BURST_ARGS="$BURST_ARGS -o /dev/null $BASE_URL/api/products"
+done
+BURST_RESULTS="$(mktemp)"
+# Unquoted on purpose: $BURST_ARGS must word-split into curl's argument list.
+# shellcheck disable=SC2086
+curl -sS -w '%{http_code}\n' --parallel --parallel-max 40 \
+    -H "Authorization: Bearer $BURST_TOKEN" $BURST_ARGS > "$BURST_RESULTS" 2>/dev/null
+BURST_429="$(grep -c '^429$' "$BURST_RESULTS" 2>/dev/null || true)"
+BURST_OK="$(grep -c '^200$' "$BURST_RESULTS" 2>/dev/null || true)"
+BURST_429="${BURST_429:-0}"
+BURST_OK="${BURST_OK:-0}"
+rm -f "$BURST_RESULTS"
+
+check "a concurrent burst of 300 requests from one caller is rate limited" "True" \
+    "$(python3 -c "import sys; print(int(sys.argv[1]) > 0)" "$BURST_429")"
+# Not a ban: the bucket's capacity is served before anything is refused. "More than 50 served" rather
+# than "exactly 100" on purpose - the bucket refills DURING the burst, so the number served depends on
+# how long the burst took, and pinning it would be a performance assertion wearing a correctness name.
+check "but plenty were served first - it throttles, it does not ban" "True" \
+    "$(python3 -c "import sys; print(int(sys.argv[1]) > 50)" "$BURST_OK")"
+# above and be useless. 50 tokens a second replenish, so a short wait is enough - polled rather
+# than slept, because a fixed sleep is a performance assertion in disguise.
+RECOVERED=no
+for _ in $(seq 1 20); do
+    if [ "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/products" \
+            -H "Authorization: Bearer $BURST_TOKEN")" = "200" ]; then
+        RECOVERED=yes
+        break
+    fi
+    sleep 1
+done
+check "and the limit lifts once the bucket refills" "yes" "$RECOVERED"
+
+# A DIFFERENT caller was never affected, and this is the point of keying per caller: a limiter with
+# one shared bucket would have refused this request too, which makes it a denial-of-service tool
+# rather than a protection. $CUSTOMER_USER made a handful of requests all run and is nowhere near any
+# limit; $OTHER_USER just made 250.
+as_customer
+check "a different caller is not refused because of somebody else's burst" "200" \
+    "$(request GET /api/cart)"
 
 as_customer
 

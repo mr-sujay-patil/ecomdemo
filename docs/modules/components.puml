@@ -11,8 +11,6 @@ top to bottom direction
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
   Component(EcomdemoApplication.EcomdemoApplication.Batch, "Batch", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Catalogpublicproxy, "Catalog (public proxy)", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Identitypublicproxy, "Identity (public proxy)", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Order, "Order", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Metrics, "Metrics", $techn="Module", $descr="", $tags="", $link="")
@@ -27,8 +25,6 @@ Rel(EcomdemoApplication.EcomdemoApplication.Batch, EcomdemoApplication.EcomdemoA
 Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Serviceclients, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
-Rel(EcomdemoApplication.EcomdemoApplication.Catalogpublicproxy, EcomdemoApplication.EcomdemoApplication.Serviceclients, "uses", $techn="", $tags="", $link="")
-Rel(EcomdemoApplication.EcomdemoApplication.Identitypublicproxy, EcomdemoApplication.EcomdemoApplication.Serviceclients, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Cart, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")

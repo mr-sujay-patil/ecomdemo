@@ -54,6 +54,7 @@ COPY inventory-service/pom.xml inventory-service/
 COPY catalog-service/pom.xml catalog-service/
 COPY customer-service/pom.xml customer-service/
 COPY notification-service/pom.xml notification-service/
+COPY gateway-service/pom.xml gateway-service/
 COPY ecomdemo-app/pom.xml ecomdemo-app/
 RUN ./mvnw -B -q dependency:go-offline
 
@@ -62,6 +63,7 @@ COPY inventory-service/src/ inventory-service/src/
 COPY catalog-service/src/ catalog-service/src/
 COPY customer-service/src/ customer-service/src/
 COPY notification-service/src/ notification-service/src/
+COPY gateway-service/src/ gateway-service/src/
 COPY ecomdemo-app/src/ ecomdemo-app/src/
 
 # -DskipTests, deliberately. Tests run in the build (`./mvnw clean verify`) and in CI, where a

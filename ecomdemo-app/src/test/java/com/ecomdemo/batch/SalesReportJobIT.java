@@ -69,7 +69,7 @@ class SalesReportJobIT extends IntegrationTest {
         // not cascade - but leaving today's orders behind would change the next run's totals.
         jdbc.update("DELETE FROM order_item WHERE product_name LIKE ?", PREFIX + "%");
         jdbc.update("DELETE FROM orders WHERE id NOT IN (SELECT order_id FROM order_item)");
-        createdProductIds.forEach(id -> admin.delete("/api/products/" + id));
+        createdProductIds.forEach(catalogue::delete);
         createdProductIds.clear();
     }
 
@@ -81,11 +81,14 @@ class SalesReportJobIT extends IntegrationTest {
         }
     }
 
+    /**
+     * Created through the catalogue gateway, not over HTTP: the application's {@code /api/products}
+     * proxy was replaced by Phase 21's gateway, and this is the path production code uses.
+     */
     private long createProduct(String name, String price, int stock) {
-        ProductSnapshot product = admin.postForObject("/api/products",
+        ProductSnapshot product = catalogue.create(
                 new ProductWrite(PREFIX + name, "for the report", new BigDecimal(price), stock,
-                        "REPORT"),
-                ProductSnapshot.class);
+                        "REPORT"));
         assertThat(product).isNotNull();
         createdProductIds.add(product.id());
         return product.id();

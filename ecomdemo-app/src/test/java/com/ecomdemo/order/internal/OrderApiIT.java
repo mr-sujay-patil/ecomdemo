@@ -62,7 +62,7 @@ class OrderApiIT extends IntegrationTest {
         clearCart();
         // Products that were ordered cannot be deleted while an order references them, so a
         // failure here is expected and ignored; the ids are scoped to this test class anyway.
-        createdIds.forEach(id -> admin.delete("/api/products/" + id));
+        createdIds.forEach(catalogue::delete);
         createdIds.clear();
     }
 
@@ -76,18 +76,21 @@ class OrderApiIT extends IntegrationTest {
         return body;
     }
 
+    /**
+     * A product, created through the catalogue gateway rather than over HTTP — the application's
+     * {@code /api/products} proxy went with Phase 21's gateway. {@code CartService} and the batch jobs
+     * reach the catalogue exactly this way, so the fixture and the code under test now share a path.
+     */
     private ProductSnapshot product(String name, String price, int stock) {
-        ProductSnapshot created = admin.postForObject(
-                "/api/products",
-                new ProductWrite(name, name + " description", new BigDecimal(price), stock, "IT"),
-                ProductSnapshot.class);
+        ProductSnapshot created = catalogue.create(
+                new ProductWrite(name, name + " description", new BigDecimal(price), stock, "IT"));
         assertThat(created).isNotNull();
         createdIds.add(created.id());
         return created;
     }
 
     private int stockOf(long productId) {
-        ProductSnapshot current = rest.getForObject("/api/products/" + productId, ProductSnapshot.class);
+        ProductSnapshot current = catalogue.requireProduct(productId);
         assertThat(current).isNotNull();
         return current.stockQuantity();
     }

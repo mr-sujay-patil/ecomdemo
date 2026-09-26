@@ -59,7 +59,7 @@ class CorrelationIdFilterTest {
         @Test
         @DisplayName("generates one, exposes it to the chain and returns it as a header")
         void generatesAnId() throws Exception {
-            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/products");
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/orders");
             MockHttpServletResponse response = new MockHttpServletResponse();
             MdcCapturingChain chain = new MdcCapturingChain();
 
@@ -78,8 +78,8 @@ class CorrelationIdFilterTest {
             MockHttpServletResponse first = new MockHttpServletResponse();
             MockHttpServletResponse second = new MockHttpServletResponse();
 
-            filter.doFilter(new MockHttpServletRequest("GET", "/api/products"), first, new MockFilterChain());
-            filter.doFilter(new MockHttpServletRequest("GET", "/api/products"), second, new MockFilterChain());
+            filter.doFilter(new MockHttpServletRequest("GET", "/api/orders"), first, new MockFilterChain());
+            filter.doFilter(new MockHttpServletRequest("GET", "/api/orders"), second, new MockFilterChain());
 
             assertThat(first.getHeader(CorrelationId.HEADER))
                     .isNotEqualTo(second.getHeader(CorrelationId.HEADER));
@@ -93,7 +93,7 @@ class CorrelationIdFilterTest {
         @Test
         @DisplayName("reuses it, which is what makes the ID work across a boundary")
         void reusesASafeId() throws Exception {
-            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/products");
+            MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/orders");
             request.addHeader(CorrelationId.HEADER, "checkout-load-test-42");
             MockHttpServletResponse response = new MockHttpServletResponse();
             MdcCapturingChain chain = new MdcCapturingChain();
@@ -127,11 +127,11 @@ class CorrelationIdFilterTest {
         @Test
         @DisplayName("replaces one that is absurdly long or oddly short")
         void replacesAnIdOutsideTheAllowedLength() throws Exception {
-            MockHttpServletRequest tooLong = new MockHttpServletRequest("GET", "/api/products");
+            MockHttpServletRequest tooLong = new MockHttpServletRequest("GET", "/api/orders");
             tooLong.addHeader(CorrelationId.HEADER, "x".repeat(65));
             MockHttpServletResponse longResponse = new MockHttpServletResponse();
 
-            MockHttpServletRequest tooShort = new MockHttpServletRequest("GET", "/api/products");
+            MockHttpServletRequest tooShort = new MockHttpServletRequest("GET", "/api/orders");
             tooShort.addHeader(CorrelationId.HEADER, "short");
             MockHttpServletResponse shortResponse = new MockHttpServletResponse();
 
@@ -151,7 +151,7 @@ class CorrelationIdFilterTest {
         @DisplayName("clears the MDC when the request finishes")
         void clearsTheMdcAfterwards() throws Exception {
             filter.doFilter(
-                    new MockHttpServletRequest("GET", "/api/products"),
+                    new MockHttpServletRequest("GET", "/api/orders"),
                     new MockHttpServletResponse(),
                     new MockFilterChain());
 

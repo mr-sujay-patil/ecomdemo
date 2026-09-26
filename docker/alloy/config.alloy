@@ -55,7 +55,7 @@ discovery.relabel "app" {
   // and adding it here is what keeps one correlation id traceable across the hop between them.
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    regex         = "app|inventory-service|catalog-service|customer-service|notification-service"
+    regex         = "app|inventory-service|catalog-service|customer-service|notification-service|gateway-service"
     action        = "keep"
   }
 

@@ -52,7 +52,7 @@ class CartApiIT extends IntegrationTest {
     @AfterEach
     void cleanUp() {
         clearCart();
-        createdIds.forEach(id -> admin.delete("/api/products/" + id));
+        createdIds.forEach(catalogue::delete);
         createdIds.clear();
     }
 
@@ -66,11 +66,17 @@ class CartApiIT extends IntegrationTest {
         return body;
     }
 
+    /**
+     * A product, created through the catalogue gateway rather than over HTTP.
+     *
+     * <p>It used to POST to {@code /api/products}, the application's proxy to catalog-service, which
+     * Phase 21's gateway replaced. Calling the gateway interface is what {@code CartService} itself
+     * does — so the fixture now travels the same path as the code under test instead of through a
+     * proxy that could mask or manufacture a failure.
+     */
     private ProductSnapshot product(String name, String price, int stock) {
-        ProductSnapshot created = admin.postForObject(
-                "/api/products",
-                new ProductWrite(name, name + " description", new BigDecimal(price), stock, "IT"),
-                ProductSnapshot.class);
+        ProductSnapshot created = catalogue.create(
+                new ProductWrite(name, name + " description", new BigDecimal(price), stock, "IT"));
         assertThat(created).isNotNull();
         createdIds.add(created.id());
         return created;
@@ -95,10 +101,10 @@ class CartApiIT extends IntegrationTest {
                 CartResponse.class);
 
         // The catalogue changes underneath the cart.
-        admin.put("/api/products/" + lamp.id(),
+        catalogue.update(lamp.id(),
                 new ProductWrite("IT Repricing Lamp", "repriced", new BigDecimal("999.00"), 10,
                         "IT"));
-        assertThat(admin.getForObject("/api/products/" + lamp.id(), ProductSnapshot.class).price())
+        assertThat(catalogue.requireProduct(lamp.id()).price())
                 .as("the catalogue really did change")
                 .isEqualByComparingTo("999.00");
 
