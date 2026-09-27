@@ -68,7 +68,15 @@ restore_kafka() {
     fi
 }
 
-trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka' EXIT
+# The same promise for catalog-service, which the Resilience section stops (Phase 22).
+CATALOG_WAS_STOPPED=false
+restore_catalog() {
+    if [ "$CATALOG_WAS_STOPPED" = true ]; then
+        printf '\033[33mrestoring the catalog-service container, which this script had stopped\033[0m\n' >&2
+        docker start "${CATALOG_CONTAINER:-ecomdemo-catalog-service}" >/dev/null 2>&1 || true
+    fi
+}
+trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka; restore_catalog' EXIT
 
 PASSED=0
 FAILED=0
@@ -2613,6 +2621,131 @@ check "a different caller is not refused because of somebody else's burst" "200"
     "$(request GET /api/cart)"
 
 as_customer
+
+# --------------------------------------------------------------------------------------------
+# Resilience (Phase 22)
+# --------------------------------------------------------------------------------------------
+# catalog-service is STOPPED, for real, and the application must degrade rather than break:
+#   - the one thing that needs the catalogue (adding a product to a cart) fails FAST with a clear
+#     503, instead of a 500 or a request that hangs;
+#   - everything that does not need it (checkout of a cart already filled, order history) keeps
+#     working, because the cart holds a snapshot of the product and the price;
+#   - after repeated failures the circuit breaker OPENS and refusals stop touching the network;
+#   - when catalog-service comes back, the application recovers ON ITS OWN.
+#
+# Why add-to-cart and not checkout: since Phase 20c checkout does not call catalog-service at all.
+# It charges the price stored in the cart and talks only to inventory-service. That is the better
+# outcome - the phase file's "checkout fails fast with 503" was written before that was true - and
+# the check below asserts it, rather than adding a catalogue call to checkout just to watch it fail.
+section "Resilience"
+
+CATALOG_CONTAINER="${CATALOG_CONTAINER:-ecomdemo-catalog-service}"
+
+# now_ms -> milliseconds since the epoch. `date +%s` is whole seconds, too coarse for a 2 s budget.
+now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
+
+# retry_after <method> <path> [data] -> the Retry-After header of a request through the gateway.
+retry_after() {
+    curl -sS -o /dev/null -D - -X "$1" "$BASE_URL$2" -H "Authorization: Bearer $AUTH" \
+        -H 'Content-Type: application/json' ${3:+-d "$3"} \
+        | tr -d '\r' | awk 'tolower($1) == "retry-after:" { print $2 }'
+}
+
+# --- The policy is in place, and visible, before anything fails ---------------------------------
+# The series exist from startup. A dashboard that only grew its panels after the first outage
+# would be blank at exactly the moment somebody opened it to check things were fine. This also
+# proves resilience4j-micrometer is in the PACKAGED application: a test-scoped declaration would
+# leave every unit test green and this scrape empty.
+scrape
+check "the catalog circuit breaker is published, and CLOSED" "1" \
+    "$(metric resilience4j_circuitbreaker_state name=catalog state=closed)"
+check "the bulkhead publishes its limit of 20 concurrent calls" "20" \
+    "$(metric resilience4j_bulkhead_max_allowed_concurrent_calls name=catalog)"
+check "the retry is published" "True" \
+    "$([ "$(metric resilience4j_retry_calls_total name=catalog)" != MISSING ] && echo True || echo False)"
+NOT_PERMITTED_BEFORE="$(metric resilience4j_circuitbreaker_not_permitted_calls_total name=catalog)"
+
+# --- Fill a cart while the catalogue is up ------------------------------------------------------
+as_customer
+request GET /api/products >/dev/null
+RES_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 3)")"
+check "with catalog-service UP, adding to the cart works" "200" \
+    "$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
+
+# --- Stop it ------------------------------------------------------------------------------------
+docker stop "$CATALOG_CONTAINER" >/dev/null 2>&1
+CATALOG_WAS_STOPPED=true   # the EXIT trap restores it if anything below fails
+
+STARTED_MS="$(now_ms)"
+DOWN_STATUS="$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
+DOWN_ELAPSED_MS=$(( $(now_ms) - STARTED_MS ))
+check "with catalog-service DOWN, adding to the cart is a 503, not a 500" "503" "$DOWN_STATUS"
+check "and it fails FAST - two attempts and their backoff, under 2 s (took ${DOWN_ELAPSED_MS} ms)" \
+    "True" "$([ "$DOWN_ELAPSED_MS" -lt 2000 ] && echo True || echo False)"
+check "the body says what is wrong, in words a shopper can use" "True" \
+    "$(jget "'catalogue' in d['message'] and d['status'] == 503")"
+
+# Five failed calls with a 50% threshold open the breaker. Each add-to-cart above is two attempts,
+# so three more requests are enough whatever the count stood at.
+for _ in 1 2 3; do
+    request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}" >/dev/null
+done
+scrape
+check "after repeated failures the circuit breaker is OPEN" "1" \
+    "$(metric resilience4j_circuitbreaker_state name=catalog state=open)"
+
+STARTED_MS="$(now_ms)"
+OPEN_STATUS="$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
+OPEN_ELAPSED_MS=$(( $(now_ms) - STARTED_MS ))
+check "with the circuit OPEN, the refusal is still a 503" "503" "$OPEN_STATUS"
+check "and says the catalogue is temporarily unavailable" "True" \
+    "$(jget "'temporarily unavailable' in d['message']")"
+# Includes the gateway hop and a curl process start, so the budget is generous; the point is that
+# no network call to catalog-service and no retry backoff happened.
+check "an open circuit refuses without trying (took ${OPEN_ELAPSED_MS} ms, under 500)" "True" \
+    "$([ "$OPEN_ELAPSED_MS" -lt 500 ] && echo True || echo False)"
+check "Retry-After tells the client how long the circuit stays open" "10" \
+    "$(retry_after POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
+scrape
+check "those refusals are counted as not_permitted" "True" \
+    "$(python3 -c "print($(metric resilience4j_circuitbreaker_not_permitted_calls_total name=catalog) > ${NOT_PERMITTED_BEFORE:-0})")"
+
+# --- What does not need the catalogue keeps working ---------------------------------------------
+# The whole point of degrading "gracefully": one dependency down takes out the features that need
+# it and nothing else.
+DEGRADED_ORDER_STATUS="$(request POST /api/orders)"
+check "checkout of the filled cart SUCCEEDS with catalog-service down - it never needed it" "201" \
+    "$DEGRADED_ORDER_STATUS"
+check "and order history still answers" "200" "$(request GET /api/orders)"
+as_anonymous
+check "the application itself stays healthy - an open breaker is not a health failure" "200" \
+    "$(app_request GET /actuator/health)"
+as_customer
+
+# --- Bring it back ------------------------------------------------------------------------------
+docker start "$CATALOG_CONTAINER" >/dev/null 2>&1
+CATALOG_WAS_STOPPED=false
+
+# No restart of the application, no manual reset: the breaker goes HALF_OPEN after its 10 s wait,
+# lets trial calls through, and closes when they succeed. The budget covers catalog-service's own
+# JVM start (tens of seconds) plus that wait.
+RECOVERED_STATUS="none"
+RECOVERY_STARTED="$(date +%s)"
+for _ in $(seq 1 60); do
+    RECOVERED_STATUS="$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
+    [ "$RECOVERED_STATUS" = "200" ] && break
+    sleep 2
+done
+RECOVERY_SECONDS=$(( $(date +%s) - RECOVERY_STARTED ))
+check "once catalog-service is back, add-to-cart recovers ON ITS OWN (after ${RECOVERY_SECONDS}s)" \
+    "200" "$RECOVERED_STATUS"
+# A trial call has succeeded; the breaker needs three to close. Two more reads make that certain.
+request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}" >/dev/null
+request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}" >/dev/null
+scrape
+check "and the circuit breaker is CLOSED again" "1" \
+    "$(metric resilience4j_circuitbreaker_state name=catalog state=closed)"
+request DELETE "/api/cart/items/$RES_PRODUCT_ID" >/dev/null
 
 # --------------------------------------------------------------------------------------------
 # Summary
