@@ -7,7 +7,7 @@
 - **Branch:** fix/pre-phase-23-hardening (cut from `main` at `4892cb6`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** see `gh pr list --head fix/pre-phase-23-hardening`
+- **PR:** #36 https://github.com/mr-sujay-patil/ecomdemo/pull/36
 - **Waiting for user:** YES — review the PR, plus the manual steps below
 
 ## Phase 22 merge verification — PASSED, `phase-22-complete` TAGGED at `4892cb6`
