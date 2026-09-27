@@ -60,7 +60,8 @@ public class OutboxTracing {
     /**
      * The current span as a W3C {@code traceparent}, or {@code null} when nothing is being traced.
      *
-     * <p>An UNSAMPLED request still has a span and still yields a value, ending in {@code -00}.
+     * <p>An UNSAMPLED request still has a span and still yields a value, with the sampled bit of
+     * its flags clear.
      * That is deliberate: storing it lets the relay honour the edge's "do not record" decision
      * instead of tossing a fresh coin and recording the Kafka half of a trace whose HTTP half was
      * never kept.
