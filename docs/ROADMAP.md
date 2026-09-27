@@ -23,6 +23,7 @@ ecomdemo/
     │   ├── git-workflow.md            # mandatory Git rules + commands + verification
     │   ├── testing-protocol.md        # testing & acceptance, every phase
     │   ├── context-management.md      # what to load, checkpoint and summary rules
+    │   ├── development-environment.md # machines, WSL2 setup, prerequisites, secrets
     │   ├── your-role.md               # the user's responsibilities
     │   └── kickoff-and-commands.md    # kickoff prompt + command vocabulary
     ├── phases/
