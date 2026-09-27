@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 22: Resilience (tag: phase-22-complete, PR #TBD)
+## Phase 22: Resilience (tag: phase-22-complete, PR #35)
 **What exists now:** every `ecomdemo-app` → catalog-service call goes through
 Retry(CircuitBreaker(Bulkhead(HTTP call with a timeout))). catalog-service down: add-to-cart is a 503
 + Retry-After in ~0.6 s, the breaker opens after 5 failed calls (refusals ~20 ms), CHECKOUT STILL

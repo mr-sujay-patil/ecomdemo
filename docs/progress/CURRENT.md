@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-22-resilience
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** see `gh pr list --head feature/phase-22-resilience`
+- **PR:** #35 https://github.com/mr-sujay-patil/ecomdemo/pull/35
 - **Waiting for user:** YES — review the PR
 
 ## Checklist (from `docs/phases/phase-22-resilience.md`) — all done
