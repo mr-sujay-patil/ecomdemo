@@ -12,6 +12,30 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 21: API Gateway (tag: phase-21-complete, PR #33)
+**What exists now:** SIX deployables, seventeen containers. `gateway-service` (Spring Cloud Gateway
+5.0.3, train 2025.1.3, reactive/Netty) owns host port **8080** and routes to all five services; the
+app moved to **8084** (white-box checks only). JWT validated at the edge, Redis rate limiter (50/s,
+burst 100, per caller), CORS, correlation-ID filter. The app's three proxies are gone, so a login's
+plaintext password never passes through `ecomdemo-app`. Smoke **295 / 0**; **1387 MiB of 3916**.
+Verified and tagged 2026-09-26 at `f7d5021` (on the Mac).
+**Key code:** `gateway-service/.../gateway/` - `GatewaySecurityConfig`, `GatewayJwtConfig`,
+`RateLimitConfig`, `CorrelationIdWebFilter`, `ServiceIdentityFilter` (mints a SERVICE token for
+anonymously-permitted paths, ordered AFTER security, never replaces a caller's token), `ApiErrors`.
+**Config & infrastructure:** `GATEWAY_PORT=8080`, `APP_PORT=8084` in `.env`; routes in
+`gateway-service/src/main/resources/application.yml`; the smoke script has `BASE_URL` (gateway) and
+`APP_URL` (app, for actuator/api-docs).
+**Tests:** EdgeSecurityIT (edge decisions, NO upstreams), gateway 7 unit + 15 ITs; smoke burst check
+(one curl, one connection, 300 requests, 40 in flight -> 429s).
+**Gotchas:** springdoc types in a scanned `@Configuration` break a service that omits the optional dep;
+Maven exclusions are per DECLARATION (a `test-jar` declaration inherited none -> Tomcat at test scope);
+`@AutoConfigureWebTestClient` is for MOCK slices; a burst check slower than the refill rate tests the
+client, not the limiter. The gateway's actuator answers under the same paths as the app's - point
+white-box checks at `APP_URL`.
+**Follow-ups (not done):** catalog-service has no springdoc; only `ecomdemo-app` logs structured, so a
+correlation ID dies at the hop; the gateway does no request logging; HS256 shared secret; Phase 19
+dashboard defect; a failed compensating release leaks a reservation.
+
 ## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete, PRs #29-#32)
 **What exists now:** FIVE deployables, sixteen containers, five databases. `customer-service` owns
 `users` (customer_db, 8083/5435) and is the only issuer of user tokens; `notification-service` owns
@@ -38,30 +62,3 @@ the first failure, so a warm-up row left pending during an outage starves the ro
 Phase 21's gateway replaces both proxies and removes the plaintext password from the app's memory; the
 Phase 19 dashboard defect is now the oldest open item; a failed compensating release still leaks a
 reservation; HS256 shared secret.
-
-## Phase 20c: Microservices Split - catalog-service (tag: NONE - see below, PR #28)
-**What exists now:** THREE deployables. `catalog-service` owns `product` in `catalog_db` (Flyway
-V1-V2) and the Redis cache that serves it; `inventory-service` owns stock; `ecomdemo-app` is the
-rest, plus the PUBLIC `/api/products` which forwards to catalog-service. 426 tests
-(5 + 34 + 41 + 281 + 65), smoke **270 cold / 271 warm**, twelve containers, **1486 MiB of 3916**.
-**TWO of five services remain. `phase-20-complete` is NOT tagged.**
-**Key code:** `common/.../clients/` (CatalogGateway, InventoryGateway, ServiceIdentityConfig - the
-clients and the identity a caller signs with); `catalog-service/` whole module;
-`ecomdemo-app/.../catalog/ProductController` (the temporary public proxy, replaced by Phase 21's
-gateway); `V14__drop_product.sql`.
-**Config & infrastructure:** `catalog-db` (5434) + `catalog-service` (8081), 384M each;
-`CATALOG_BASE_URL`; Alloy and Prometheus cover all three services; Dockerfile copies three module
-poms and `DockerfileCoversEveryModuleTest` checks it does.
-**Tests:** CatalogSchemaTest, ProductProxyAccessTest, DockerfileCoversEveryModuleTest,
-CatalogIntegrationTest (base: containers + a SERVICE token, because this service has no login).
-**Gotchas:** THREE more failures that passed every test and still broke the container -
-`spring-boot-restclient` at TEST scope (the RestClient.Builder bean is auto-configured there, so the
-test classpath had a bean the runtime did not); the Dockerfile's per-module COPY list going stale;
-and `InMemoryCatalog` storing a stock number instead of asking inventory for it on every read, which
-four ITs caught. Also: product ids are only unique within catalog_db, so anything counting by a
-foreign id across a re-provision needs its window scoped - the smoke race check found two orders
-holding "the same" product.
-**Follow-ups (not done, out of scope):** extract customer-service and notification-service;
-`order-service` is the residue. That is 20d. Still open: the CSV import's partial-failure window, a
-failed compensating release leaking a reservation, the HS256 shared secret, and the Phase 19
-dashboard defect.
