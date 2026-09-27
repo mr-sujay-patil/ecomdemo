@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-27
 - **Phase:** 23 — Distributed Tracing (OpenTelemetry + Tempo)
 - **Branch:** feature/phase-23-tracing (cut from `main` at `c232a27`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES — Docker Desktop's WSL integration dropped mid-session (`docker` not found)
 
 ## Fix-branch merge verification (PR #36) — PASSED, no tag (not a phase)
 Merged as a merge commit `c232a27` (2 parents); 0 missing commits, 0 diffs, branch alive; CI green;
@@ -16,25 +16,31 @@ Merged as a merge commit `c232a27` (2 parents); 0 missing commits, 0 diffs, bran
 manual steps are done (`.env` memory pins gone, stash dropped).
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] Tracing in all six services: Micrometer Tracing → OTel bridge → OTLP/HTTP to Tempo
-- [ ] Propagation over HTTP: gateway → services, app → catalog/inventory/customer (RestClient)
-- [ ] Propagation over Kafka: template + listener observation in app, inventory, notification,
-      catalog (catalog's hand-built factory too); the OUTBOX stores the `traceparent` and the relay
-      restores it, so the async hop stays in the checkout's trace
-- [ ] Tempo in Compose + Grafana Tempo datasource
-- [ ] Trace IDs in logs: ECS JSON in all six services; Loki derived field → Tempo; Tempo → Loki
-- [ ] Sampling configuration (parent-based, probability from env; 1.0 in compose)
-- [ ] Tests + smoke: a checkout's trace in Tempo's API with spans from ≥ 4 services
-- [ ] README, decisions, test report, RECENT rotation, tracker 🔵
+- [x] Tracing in all six services: `spring-boot-starter-opentelemetry`, shared settings in
+      `common/src/main/resources/ecomdemo-observability.properties` (imported by each service)
+- [x] Propagation over HTTP — verified live: gateway → catalog → inventory in ONE trace
+- [~] Propagation over Kafka: code done (V17 `trace_parent`, `OutboxTracing`, relay template and
+      catalog factory observed; `OutboxTracingTest` 6/6 green) — NOT yet verified live
+- [x] Tempo 3.0.3 in compose (`docker/tempo/tempo.yaml`) + Grafana Tempo datasource
+- [~] Trace IDs in logs: ECS in all six (field `traceId`), Alloy `trace_id` metadata, Loki↔Tempo
+      links — not yet verified live; gateway MDC may need `spring.reactor.context-propagation=auto`
+- [x] Sampling: parent-based, `TRACING_SAMPLING_PROBABILITY` (0.1 default, 1.0 in compose)
+- [~] Smoke section "Distributed tracing" written, NEVER RUN yet
+- [ ] Full `verify`, cold smoke ×3, test report, README, decisions, RECENT rotation, tracker 🔵
 
 ## Planning decisions
 - Tempo **3.0.3** single binary (`-target=all`), local storage; no metrics-generator (a suggestion).
 - Services export straight to Tempo (`tempo:4318`), not via Alloy: one hop fewer to learn/debug.
 - The smoke test sends its OWN W3C `traceparent` (sampled) so it knows the trace ID to query.
+- Not traced: `/actuator/**` (ObservationPredicate, servlet in common + reactive in gateway),
+  `spring.security.*` and `tasks.scheduled.*` observations (measured noise in Tempo).
+- OTel sets traceparent flags `03` (sampled + W3C L2 "random"), not `01` — tests read the bit.
 
 ## Next action
-Implement the checklist top to bottom. Start by adding `spring-boot-starter-opentelemetry` to
-`ecomdemo-app` and reading the resolved Boot 4.1.1 tracing/OTLP property names from the jars.
+Once `docker info` works again: `docker compose up --build --wait -d`, run `scripts/smoke-test.sh`,
+fix the new "Distributed tracing" section until green (expected services in a checkout trace:
+gateway-service, ecomdemo, inventory-service, notification-service, probably catalog-service). Then
+check the gateway's log lines carry `traceId`; then the full testing protocol.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
