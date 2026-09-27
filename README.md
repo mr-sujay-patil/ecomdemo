@@ -235,7 +235,7 @@ Top level, outside the modules:
 ├── .env.example        # every variable, documented; .env itself is gitignored
 ├── docker/             # prometheus, grafana and alloy configuration, bind-mounted
 ├── docs/               # roadmap, phase specs, process docs, decisions, progress, test reports
-├── scripts/            # smoke-test.sh (~315 checks), failure-demo.sh, sonar-setup.sh
+├── scripts/            # smoke-test.sh (313 checks), failure-demo.sh, sonar-setup.sh
 └── .github/workflows/  # build + test every PR; publish the image on merge to main
 ```
 
