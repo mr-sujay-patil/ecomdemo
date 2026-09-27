@@ -20,7 +20,8 @@ and `.env` created there on 2026-09-27. A baseline `verify` runs on this machine
   `resilience/ResilientCatalog` + `CatalogResilienceConfig` (BPP wraps `CatalogClient` in place);
   timeouts in `CatalogProperties` (1s read, 30s bulk); `ServiceUnavailableException` → 503 + Retry-After
 - [x] A bulkhead — semaphore, 20 concurrent, no wait; ignored by the breaker
-- [ ] Resilience metrics in Grafana
+- [x] Resilience metrics in Grafana — `docker/grafana/dashboards/ecomdemo-resilience.json` (9 panels);
+  `DashboardMetricsTest` derives resilience4j series from the real binders + pins `name="catalog"`
 - [ ] A failure demo
 - [ ] Smoke: stop catalog-service → fails fast (< 2 s) with 503; restart → recovers
 
@@ -43,9 +44,9 @@ and `.env` created there on 2026-09-27. A baseline `verify` runs on this machine
 - 503 carries `Retry-After`, mapped in `GlobalExceptionHandler` via a new `ServiceUnavailableException`.
 
 ## Next action
-Baseline `verify` on this machine: BUILD SUCCESS in 2:28, counts identical to Phase 21. Next: the
-Grafana resilience dashboard (`docker/grafana/dashboards/ecomdemo-resilience.json`) and extend
-`DashboardMetricsTest` to check it against series derived from resilience4j-micrometer.
+Failure demo (`scripts/failure-demo.sh`) and the smoke additions: stop catalog-service → add-to-cart
+503 in < 2 s with Retry-After, checkout of a filled cart still 201, resilience4j series in the app's
+scrape; start it → add-to-cart recovers. Smoke must restart catalog-service even if a check fails.
 ⚠️ `resilience4j-micrometer` must NOT be test-scoped in the app pom (it would leave the jar).
 
 ## ⚠️ Carried, not fixed (oldest first)

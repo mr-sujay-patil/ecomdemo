@@ -1,0 +1,736 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "How ecomdemo-app behaves when catalog-service fails: the circuit breaker, retry and bulkhead around every catalog call (Phase 22). Provisioned from docker/grafana/dashboards/ecomdemo-resilience.json - edits made in this UI are overwritten on reload.",
+  "editable": false,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "catalog-service circuit",
+      "description": "The breaker's state NOW: CLOSED (calls flow), OPEN (every call refused at once for 10 s, no network), HALF_OPEN (three trial calls decide). lastNotNull is right here because the query is a gauge of the current state - unlike a rate(), whose last point is one noisy sample (the Phase 19 overview defect).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "CLOSED",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "HALF_OPEN",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "OPEN",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(resilience4j_circuitbreaker_state{application=\"$application\", name=\"catalog\", state=\"open\"}) * 2 + max(resilience4j_circuitbreaker_state{application=\"$application\", name=\"catalog\", state=\"half_open\"})",
+          "legendFormat": "state",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Failure rate (last 10 calls)",
+      "description": "Share of the last 10 recorded calls that failed (I/O error, timeout, 5xx). At 50% the breaker opens. -1 means fewer than 5 calls have been made - too few to judge, so the breaker will not open on them.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "-1": {
+                  "text": "too few calls",
+                  "color": "text",
+                  "index": 0
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 25
+              },
+              {
+                "color": "red",
+                "value": 50
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(resilience4j_circuitbreaker_failure_rate{application=\"$application\", name=\"catalog\"})",
+          "legendFormat": "failure rate",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Refused by the open circuit (range)",
+      "description": "Calls that never left this service because the breaker was open. Each is a request that failed in microseconds instead of waiting on a timeout - and a request catalog-service did not have to survive while it recovered.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(resilience4j_circuitbreaker_not_permitted_calls_total{application=\"$application\", name=\"catalog\"}[$__range]))",
+          "legendFormat": "refused",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "503s served (range)",
+      "description": "What the shopper saw: responses that were a clear 503 with Retry-After, instead of a 500 or a request that hung. increase() over $__range follows the time picker.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0,
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(increase(http_server_requests_seconds_count{application=\"$application\", status=\"503\"}[$__range]))",
+          "legendFormat": "503s",
+          "refId": "A",
+          "instant": true,
+          "range": false
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "state-timeline",
+      "title": "Circuit state over time",
+      "description": "The failure demo in one picture: CLOSED, then OPEN when catalog-service stops, HALF_OPEN every 10 s while it is still down (and straight back to OPEN), then CLOSED once it answers again.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "CLOSED",
+                  "color": "green",
+                  "index": 0
+                },
+                "1": {
+                  "text": "HALF_OPEN",
+                  "color": "orange",
+                  "index": 1
+                },
+                "2": {
+                  "text": "OPEN",
+                  "color": "red",
+                  "index": 2
+                }
+              }
+            }
+          ],
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 2
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showValue": "never",
+        "mergeValues": true,
+        "rowHeight": 0.8,
+        "legend": {
+          "showLegend": false
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(resilience4j_circuitbreaker_state{application=\"$application\", name=\"catalog\", state=\"open\"}) * 2 + max(resilience4j_circuitbreaker_state{application=\"$application\", name=\"catalog\", state=\"half_open\"})",
+          "legendFormat": "catalog",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Calls to catalog-service by outcome",
+      "description": "Every call the breaker saw, by outcome. successful and failed are what it judges on. ignored = refused by our own BULKHEAD (never reached catalog-service, so it counts for neither). not_permitted = refused by the OPEN breaker.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (kind) (rate(resilience4j_circuitbreaker_calls_seconds_count{application=\"$application\", name=\"catalog\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(resilience4j_circuitbreaker_not_permitted_calls_total{application=\"$application\", name=\"catalog\"}[$__rate_interval]))",
+          "legendFormat": "not_permitted",
+          "refId": "B",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Retries",
+      "description": "Reads only - writes are never retried. successful_with_retry is a blip the shopper never saw. failed_with_retry is three attempts that all failed: the case the breaker exists to cut short, because each of those cost three calls to a service that was already struggling.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (kind) (rate(resilience4j_retry_calls_total{application=\"$application\", name=\"catalog\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Bulkhead: catalog calls in flight",
+      "description": "How many of the 20 permitted concurrent calls are in use. Reaching the limit line means catalog-service is slow enough that callers are queueing on it - and the bulkhead is what stops them taking every request thread in the service.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 18
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(resilience4j_bulkhead_max_allowed_concurrent_calls{application=\"$application\", name=\"catalog\"}) - max(resilience4j_bulkhead_available_concurrent_calls{application=\"$application\", name=\"catalog\"})",
+          "legendFormat": "in flight",
+          "refId": "A",
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "max(resilience4j_bulkhead_max_allowed_concurrent_calls{application=\"$application\", name=\"catalog\"})",
+          "legendFormat": "limit",
+          "refId": "B",
+          "range": true
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Catalog call latency (mean)",
+      "description": "Mean duration of a call, by outcome. Failed calls near 1 s are READ TIMEOUTS (a hung catalog-service); failed calls near zero are refusals (a stopped one). The difference is why a timeout is the first layer, not the last.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "ecomdemo-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 18
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "ecomdemo-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (kind) (rate(resilience4j_circuitbreaker_calls_seconds_sum{application=\"$application\", name=\"catalog\", kind=~\"successful|failed\"}[$__rate_interval])) / sum by (kind) (rate(resilience4j_circuitbreaker_calls_seconds_count{application=\"$application\", name=\"catalog\", kind=~\"successful|failed\"}[$__rate_interval]))",
+          "legendFormat": "{{kind}}",
+          "refId": "A",
+          "range": true
+        }
+      ]
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 39,
+  "tags": [
+    "ecomdemo",
+    "phase-22"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "ecomdemo",
+          "value": "ecomdemo"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "ecomdemo-prometheus"
+        },
+        "definition": "label_values(resilience4j_circuitbreaker_state, application)",
+        "description": "The `application` common tag MetricsConfig stamps on every meter. Taken from a resilience4j series, so the variable resolves even before the first order is placed.",
+        "hide": 0,
+        "includeAll": false,
+        "label": "Application",
+        "multi": false,
+        "name": "application",
+        "options": [],
+        "query": {
+          "qryType": 1,
+          "query": "label_values(resilience4j_circuitbreaker_state, application)",
+          "refId": "A"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "EcomDemo Resilience",
+  "uid": "ecomdemo-resilience",
+  "version": 1,
+  "weekStart": ""
+}

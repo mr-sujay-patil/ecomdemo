@@ -4,6 +4,12 @@ import com.ecomdemo.support.ProjectRoot;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.github.resilience4j.micrometer.tagged.TaggedBulkheadMetrics;
+import io.github.resilience4j.micrometer.tagged.TaggedCircuitBreakerMetrics;
+import io.github.resilience4j.micrometer.tagged.TaggedRetryMetrics;
+import io.github.resilience4j.retry.RetryRegistry;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
@@ -41,6 +47,8 @@ import org.junit.jupiter.api.Test;
 class DashboardMetricsTest {
 
     private static final Path DASHBOARD = ProjectRoot.resolve("docker/grafana/dashboards/ecomdemo.json");
+    private static final Path RESILIENCE_DASHBOARD =
+            ProjectRoot.resolve("docker/grafana/dashboards/ecomdemo-resilience.json");
     private static final Path ALERTS = ProjectRoot.resolve("docker/prometheus/alerts.yml");
     private static final Path PROMETHEUS_CONFIG = ProjectRoot.resolve("docker/prometheus/prometheus.yml");
 
@@ -86,6 +94,28 @@ class DashboardMetricsTest {
                 .isNotEmpty();
 
         assertThat(knownSeries()).containsAll(referenced);
+    }
+
+    @Test
+    void everyMetricTheResilienceDashboardQueriesIsOneTheApplicationRegisters() throws IOException {
+        Set<String> referenced = metricNamesIn(RESILIENCE_DASHBOARD);
+
+        assertThat(referenced)
+                .as("the resilience dashboard must query resilience4j series")
+                .anyMatch(name -> name.startsWith("resilience4j_"));
+        assertThat(knownSeries()).containsAll(referenced);
+    }
+
+    @Test
+    void theResilienceDashboardSelectsTheInstanceTheApplicationCreates() throws IOException {
+        // The metric NAMES can all be right and every panel still empty: the series carry a
+        // `name` label that is the Resilience4j instance name, and a dashboard filtering on
+        // name="catalog-service" would match nothing. CatalogResilienceConfig names it "catalog".
+        String json = Files.readString(RESILIENCE_DASHBOARD);
+
+        assertThat(json).contains("name=\\\"catalog\\\"");
+        assertThat(json).doesNotContainPattern("name=\\\\\"(?!catalog\\\\\")");
+        assertThat(json).contains("\"uid\": \"ecomdemo-prometheus\"");
     }
 
     @Test
@@ -145,6 +175,17 @@ class DashboardMetricsTest {
     private static Set<String> knownSeries() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         new CheckoutMetrics(registry);
+        // The resilience series, from the same Micrometer binders Resilience4j's Boot module
+        // registers - so a Resilience4j upgrade that renamed one fails here, not on a blank panel.
+        CircuitBreakerRegistry breakers = CircuitBreakerRegistry.ofDefaults();
+        breakers.circuitBreaker("catalog");
+        TaggedCircuitBreakerMetrics.ofCircuitBreakerRegistry(breakers).bindTo(registry);
+        RetryRegistry retries = RetryRegistry.ofDefaults();
+        retries.retry("catalog");
+        TaggedRetryMetrics.ofRetryRegistry(retries).bindTo(registry);
+        BulkheadRegistry bulkheads = BulkheadRegistry.ofDefaults();
+        bulkheads.bulkhead("catalog");
+        TaggedBulkheadMetrics.ofBulkheadRegistry(bulkheads).bindTo(registry);
 
         Set<String> names = new LinkedHashSet<>(SPRING_PROVIDED);
         for (Meter meter : registry.getMeters()) {
@@ -200,7 +241,8 @@ class DashboardMetricsTest {
                 || name.startsWith("jvm_")
                 || name.startsWith("hikaricp_")
                 || name.startsWith("process_cpu")
-                || name.startsWith("system_cpu");
+                || name.startsWith("system_cpu")
+                || name.startsWith("resilience4j_");
     }
 
     private static String datasourceUid() throws IOException {
