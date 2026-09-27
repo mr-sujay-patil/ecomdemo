@@ -143,7 +143,7 @@ services:
 
       # Overrides the Dockerfile's default when set in .env — useful for pinning a heap on a
       # laptop, or adding -XX:+HeapDumpOnOutOfMemoryError while debugging.
-      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError}
+      JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError}
 
       # Kafka, reached by service name on the compose network - same reasoning as `db`. This is
       # the INTERNAL listener; the published 29092 is for producers running on the host.
@@ -185,10 +185,14 @@ services:
     # A limit matters here even locally, because it is what MaxRAMPercentage is a percentage OF.
     # Without one the JVM sizes its heap against the whole host, and the "75% of the container"
     # setting in the Dockerfile silently means "75% of your laptop".
+    #
+    # 1G since the WSL2 workstation (was 768M, sized for a Mac whose whole Docker VM was 3.9 GB). The
+    # Dockerfile's heap share is now 50%: 512 MiB of heap against a measured peak of 112, and 512 MiB
+    # for the ~180 MiB this JVM spends outside the heap.
     deploy:
       resources:
         limits:
-          memory: ${APP_MEMORY_LIMIT:-768M}
+          memory: ${APP_MEMORY_LIMIT:-1G}
     restart: unless-stopped
 
 
@@ -286,9 +290,10 @@ services:
     deploy:
       resources:
         limits:
-          # 320M, lower than the others' 384M, and measured rather than guessed: this service has one
-          # small table, no cache, no broker client and no outbound calls. It is the cheapest JVM here.
-          memory: ${CUSTOMER_MEMORY_LIMIT:-320M}
+          # 768M, like every service since the WSL2 workstation. The old 320M was measured correctly
+          # and still wrong: this JVM's NON-heap alone is ~145 MiB, so a 75% heap share of 320M could
+          # never fit. See the Dockerfile's JAVA_OPTS and ContainerMemoryBudgetTest.
+          memory: ${CUSTOMER_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -352,7 +357,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${NOTIFICATION_MEMORY_LIMIT:-320M}
+          # 768M (was 320M, at which it idled at 97-98%: ~150 MiB of non-heap plus a heap allowed to
+          # reach 240). Not a leak - the heap-to-limit ratio. See the Dockerfile's JAVA_OPTS.
+          memory: ${NOTIFICATION_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -434,12 +441,9 @@ services:
     deploy:
       resources:
         limits:
-          # 384M, the same cap inventory-service gets. MEASURED rather than guessed: with two
-          # services running, inventory-service idled at 185 MiB against this limit and the whole
-          # stack at 1.4 GB against a 3.8 GB ceiling. A third service costs about 205 MiB with its
-          # database, which is why the memory risk 20a called "the open risk" is not the binding
-          # constraint it looked like.
-          memory: ${CATALOG_MEMORY_LIMIT:-384M}
+          # 768M (was 384M, sized to fit five services into the Mac's 3.8 GB Docker VM, where it
+          # reached 98% after the rate-limit burst). ~175 MiB of non-heap; see the Dockerfile.
+          memory: ${CATALOG_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -484,12 +488,11 @@ services:
     deploy:
       resources:
         limits:
-          # 384M, not the app's 768M, and this number is what makes five services fit at all.
           # MaxRAMPercentage in the Dockerfile is a percentage OF THIS - without a limit the JVM
-          # sizes its heap against the whole Docker VM, and five JVMs each claiming 75% of 3.8 GB
-          # is the mistake the app's comment warns about, five times over. This service holds one
-          # table and one topic; it does not need what a monolith needed.
-          memory: ${INVENTORY_MEMORY_LIMIT:-384M}
+          # sizes its heap against the whole host, and six JVMs each claiming half of it is the
+          # mistake the app's comment warns about, six times over. 768M since the WSL2 workstation
+          # (was 384M, the price of fitting five services into the Mac's 3.8 GB Docker VM).
+          memory: ${INVENTORY_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -552,11 +555,10 @@ services:
     deploy:
       resources:
         limits:
-          # 320M, the cap the two smallest services get. A gateway holds no database connections and
-          # no JPA metamodel; it is routing tables and buffers. To be MEASURED at the end of the
-          # phase rather than asserted here - 20a's projection of 296 MiB per service overshot the
-          # real 72-187 MiB by more than double, and the error flattered the guess.
-          memory: ${GATEWAY_MEMORY_LIMIT:-320M}
+          # 768M (was 320M). A gateway holds no database connections and no JPA metamodel, and its
+          # heap peaked at 63 MiB - but its non-heap is still ~107 MiB (Netty, the reactive stack),
+          # and a 75% heap share of 320M left too little for it. See the Dockerfile's JAVA_OPTS.
+          memory: ${GATEWAY_MEMORY_LIMIT:-768M}
     restart: unless-stopped
 
 

@@ -2701,13 +2701,20 @@ with JAVA_OPTS:   576 MB
 container limit:  768 MB
 ```
 
-Without `-XX:MaxRAMPercentage=75.0` this container would run a 192 MB heap and leave 576 MB
+Without a `-XX:MaxRAMPercentage` this container would run a 192 MB heap and leave 576 MB
 unused, spending its life in GC. A percentage follows the limit wherever the image runs; an
-`-Xmx576m` would be wrong the moment `APP_MEMORY_LIMIT` changes. 75% and not more, because
-metaspace, thread stacks, the code cache and direct buffers are not heap.
+`-Xmx` would be wrong the moment `APP_MEMORY_LIMIT` changes.
+
+**How big a percentage is a measurement, not a rule of thumb.** This was 75% until the pre-Phase-23
+hardening, when every service's non-heap — metaspace, thread stacks, the code cache, direct buffers
+— was measured at **107–179 MiB**, a roughly *fixed* cost per JVM, against a peak heap of only
+63–112 MiB. At 75% of a 320 MiB limit the heap may grow to 232 MiB, and 232 + ~150 does not fit in
+320: the kernel OOM-kills the container before Java can even throw. So the share is now **50%** and
+the limits **768 MiB** (1 GiB for the app), and `ContainerMemoryBudgetTest` checks for every service
+that *limit × (1 − share)* leaves at least 256 MiB outside the heap.
 
 Note the limit has to exist for the percentage to mean anything — hence `deploy.resources.limits.memory`
-in `compose.yaml`. Without it, "75% of the container" quietly means 75% of your laptop.
+in `compose.yaml`. Without it, "50% of the container" quietly means half of your laptop.
 
 `-XX:+ExitOnOutOfMemoryError` is there because a JVM that has exhausted its heap will not recover,
 and a container that keeps passing health checks while failing every request is worse than one
