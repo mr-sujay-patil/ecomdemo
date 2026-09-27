@@ -11,6 +11,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -54,7 +56,8 @@ class OutboxBatchPublisherTest {
                 new OutboxBatchPublisher(
                         outbox,
                         sender,
-                        new OutboxProperties(Duration.ofSeconds(1), 10, Duration.ofDays(7), "-"));
+                        new OutboxProperties(Duration.ofSeconds(1), 10, Duration.ofDays(7), "-"),
+                        new OutboxTracing(Tracer.NOOP, Propagator.NOOP));
     }
 
     private static OutboxEvent orderEvent(String orderId) {
@@ -63,7 +66,8 @@ class OutboxBatchPublisherTest {
                 OutboxWriter.ORDER_AGGREGATE,
                 orderId,
                 OrderPlacedEvent.class.getSimpleName(),
-                "{\"orderId\":" + orderId + "}");
+                "{\"orderId\":" + orderId + "}",
+                null);
     }
 
     /**
@@ -236,7 +240,7 @@ class OutboxBatchPublisherTest {
     @DisplayName("an unmapped event type fails loudly rather than sitting pending for ever")
     void refusesAnUnroutableEvent() {
         OutboxEvent unknown =
-                new OutboxEvent(UUID.randomUUID(), "Order", "1", "SomethingElseHappened", "{}");
+                new OutboxEvent(UUID.randomUUID(), "Order", "1", "SomethingElseHappened", "{}", null);
         when(outbox.findByPublishedAtIsNullOrderByIdAsc(any(Limit.class)))
                 .thenReturn(List.of(unknown));
 

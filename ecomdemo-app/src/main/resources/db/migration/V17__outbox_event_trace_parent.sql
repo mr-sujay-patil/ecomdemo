@@ -1,0 +1,18 @@
+-- Phase 23: the trace an outbox row was written in, so the relay can publish it IN that trace.
+--
+-- The outbox (Phase 18) deliberately puts a gap between the checkout and the Kafka send: the order
+-- and the row commit together on the request thread, and the relay publishes the row later, on a
+-- scheduler thread, in a transaction of its own. Trace context lives on the thread that is handling
+-- the request, so by the time the relay runs it is gone - and without this column the Kafka send,
+-- and everything notification-service does with the event, would start a trace of its own. One
+-- checkout would show as two unrelated traces, which is precisely what tracing exists to prevent.
+--
+-- So the context is written down the same way the payload is: frozen inside the transaction, as a
+-- W3C `traceparent` value - `00-<32 hex trace id>-<16 hex span id>-<2 hex flags>`, always exactly
+-- 55 characters. It is the header's own text rather than two id columns because it is ALSO the
+-- sampled flag, and because it is what the relay hands straight back to the propagator.
+--
+-- NULLABLE, and NULL is a normal value: every row written before this migration, and any row
+-- written with tracing switched off. The relay publishes those exactly as before, in a trace of
+-- their own. No default, no backfill - there is no trace to backfill them with.
+ALTER TABLE outbox_event ADD COLUMN trace_parent VARCHAR(55);

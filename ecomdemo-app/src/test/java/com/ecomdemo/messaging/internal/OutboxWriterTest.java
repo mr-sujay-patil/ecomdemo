@@ -5,6 +5,8 @@ import com.ecomdemo.messaging.OrderPlacedEvent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 
+import io.micrometer.tracing.Tracer;
+import io.micrometer.tracing.propagation.Propagator;
 import java.math.BigDecimal;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -42,7 +44,7 @@ class OutboxWriterTest {
     void setUp() {
         // Constructed here and not in a field initialiser: field initialisers run before Mockito
         // populates @Mock, so the writer would be built around a null repository.
-        writer = new OutboxWriter(outbox);
+        writer = new OutboxWriter(outbox, new OutboxTracing(Tracer.NOOP, Propagator.NOOP));
     }
 
     private static final OrderPlacedEvent EVENT =
