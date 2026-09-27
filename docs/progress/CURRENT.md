@@ -5,55 +5,48 @@
 - **Updated:** 2026-09-27
 - **Phase:** 22: Resilience (Resilience4j)
 - **Branch:** feature/phase-22-resilience
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** see `gh pr list --head feature/phase-22-resilience`
+- **Waiting for user:** YES — review the PR
 
-## Phase 21 merge verification — `phase-21-complete` IS TAGGED (at `f7d5021`)
-Verified on the Mac 2026-09-26 with the stack down: `verify` BUILD SUCCESS, smoke **295 / 0**. Recorded in
-the annotated tag. Phase 22 starts on the WSL2 workstation (24 CPU, 30 GB); `gh` installed + authenticated
-and `.env` created there on 2026-09-27. A baseline `verify` runs on this machine before any change.
+## Checklist (from `docs/phases/phase-22-resilience.md`) — all done
+- [x] Circuit breaker, retry and timeout on order → catalog calls, with fallbacks (a clear 503)
+- [x] A bulkhead (semaphore, 20, no wait; ignored by the breaker)
+- [x] Resilience metrics in Grafana (`ecomdemo-resilience.json`, checked by `DashboardMetricsTest`)
+- [x] A failure demo (`scripts/failure-demo.sh`)
+- [x] Smoke: catalog-service stopped → add-to-cart 503 in ~0.6 s, checkout STILL 201, recovers in ~10 s
 
-## Checklist (from `docs/phases/phase-22-resilience.md`)
-- [x] Circuit breaker, retry and timeout on order → catalog calls, with fallbacks (a clear 503) —
-  `resilience/ResilientCatalog` + `CatalogResilienceConfig` (BPP wraps `CatalogClient` in place);
-  timeouts in `CatalogProperties` (1s read, 30s bulk); `ServiceUnavailableException` → 503 + Retry-After
-- [x] A bulkhead — semaphore, 20 concurrent, no wait; ignored by the breaker
-- [x] Resilience metrics in Grafana — `docker/grafana/dashboards/ecomdemo-resilience.json` (9 panels);
-  `DashboardMetricsTest` derives resilience4j series from the real binders + pins `name="catalog"`
-- [ ] A failure demo
-- [ ] Smoke: stop catalog-service → fails fast (< 2 s) with 503; restart → recovers
-
-## Design decisions (made at PLANNING, record in `docs/decisions.md`)
-- **Checkout does NOT call catalog-service** (since 20c it charges the cart's snapshot price and only
-  talks to inventory). The shopper's order → catalog call is **add-to-cart** (`CartService.addItem →
-  requireProduct`), plus the CSV import. So the smoke check is: catalog down → `POST /api/cart/items`
-  is a 503 in < 2 s, AND checkout of an already-filled cart still SUCCEEDS. Making checkout call
-  catalog just to fail would add coupling to satisfy a test. Flag this in the PR.
-- **Library:** `resilience4j-spring-boot4` 2.4.0 (GA, built on Boot 4.0 / Spring 7). Spring Cloud
-  CircuitBreaker has no retry, so it covers less of the checklist.
-- **Where:** a `@Primary` decorator of `CatalogGateway` in `ecomdemo-app`, decorating PROGRAMMATICALLY
-  (registries from properties) so the order Retry(CircuitBreaker(Bulkhead(call))) is visible in code.
-  Resilience is the caller's policy; `common` keeps the plain client.
-- **Timeout = the HTTP client's connect/read timeout** (catalog properties in `common`), not a
-  TimeLimiter — a TimeLimiter on a blocking call abandons the thread, it does not stop it.
-- **Retry only reads** (`requireProduct`, `findAll`); writes get CB + bulkhead only. Retry never
-  retries `CallNotPermitted`/`BulkheadFull` (that is a retry storm). 404/4xx are not failures.
-- Circuit state is NOT a health indicator: an open breaker must not take the app out of readiness.
-- 503 carries `Retry-After`, mapped in `GlobalExceptionHandler` via a new `ServiceUnavailableException`.
+## Verified (WSL2 workstation, by Claude Code)
+- `./mvnw clean verify`, stack down: 12 + 34 + 41+12 + 43+8 + 8+3 + 7+15 + 231+53, BUILD SUCCESS, 2:03.
+- Smoke from a COLD stack: **313 / 0 / 0**. One earlier cold run: 310 / 3 — intermittent Phase 15/17
+  checks, diagnosed in `docs/test-reports/phase-22.md` §5; `main` cold: 295 / 0.
+- Full write-up: `docs/test-reports/phase-22.md` (read §0: the first policy could not meet its budget).
 
 ## Next action
-Failure demo (`scripts/failure-demo.sh`) and the smoke additions: stop catalog-service → add-to-cart
-503 in < 2 s with Retry-After, checkout of a filled cart still 201, resilience4j series in the app's
-scrape; start it → add-to-cart recovers. Smoke must restart catalog-service even if a check fails.
-⚠️ `resilience4j-micrometer` must NOT be test-scoped in the app pom (it would leave the jar).
+**Waiting for review.** On `approved, merge it`: `gh pr merge <n> --merge` (never squash/rebase/delete),
+then merge verification per `docs/process/execution-protocol.md` §5 on `main`: stack DOWN, `./mvnw clean
+verify`, then a cold `docker compose up --build --wait` + `scripts/smoke-test.sh`, then
+`git tag -a phase-22-complete` and push the tag. Next phase: 23 (Distributed Tracing).
+
+### ⚠️ Environment notes (this machine)
+- Windows reserves TCP **9022–9121** (WinNAT) → Prometheus' 9090 may fail to bind. Workaround:
+  `export PROMETHEUS_PORT=19090 PROMETHEUS_URL=http://localhost:19090` (or the user sets it in `.env`).
+- The WSL2 VM can be paused by the host (one `verify` took 86 min). If a run is absurdly slow, check
+  `dmesg | grep TimeSync` and rerun before diagnosing code.
+- Repo-local git identity set to `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
 - **Phase 19 dashboard defect** — two `EcomDemo Overview` stat panels reduce an instantaneous rate with
   `lastNotNull`. Branch `fix/dashboard-stat-reducers`.
 - A failed compensating release leaks a reservation; nothing reconciles it.
 - The CSV import is a distributed write with no shared transaction (restartable, idempotent).
-- **HS256 with a shared secret** — every service can mint as well as verify. Wants asymmetric keys + JWKS.
+- **HS256 with a shared secret** — every service can mint as well as verify.
 - `ecomdemo-app` is not yet named `order-service`.
 - catalog-service has no springdoc; a correlation ID dies at the hop; the gateway does no request logging.
+- **NEW:** on a cold start a poison message stalled one notification partition until a rebalance (seen
+  once in three cold runs; the Phase 17 check caught it). No message lost.
+- **NEW:** the gateway's own `/api/products` route has no breaker; inventory calls (checkout's real
+  dependency) have no resilience policy; notification-service idles at 97 % of its 320M cap.
+- **NEW:** Phase 21 recorded no entries in `docs/decisions.md`; `application.properties` still describes
+  the removed customer proxy.
