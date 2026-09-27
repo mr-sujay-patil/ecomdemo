@@ -50,11 +50,13 @@ public class KafkaTopicsConfig {
     /**
      * The dead-letter topic, declared explicitly.
      *
-     * <p>{@code @RetryableTopic} would create this and the retry topics itself, but only at the
-     * moment they are first needed — so a freshly started stack has no DLT until something has
-     * already failed, and "is there a DLT?" cannot be answered by looking. Declaring it here means
-     * it exists from startup, empty, which is also what lets the smoke test assert that it is
-     * empty rather than that it is absent.
+     * <p>This service is the ONE owner of {@code orders.placed} and its DLT. notification-service's
+     * {@code @RetryableTopic} used to create them as well - the main topic with ONE partition - and
+     * on a cold start whichever service came up first won. When notification-service won, this
+     * class then added partitions 1 and 2 to a topic its consumer was already reading, and the
+     * consumer did not see them for minutes. notification-service now creates only its own retry
+     * topics. Declaring the DLT here also means it exists from startup, empty, which is what lets
+     * the smoke test assert that it is empty rather than that it is absent.
      *
      * <p>ONE partition, not three: nothing consumes a DLT, and its entire purpose is that a human
      * reads it in order.
