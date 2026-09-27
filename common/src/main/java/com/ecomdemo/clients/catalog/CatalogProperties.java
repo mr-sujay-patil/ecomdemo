@@ -15,7 +15,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * <p>There are two read timeouts because there are two very different kinds of call:
  * <ul>
  *   <li>{@code readTimeout} — a single product read or write. Normally a few milliseconds (reads
- *       are served from catalog-service's Redis cache), so one second is already generous. A
+ *       are served from catalog-service's Redis cache), so half a second is already generous. A
  *       shopper is waiting on it.</li>
  *   <li>{@code bulkReadTimeout} — the CSV import's batch upsert. One chunk writes up to a hundred
  *       products, each of which makes catalog-service call inventory-service. A one-second limit
@@ -30,8 +30,8 @@ public record CatalogProperties(
 
     public CatalogProperties {
         baseUrl = baseUrl == null || baseUrl.isBlank() ? "http://localhost:8081" : baseUrl;
-        connectTimeout = connectTimeout == null ? Duration.ofMillis(500) : connectTimeout;
-        readTimeout = readTimeout == null ? Duration.ofSeconds(1) : readTimeout;
+        connectTimeout = connectTimeout == null ? Duration.ofMillis(250) : connectTimeout;
+        readTimeout = readTimeout == null ? Duration.ofMillis(500) : readTimeout;
         bulkReadTimeout = bulkReadTimeout == null ? Duration.ofSeconds(30) : bulkReadTimeout;
     }
 }

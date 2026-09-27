@@ -49,9 +49,10 @@ class CatalogClientConfig {
             Duration readTimeout,
             ServiceTokenProvider serviceTokenProvider) {
         // Connect timeout: how long to wait for the TCP handshake. Read timeout: how long to wait
-        // for the response once the request is sent. They fail differently - a stopped container
-        // is refused or unresolvable at once, a hung one accepts the connection and then goes
-        // quiet - and only the second one needs the read timeout to be noticed at all.
+        // for the response once the request is sent. They catch different failures - a STOPPED
+        // container is never connected to (and, with its old IP still in the JVM's DNS cache, is
+        // not refused either: the SYN simply goes unanswered), a HUNG one accepts the connection
+        // and then goes quiet. Each needs its own limit to be noticed at all.
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(properties.connectTimeout()).build();
         JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
         requestFactory.setReadTimeout(readTimeout);

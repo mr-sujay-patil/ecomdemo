@@ -101,7 +101,7 @@ class ResilientCatalogTest {
     class Reads {
 
         @Test
-        @DisplayName("an I/O failure is tried three times, then becomes a 503")
+        @DisplayName("an I/O failure is tried twice, then becomes a 503")
         void retriedThenUnavailable() {
             when(http.requireProduct(anyLong())).thenThrow(new ResourceAccessException("Connection refused"));
 
@@ -110,7 +110,7 @@ class ResilientCatalogTest {
                         .isInstanceOf(ServiceUnavailableException.class)
                         .hasMessageContaining("did not respond");
 
-                verify(http, times(3)).requireProduct(1L);
+                verify(http, times(2)).requireProduct(1L);
             });
         }
 
@@ -187,9 +187,9 @@ class ResilientCatalogTest {
 
             context.run(ctx -> {
                 CatalogGateway catalogue = catalogue(ctx);
-                // Two reads = up to six attempts; the fifth failed attempt reaches the minimum
+                // Three reads = up to six attempts; the fifth failed attempt reaches the minimum
                 // number of calls with a 100% failure rate, and the breaker opens.
-                for (int i = 0; i < 2; i++) {
+                for (int i = 0; i < 3; i++) {
                     assertThatThrownBy(() -> catalogue.requireProduct(1L))
                             .isInstanceOf(ServiceUnavailableException.class);
                 }
@@ -277,6 +277,36 @@ class ResilientCatalogTest {
         }
     }
 
+    @Test
+    @DisplayName("timeouts compose: the worst case a shopper waits on a read fits the 2 s budget")
+    void theWorstCaseFitsTheBudget() {
+        // attempts x per-attempt timeout + every backoff at its jittered maximum. The per-attempt
+        // cost of an outage is the READ timeout, not the connect timeout: a stopped container's
+        // name can take seconds to fail to resolve, and the connect timeout does not cover DNS.
+        // Computed from the SHIPPED properties, so raising max-attempts or the read timeout
+        // without redoing this arithmetic fails here rather than in front of a shopper.
+        Properties file = applicationProperties();
+        int attempts = Integer.parseInt(file.getProperty("resilience4j.retry.instances.catalog.max-attempts"));
+        Duration readTimeout = duration(file.getProperty("ecomdemo.catalog.read-timeout"));
+        Duration firstWait = duration(file.getProperty("resilience4j.retry.instances.catalog.wait-duration"));
+        double multiplier = Double.parseDouble(
+                file.getProperty("resilience4j.retry.instances.catalog.exponential-backoff-multiplier", "1"));
+        double jitter = Double.parseDouble(
+                file.getProperty("resilience4j.retry.instances.catalog.randomized-wait-factor", "0"));
+
+        Duration worst = readTimeout.multipliedBy(attempts);
+        for (int retry = 0; retry < attempts - 1; retry++) {
+            long waitMillis = (long) (firstWait.toMillis() * Math.pow(multiplier, retry) * (1 + jitter));
+            worst = worst.plusMillis(waitMillis);
+        }
+
+        assertThat(worst).isLessThan(Duration.ofSeconds(2));
+    }
+
+    private static Duration duration(String value) {
+        return org.springframework.boot.convert.DurationStyle.detectAndParse(value);
+    }
+
     private static CatalogGateway catalogue(AssertableApplicationContext ctx) {
         return ctx.getBean(CatalogGateway.class);
     }
@@ -295,14 +325,19 @@ class ResilientCatalogTest {
         }
     }
 
-    /** Every {@code resilience4j.*} line of the application's own properties file, as-is. */
-    static String[] shippedResilienceProperties() {
+    private static Properties applicationProperties() {
         Properties file = new Properties();
         try (InputStream in = ResilientCatalogTest.class.getResourceAsStream("/application.properties")) {
             file.load(in);
         } catch (IOException e) {
             throw new IllegalStateException(e);
         }
+        return file;
+    }
+
+    /** Every {@code resilience4j.*} line of the application's own properties file, as-is. */
+    static String[] shippedResilienceProperties() {
+        Properties file = applicationProperties();
         String[] lines = file.stringPropertyNames().stream()
                 .filter(key -> key.startsWith("resilience4j."))
                 .map(key -> key + "=" + file.getProperty(key))
