@@ -144,6 +144,35 @@
 		</dependency>
 
 		<!--
+			Resilience4j (Phase 22): the circuit breaker, retry and bulkhead around every call to
+			catalog-service. The Boot module turns `resilience4j.*` properties into configured
+			registries, and binds every instance a registry creates to Micrometer - which is where
+			the Grafana resilience dashboard gets its series. This project decorates in code rather
+			than with @CircuitBreaker annotations (see `resilience/CatalogResilienceConfig`), so the
+			annotation aspects it can also register are not relied on.
+		-->
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-spring-boot4</artifactId>
+			<version>${resilience4j.version}</version>
+		</dependency>
+		<!--
+			Arrives through the module above at RUNTIME scope. Named here because DashboardMetricsTest
+			compiles against the same Micrometer publishers the application binds, to derive the
+			resilience series the dashboard may query rather than listing them by hand.
+
+			Deliberately NOT <scope>test</scope>: a direct declaration wins over a transitive one, so
+			test scope would REMOVE it from the packaged application, and nothing would publish a
+			single resilience4j_* series in production while every test still passed. That is the
+			Phase 20c `spring-boot-restclient` defect in a different jar.
+		-->
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-micrometer</artifactId>
+			<version>${resilience4j.version}</version>
+		</dependency>
+
+		<!--
 			Spring Security's OAuth2 Resource Server. "Resource server" is the OAuth2 word for
 			an API that ACCEPTS tokens rather than one that issues them: it adds a filter that
 			pulls a Bearer token off the Authorization header, verifies its signature and its

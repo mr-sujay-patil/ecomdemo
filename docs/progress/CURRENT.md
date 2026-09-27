@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-27
 - **Phase:** 22: Resilience (Resilience4j)
 - **Branch:** feature/phase-22-resilience
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** no
@@ -16,8 +16,10 @@ the annotated tag. Phase 22 starts on the WSL2 workstation (24 CPU, 30 GB); `gh`
 and `.env` created there on 2026-09-27. A baseline `verify` runs on this machine before any change.
 
 ## Checklist (from `docs/phases/phase-22-resilience.md`)
-- [ ] Circuit breaker, retry and timeout on order → catalog calls, with fallbacks (a clear 503)
-- [ ] A bulkhead
+- [x] Circuit breaker, retry and timeout on order → catalog calls, with fallbacks (a clear 503) —
+  `resilience/ResilientCatalog` + `CatalogResilienceConfig` (BPP wraps `CatalogClient` in place);
+  timeouts in `CatalogProperties` (1s read, 30s bulk); `ServiceUnavailableException` → 503 + Retry-After
+- [x] A bulkhead — semaphore, 20 concurrent, no wait; ignored by the breaker
 - [ ] Resilience metrics in Grafana
 - [ ] A failure demo
 - [ ] Smoke: stop catalog-service → fails fast (< 2 s) with 503; restart → recovers
@@ -41,8 +43,10 @@ and `.env` created there on 2026-09-27. A baseline `verify` runs on this machine
 - 503 carries `Retry-After`, mapped in `GlobalExceptionHandler` via a new `ServiceUnavailableException`.
 
 ## Next action
-Check the baseline `verify` result, commit the housekeeping (`docs(progress): start phase 22`), then
-implement the checklist in order.
+Baseline `verify` on this machine: BUILD SUCCESS in 2:28, counts identical to Phase 21. Next: the
+Grafana resilience dashboard (`docker/grafana/dashboards/ecomdemo-resilience.json`) and extend
+`DashboardMetricsTest` to check it against series derived from resilience4j-micrometer.
+⚠️ `resilience4j-micrometer` must NOT be test-scoped in the app pom (it would leave the jar).
 
 ## ⚠️ Carried, not fixed (oldest first)
 - **Phase 19 dashboard defect** — two `EcomDemo Overview` stat panels reduce an instantaneous rate with
