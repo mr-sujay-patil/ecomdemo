@@ -8,42 +8,46 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 20: Microservices Split — complete. Five services.**
+**Phase 22: Resilience — catalog-service can fail without taking the application with it.**
 
 | Service | Owns | Port |
 |---|---|---|
-| `ecomdemo-app` | carts, orders, the outbox, the batch jobs — and the public API | 8080 |
+| `gateway-service` | the only door: routing, JWT at the edge, rate limiting, CORS (Phase 21) | **8080** |
+| `ecomdemo-app` | carts, orders, the outbox, the batch jobs | 8084 |
 | `catalog-service` | products, and the Redis cache that serves them | 8081 |
 | `inventory-service` | stock, and the only code that may change one | 8082 |
 | `customer-service` | accounts — the only place a password is checked or a token issued | 8083 |
 | `notification-service` | notifications. Nobody calls it; it reacts to a topic | 8085 |
 
-A database each. Sixteen containers in total, idling at **1.46 GB**.
+A database each; seventeen containers. Clients use **8080 only**; 8084 is for looking at the
+application's own actuator.
 
-Four things are worth knowing before reading further, because they are what the split actually cost:
+**What Phase 22 changed.** Every call from `ecomdemo-app` to catalog-service now goes through a
+timeout, a bulkhead, a circuit breaker and (for reads) a retry. Stop catalog-service and:
+
+- adding a product to a cart fails in **about a second** with a clear **503** and a `Retry-After`,
+  instead of a 500 — or, if catalog-service hangs rather than dies, a request that never returns;
+- after five failed calls the breaker **opens**, and refusals take **milliseconds** because they stop
+  touching the network at all;
+- **checkout still works**, because a cart holds a snapshot of each product and its price;
+- when catalog-service comes back, the application **recovers on its own**.
+
+See [Resilience](#resilience) below, `./scripts/failure-demo.sh` to watch it happen, and the
+**EcomDemo Resilience** dashboard in Grafana.
+
+Still true from Phase 20, and worth knowing:
 
 - **Checkout is a saga.** Reserving stock is an HTTP call, so it cannot share the order's transaction.
   A rollback after a successful reservation triggers a compensating *release* — and that call can
   itself fail, leaving stock reserved for an order that never existed. Logged, and not reconciled.
-- **The catalogue's stock figure is eventually consistent.** A sale changes it in inventory-service,
-  which publishes an event; catalog-service evicts its cache when it arrives. **The sale itself
-  cannot go wrong** — the reservation is synchronous and holds the row lock. Stale display, correct
-  sale.
-- **Nothing guarantees a cart belongs to a real account any more.** `cart.user_id` and
-  `orders.user_id` lost their foreign keys, because a key cannot span two databases. Deleting an
-  account leaves its cart behind.
-- **The CSV import is a distributed write** across two services with no shared transaction. It is
-  restartable and idempotent, so the repair is to run it again.
+- **The catalogue's stock figure is eventually consistent.** Stale display, correct sale.
+- **Nothing guarantees a cart belongs to a real account any more** — a foreign key cannot span two
+  databases.
+- **The CSV import is a distributed write** with no shared transaction; restartable and idempotent.
+- Tokens are **HS256 with a shared key**: only customer-service issues them by convention, not by
+  constraint. Asymmetric keys and a JWKS endpoint are the honest fix.
 
-Every service verifies tokens locally with a shared key; **only customer-service can issue one**. That
-asymmetry is the security model, and it is a convention rather than a constraint while the algorithm is
-HS256 — the honest fix is asymmetric keys and a JWKS endpoint, which is a phase of its own.
-
-`ecomdemo-app` is order-service in everything but its name. The rename touches every image tag,
-compose service and CI reference, so it is left as its own change.
-
-See [`docs/test-reports/phase-20d.md`](docs/test-reports/phase-20d.md) — **especially §0**, which
-records that four services' integration tests had never once run while the build reported success.
+See [`docs/test-reports/phase-22.md`](docs/test-reports/phase-22.md).
 
 <details>
 <summary>Phase 14: Batch Processing</summary>
@@ -231,7 +235,7 @@ Top level, outside the modules:
 ├── .env.example        # every variable, documented; .env itself is gitignored
 ├── docker/             # prometheus, grafana and alloy configuration, bind-mounted
 ├── docs/               # roadmap, phase specs, process docs, decisions, progress, test reports
-├── scripts/            # smoke-test.sh (270 checks), sonar-setup.sh
+├── scripts/            # smoke-test.sh (~315 checks), failure-demo.sh, sonar-setup.sh
 └── .github/workflows/  # build + test every PR; publish the image on merge to main
 ```
 
@@ -2282,6 +2286,71 @@ Five databases therefore cost about 125 MiB more than one, while five JVMs cost 
 — so database-per-service stays, and the JVMs get capped instead. That measurement reversed the
 shortcut that looked obvious before anyone took it: collapsing to one database with a schema per
 service would have saved a rounding error and given up the entire architectural point.
+
+## Resilience
+
+Phase 22. What `ecomdemo-app` does when catalog-service is slow, failing, or gone.
+
+### The failure this prevents: a cascade
+
+Before this phase the catalog client had **no timeout**. If catalog-service accepted a connection and
+then stopped answering, every request that needed it would wait — for ever — each holding one of
+Tomcat's 200 request threads. Enough of those and the application has no threads left for *anything*,
+including checkout, which does not need the catalogue at all. One slow service has taken down a healthy
+one. That is a **cascading failure**, and each layer below exists to cut a different link of it.
+
+### Four layers, and the order is the design
+
+```
+Retry( CircuitBreaker( Bulkhead( HTTP call with a timeout ) ) )      resilience/ResilientCatalog
+```
+
+| Layer | What it does here | Configured in |
+|---|---|---|
+| **Timeout** | 250 ms to connect; 500 ms to answer a product read; 30 s for a CSV chunk. Without it nothing else works: a call that never returns is never counted as a failure. | `ecomdemo.catalog.*` |
+| **Bulkhead** | At most **20** catalog calls in flight. The 21st gets a 503 at once rather than a thread. A slow catalogue can hold 20 threads, never 200. | `resilience4j.bulkhead.*` |
+| **Circuit breaker** | Watches the last 10 calls; at a 50 % failure rate (after at least 5) it **opens** and refuses every call for 10 s without touching the network. Then **half-open**: 3 trial calls decide whether it closes or re-opens. | `resilience4j.circuitbreaker.*` |
+| **Retry** | Reads only, **2 attempts** (one retry) with **jitter** (≈100 ms ±50 %). Never retries an open breaker or a full bulkhead. | `resilience4j.retry.*` |
+
+**Timeouts compose.** The worst a shopper waits on a read is *attempts × read timeout + backoff* =
+2 × 500 ms + ≤150 ms ≈ **1.15 s**. The first version had 3 attempts at 1 s — 3.3 s, a policy that could
+never meet a 2 s budget — and the first smoke run on the workstation caught it. Why a stopped service
+costs a full timeout at all: it is not *refused*. The JVM caches its IP, and a SYN to a stopped
+container's address goes unanswered; once the cache expires, resolving the name took ~12 s on this
+machine. `ResilientCatalogTest` recomputes the worst case from the shipped properties.
+
+Why the order: the timeout must be innermost or the other layers never see the failure. Retry is
+outermost so each attempt passes *through* the breaker — every failed attempt counts, and an open
+breaker stops the retrying too.
+
+### Decisions worth understanding
+
+- **Only reads are retried.** A create that timed out may have *succeeded* — the request arrived, the
+  response did not. Retrying it makes a second product.
+- **Jitter** matters as soon as there is more than one caller. A thousand requests that failed at the
+  same instant and all wait exactly 100 ms retry at the same instant too: a **retry storm**, arriving
+  at a service that is trying to recover.
+- **A 404 is not a failure.** An unknown product is catalog-service working perfectly. Only I/O
+  errors, timeouts and 5xx count — otherwise a few typos would open the breaker for everyone.
+- **The breaker is not a health check.** If an open breaker made the application report DOWN, an
+  orchestrator would restart it or pull it from the load balancer, taking out checkout too.
+- **Why a 503, with `Retry-After`.** A 500 says "this server has a bug"; a 503 says "something it
+  needs is unavailable; ask again later". For an open breaker `Retry-After` is exactly how long it
+  stays open.
+- **Checkout survives the outage.** It charges the price snapshotted into the cart and only talks to
+  inventory-service. The smoke test asserts that it *succeeds* with catalog-service stopped.
+
+### Watch it
+
+```bash
+docker compose up --build --wait
+./scripts/failure-demo.sh          # stops catalog-service, narrates, restarts it
+```
+
+Open **http://localhost:3000/d/ecomdemo-resilience** alongside: circuit state over time, failure rate,
+calls by outcome (`ignored` = refused by the bulkhead), retries, bulkhead permits in use, and the 503s
+shoppers were served. `DashboardMetricsTest` checks every series the dashboard queries against the
+meters Resilience4j actually registers.
 
 ## Code quality
 

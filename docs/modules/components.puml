@@ -11,6 +11,7 @@ top to bottom direction
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
   Component(EcomdemoApplication.EcomdemoApplication.Batch, "Batch", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Resilience, "Resilience", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Order, "Order", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Metrics, "Metrics", $techn="Module", $descr="", $tags="", $link="")
@@ -32,6 +33,8 @@ Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoA
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Metrics, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Serviceclients, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Resilience, EcomdemoApplication.EcomdemoApplication.Serviceclients, "depends on", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Resilience, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Security, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
