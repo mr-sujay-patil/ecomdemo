@@ -87,12 +87,54 @@ Never paste a secret into a commit, a PR, or the conversation.
 
     ./mvnw clean verify          # the whole reactor: unit + integration tests
     docker compose up --build --wait
-    ./scripts/smoke-test.sh      # ~295 checks against the live stack
+    ./scripts/smoke-test.sh      # ~315 checks against the live stack
     docker compose --profile tools down   # --profile tools, or the network survives the stop
 
-**On a memory-constrained machine, bring the stack DOWN before either a build or `verify`.** On the
-workstation this is no longer necessary, but the ordering is still the honest one: `verify` starts
-Testcontainers, and measuring anything against a loaded Docker daemon measures the daemon.
+## No resource rationing on the workstation
+
+**Decided by the user on 2026-09-27: on the workstation, memory and CPU are not constraints.** Tests
+may run with the full stack up, builds may run beside it, containers are sized for the workload rather
+than to squeeze into a small VM, and a suspicion can be checked by running something ten times. The
+Mac-era rules — *bring the stack down before `verify`*, *never build while the stack is up*, and limits
+chosen so five JVMs fit into 3.8 GB — no longer apply, and were re-measured rather than inherited:
+
+| Measured on the workstation | Result |
+|---|---|
+| `./mvnw clean verify`, stack down | 2:03 – 2:28 |
+| `./mvnw clean verify`, **full stack up** | passes since the pre-Phase-23 hardening (it did not before — see below) |
+| `docker compose up --build --wait`, cold | 25 s – 2:14 (the long one pulls base images) |
+| `scripts/smoke-test.sh`, cold stack | about 5 minutes |
+| JVM non-heap per service | 107 – 179 MiB — a fixed cost, which is why the heap share is 50%, not 75% |
+
+**Running with the stack up found a real test defect.** Every build until the workstation had the stack
+down, so nothing listened on `localhost:8081-8084`. `EdgeSecurityIT` depended on that silently: its
+routes pointed there, and with the stack up the "empty" upstream was catalog-service answering 401.
+Rationing hid it. The test now arranges a closed port itself.
+
+**What still holds is the difference between a cold and a warm stack.** Verification uses a COLD stack
+(`down`, then `up --build --wait`), because a warm one has already paid the costs a cold start pays —
+topic creation, JIT, connection pools — and the Kafka partition race fixed before Phase 23 appeared
+only on cold starts. A measurement should say which it was.
+
+## Quirks of this machine
+
+Each of these cost time to prove environmental; they are written down so the next one does not.
+
+- **The WSL2 VM can be paused by the host** (Windows sleeping). One `verify` took **86 minutes** with
+  the CPU time of a 2-minute one: the Docker daemon took 30 minutes to start a container and the JVM
+  sat silent for 54. `dmesg | grep TimeSync` showed Hyper-V re-syncing the clock at the second the JVM
+  resumed. If a run is absurdly slow, check that and rerun before diagnosing code.
+- **Windows reserves port ranges for Hyper-V/WinNAT**, and they move — on 2026-09-27 the range
+  9022-9121 blocked Prometheus' 9090 (*"ports are not available … /forwards/expose returned
+  unexpected status: 500"*) and a few hours later did not. Check with
+  `/mnt/c/Windows/System32/netsh.exe interface ipv4 show excludedportrange protocol=tcp`. Either set
+  `PROMETHEUS_PORT` in `.env` (and export it when running the smoke test, whose `PROMETHEUS_URL`
+  follows it) or, in an admin PowerShell,
+  `net stop winnat` then `net start winnat`. Change only the HOST side: `"${PROMETHEUS_PORT:-9090}:9090"`
+  — Prometheus listens on 9090 inside its container whatever the host uses.
+- **A stopped container's name takes ~12 s to fail to resolve** inside the Compose network (Docker's
+  DNS forwards the unknown name upstream). It is why Phase 22's retry budget is built on the read
+  timeout, not the connect timeout.
 
 ## Reporting results
 
@@ -110,4 +152,5 @@ session-start sequence in `execution-protocol.md` §1 — git state → `docs/pr
 
 One caveat worth stating: `CURRENT.md` sometimes carries notes that were true of the machine that wrote
 them — Phase 21 left *"never build while the stack is up"* and *"the app's healthcheck budget is tight
-on a cold start"*. Both were measurements of the Mac. **Re-measure rather than inherit them.**
+on a cold start"*. Both were measurements of the Mac, and both were re-measured on the workstation
+(above). **Re-measure rather than inherit them.**

@@ -9,12 +9,16 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
+import org.apache.kafka.clients.admin.NewTopic;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
@@ -45,12 +49,39 @@ import org.springframework.test.context.ActiveProfiles;
  * version could fail because checkout broke, which said nothing about the consumer.
  */
 @SpringBootTest
-@Import({PostgresContainerConfig.class, KafkaContainerConfig.class})
+@Import({PostgresContainerConfig.class, KafkaContainerConfig.class, OrderPlacedConsumerIT.ProducerOwnedTopics.class})
 @ActiveProfiles("it")
 @DisplayName("orders.placed -> notification")
 class OrderPlacedConsumerIT {
 
     private static final Duration PATIENCE = Duration.ofSeconds(20);
+
+    /** Production's layout, which order-service declares. */
+    private static final int PARTITIONS = 3;
+
+    /**
+     * The topics order-service OWNS, declared here the way order-service declares them.
+     *
+     * <p>This service no longer creates {@code orders.placed} (see {@code KafkaTopicsConfig}), so
+     * something has to stand in for the producer - and it must do so BEFORE the first send, because the
+     * test broker auto-creates an unknown topic with one partition and the test would quietly be back
+     * to the layout that hid the defect. Until this existed, every test here ran against ONE partition,
+     * and "a poison message does not block the partition behind it" was true of a topic that only had
+     * one.
+     */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ProducerOwnedTopics {
+
+        @Bean
+        NewTopic ordersPlaced() {
+            return TopicBuilder.name(Topics.ORDERS_PLACED).partitions(PARTITIONS).replicas(1).build();
+        }
+
+        @Bean
+        NewTopic ordersPlacedDlt() {
+            return TopicBuilder.name(Topics.ORDERS_PLACED + Topics.DLT_SUFFIX).partitions(1).replicas(1).build();
+        }
+    }
 
     @Autowired
     private KafkaTemplate<String, Object> kafka;
@@ -115,14 +146,42 @@ class OrderPlacedConsumerIT {
         // would have been retried for ever with its offset never committed, and every message behind it
         // on the partition would have waited - head-of-line blocking, which looks like the consumer
         // hanging rather than like one bad record.
-        kafka.send(Topics.ORDERS_PLACED, "poison", "{\"this\":\"is not an OrderPlacedEvent\"}");
+        // Both on partition 1, EXPLICITLY. With three partitions the two keys may hash apart, and
+        // then the good event would not be "behind" the poison at all - the test would pass while
+        // proving nothing about head-of-line blocking.
+        kafka.send(Topics.ORDERS_PLACED, 1, "poison", "{\"this\":\"is not an OrderPlacedEvent\"}");
 
-        publish(UUID.randomUUID(), goodOrderId, "chandra");
+        publish(1, UUID.randomUUID(), goodOrderId, "chandra");
 
         await().atMost(PATIENCE).untilAsserted(() ->
                 assertThat(notifications.findByOrderId(goodOrderId))
                         .as("the message AFTER the poison one still got through")
                         .hasSize(1));
+    }
+
+    @Test
+    @DisplayName("every partition is consumed, not only the first")
+    void everyPartitionIsConsumed() {
+        // The cold-start defect in one assertion: the consumer had partition 0 and never learned of 1
+        // and 2, so a third of the orders were notified and the rest waited minutes. One event per
+        // partition, placed there explicitly, and all of them must arrive.
+        long firstOrderId = 9_100L;
+        for (int partition = 0; partition < PARTITIONS; partition++) {
+            publish(partition, UUID.randomUUID(), firstOrderId + partition, "dmitri");
+        }
+
+        await().atMost(PATIENCE).untilAsserted(() -> {
+            for (int partition = 0; partition < PARTITIONS; partition++) {
+                assertThat(notifications.findByOrderId(firstOrderId + partition))
+                        .as("the event on partition %d", partition)
+                        .hasSize(1);
+            }
+        });
+    }
+
+    /** {@link #publish(UUID, long, String)} onto one chosen partition. */
+    private void publish(int partition, UUID eventId, long orderId, String username) {
+        kafka.send(Topics.ORDERS_PLACED, partition, String.valueOf(orderId), event(eventId, orderId, username));
     }
 
     /**
@@ -135,12 +194,16 @@ class OrderPlacedConsumerIT {
      * that not sharing a jar creates.
      */
     private void publish(UUID eventId, long orderId, String username) {
-        kafka.send(Topics.ORDERS_PLACED, String.valueOf(orderId), Map.of(
+        kafka.send(Topics.ORDERS_PLACED, String.valueOf(orderId), event(eventId, orderId, username));
+    }
+
+    private static Map<String, Object> event(UUID eventId, long orderId, String username) {
+        return Map.of(
                 "eventId", eventId.toString(),
                 "orderId", orderId,
                 "username", username,
                 "totalAmount", new BigDecimal("59.97"),
                 "itemCount", 3,
-                "placedAt", Instant.now().toString()));
+                "placedAt", Instant.now().toString());
     }
 }

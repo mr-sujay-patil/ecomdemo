@@ -99,9 +99,14 @@ public class OrderPlacedListener {
      *
      * <p>Naming the template makes the choice explicit rather than emergent, so adding a third
      * template later cannot silently re-point this.
+     *
+     * <p>{@code autoCreateTopics = "false"}: left at its default, this annotation also creates the
+     * MAIN topic, with one partition, racing order-service's three. See {@code KafkaTopicsConfig} for
+     * what that cost and which topics this service declares instead.
      */
     @RetryableTopic(
             attempts = "3",
+            autoCreateTopics = "false",
             backOff = @BackOff(delay = 1000, multiplier = 2.0, jitter = 250),
             sameIntervalTopicReuseStrategy = SameIntervalTopicReuseStrategy.SINGLE_TOPIC,
             topicSuffixingStrategy = TopicSuffixingStrategy.SUFFIX_WITH_INDEX_VALUE,

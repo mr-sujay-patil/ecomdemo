@@ -23,8 +23,8 @@
     {
       "id": 1,
       "type": "stat",
-      "title": "Orders placed / min",
-      "description": "rate() of the orders.placed counter, scaled to a minute. Never the raw counter: it only goes up, and it resets to zero when the process restarts.",
+      "title": "Orders / min (selected range)",
+      "description": "Orders placed across the WHOLE selected range, divided by its length in minutes - the same window as Revenue and Average order value beside it. It used to reduce an instantaneous rate with lastNotNull, so a quiet moment at the end of the range read 0.00 for an hour that held 34 orders (the Phase 19 defect).",
       "datasource": {
         "type": "prometheus",
         "uid": "ecomdemo-prometheus"
@@ -77,10 +77,11 @@
             "uid": "ecomdemo-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(orders_placed_total{application=\"$application\"}[$__rate_interval])) * 60",
+          "expr": "sum(increase(orders_placed_total{application=\"$application\"}[$__range])) / ($__range_s / 60)",
           "legendFormat": "orders/min",
-          "range": true,
-          "refId": "A"
+          "range": false,
+          "refId": "A",
+          "instant": true
         }
       ]
     },
@@ -143,8 +144,9 @@
           "editorMode": "code",
           "expr": "sum(increase(order_value_sum{application=\"$application\"}[$__range]))",
           "legendFormat": "revenue",
-          "range": true,
-          "refId": "A"
+          "range": false,
+          "refId": "A",
+          "instant": true
         }
       ]
     },
@@ -207,16 +209,17 @@
           "editorMode": "code",
           "expr": "sum(increase(order_value_sum{application=\"$application\"}[$__range])) / sum(increase(order_value_count{application=\"$application\"}[$__range]))",
           "legendFormat": "average",
-          "range": true,
-          "refId": "A"
+          "range": false,
+          "refId": "A",
+          "instant": true
         }
       ]
     },
     {
       "id": 4,
       "type": "stat",
-      "title": "Failed checkouts",
-      "description": "The E of RED: the share of checkouts that did not become an order, for any reason. The alert rule watches the `conflict` slice of this specifically.",
+      "title": "Failed checkouts (selected range)",
+      "description": "Share of checkouts in the selected range that did not end in an order. A range with NO checkouts reads 0% explicitly: the old instantaneous ratio became 0/0 = NaN, lastNotNull SKIPPED it, and the panel showed a failure rate from minutes earlier as though it were current - the more dangerous half of the Phase 19 defect.",
       "datasource": {
         "type": "prometheus",
         "uid": "ecomdemo-prometheus"
@@ -277,10 +280,11 @@
             "uid": "ecomdemo-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(checkout_duration_seconds_count{application=\"$application\", outcome!=\"placed\"}[$__rate_interval])) / sum(rate(checkout_duration_seconds_count{application=\"$application\"}[$__rate_interval]))",
+          "expr": "(sum(increase(checkout_duration_seconds_count{application=\"$application\", outcome!=\"placed\"}[$__range])) / (sum(increase(checkout_duration_seconds_count{application=\"$application\"}[$__range])) > 0)) or vector(0)",
           "legendFormat": "failed",
-          "range": true,
-          "refId": "A"
+          "range": false,
+          "refId": "A",
+          "instant": true
         }
       ]
     },

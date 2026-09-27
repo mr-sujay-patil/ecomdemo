@@ -11,11 +11,14 @@ import io.github.resilience4j.micrometer.tagged.TaggedCircuitBreakerMetrics;
 import io.github.resilience4j.micrometer.tagged.TaggedRetryMetrics;
 import io.github.resilience4j.retry.RetryRegistry;
 import io.micrometer.core.instrument.Meter;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -116,6 +119,27 @@ class DashboardMetricsTest {
         assertThat(json).contains("name=\\\"catalog\\\"");
         assertThat(json).doesNotContainPattern("name=\\\\\"(?!catalog\\\\\")");
         assertThat(json).contains("\"uid\": \"ecomdemo-prometheus\"");
+    }
+
+    @Test
+    void noStatPanelReducesAnInstantaneousRate() throws IOException {
+        // The Phase 19 defect, as a rule. A stat panel shows ONE number, and a reducer such as
+        // lastNotNull picks it from a series. Fed rate(...[$__rate_interval]) that number is "the
+        // last few minutes", sitting beside panels that mean "the selected range" - and when the
+        // traffic stops, a ratio becomes NaN, lastNotNull skips it, and a stale figure is shown as
+        // current. Every stat must be computed over $__range, as ONE instant value.
+        for (Path dashboard : List.of(DASHBOARD, RESILIENCE_DASHBOARD)) {
+            for (JsonNode panel : new ObjectMapper().readTree(Files.readString(dashboard)).get("panels")) {
+                if (!"stat".equals(panel.get("type").asString())) {
+                    continue;
+                }
+                for (JsonNode target : panel.get("targets")) {
+                    String where = dashboard.getFileName() + " / " + panel.get("title").asString();
+                    assertThat(target.get("expr").asString()).as(where).doesNotContain("$__rate_interval");
+                    assertThat(target.path("instant").asBoolean(false)).as(where + " is an instant query").isTrue();
+                }
+            }
+        }
     }
 
     @Test

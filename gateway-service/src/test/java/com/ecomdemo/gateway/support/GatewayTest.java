@@ -18,6 +18,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
@@ -35,6 +37,14 @@ import org.springframework.test.web.reactive.server.WebTestClient;
  * is not listening and comes back 503 — which is a perfectly good "the edge let this through", and a
  * far more precise claim than standing up four services to observe the same thing.
  *
+ * <p><strong>"Not listening" is ARRANGED, not assumed.</strong> The routes default to
+ * {@code localhost:8081}-{@code 8084} - the ports the Compose stack publishes. Until the WSL2
+ * workstation, the build was always run with the stack down, so nothing answered there and these tests
+ * passed. With the stack up, the "empty room" was catalog-service itself: it answered 401 to the
+ * gateway's forwarded request and four tests failed on a machine where the gateway was perfectly
+ * correct. {@link #pointEveryRouteAtAClosedPort} now sends every route to a port this JVM has just
+ * checked is closed, so the claim holds whatever else is running.
+ *
  * <p>Tokens are MINTED rather than obtained by logging in, following {@code CatalogIntegrationTest}
  * from Phase 20c. The gateway has no login endpoint and never will; customer-service issues tokens.
  * Minting also lets a test ask for a role nobody would grant.
@@ -47,6 +57,30 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 @ActiveProfiles("test")
 @Import(RedisContainerConfig.class)
 public abstract class GatewayTest {
+
+    /**
+     * A port nothing listens on: bound to find a free one, then released. The window in which another
+     * process could take it is microseconds; the alternative - a fixed "unused" port - is exactly the
+     * assumption that failed.
+     */
+    private static final int CLOSED_PORT = closedPort();
+
+    @DynamicPropertySource
+    static void pointEveryRouteAtAClosedPort(DynamicPropertyRegistry properties) {
+        String nowhere = "http://localhost:" + CLOSED_PORT;
+        for (String upstream : new String[] {
+                "CATALOG_BASE_URL", "CUSTOMER_BASE_URL", "INVENTORY_BASE_URL", "APP_BASE_URL"}) {
+            properties.add(upstream, () -> nowhere);
+        }
+    }
+
+    private static int closedPort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (java.io.IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+    }
 
     private static final Duration FALLBACK_EXPIRY = Duration.ofMinutes(15);
 

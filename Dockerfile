@@ -142,9 +142,16 @@ EXPOSE 8080
 # --- JVM settings for a container ------------------------------------------------------------
 # MaxRAMPercentage is the one that matters. A modern JVM reads the container's memory limit
 # rather than the host's, but its default heap is 25% of it — so a 512 MB container runs a 128 MB
-# heap and spends its life in GC while 384 MB sits unused. 75% leaves room for the parts of a JVM
-# that are NOT heap: metaspace, thread stacks, code cache, direct buffers. Setting -Xmx instead
-# would hard-code a number that is wrong the moment the limit changes.
+# heap and spends its life in GC while 384 MB sits unused. Setting -Xmx instead would hard-code a
+# number that is wrong the moment the limit changes.
+#
+# 50%, not the 75% this used to be, and MEASURED (on the WSL2 workstation, after a full smoke run):
+# every service's NON-heap - metaspace, code cache, thread stacks, direct buffers - was 107-179 MiB,
+# a roughly FIXED cost per JVM, while peak heap was only 63-112 MiB. At 75% of a 320 MiB limit the heap
+# may grow to 232 MiB, and 232 + ~150 of non-heap does not fit in 320: the kernel would OOM-kill the
+# container before Java ever reported an OutOfMemoryError. That is what "97% of its limit" was. A
+# percentage is only safe when what it leaves over covers the fixed cost - see compose.yaml's limits,
+# and ContainerMemoryBudgetTest, which checks that sum for every service.
 #
 # MaxRAMPercentage, not MinRAMPercentage: the "Min" one applies only below ~250 MB of available
 # memory, which is a trap worth knowing about.
@@ -152,7 +159,7 @@ EXPOSE 8080
 # ExitOnOutOfMemoryError: a JVM that has exhausted its heap is not going to recover, and a
 # container that keeps answering health checks while failing every request is worse than one that
 # dies and gets restarted. Restarting is what an orchestrator is for.
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
 
 # --- Health check -----------------------------------------------------------------------------
 # Compose uses this to decide when the service is genuinely ready, not merely started.

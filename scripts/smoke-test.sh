@@ -1623,7 +1623,9 @@ check "JVM and pool meters are published for the USE panels" "True" \
 # --- Prometheus and Grafana ------------------------------------------------------------------------
 # Only meaningful against the compose stack. Skipped, never passed, when they are not reachable:
 # a monitoring check that quietly succeeds because nothing was there to check is worse than none.
-PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:9090}"
+# Follows PROMETHEUS_PORT, the variable compose.yaml publishes Prometheus on, so moving the host port
+# (Windows can reserve 9090 - see docs/process/development-environment.md) needs one setting, not two.
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:${PROMETHEUS_PORT:-9090}}"
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 GRAFANA_AUTH="${GRAFANA_USER:-admin}:${GRAFANA_PASSWORD:-admin}"
 
@@ -2739,12 +2741,21 @@ done
 RECOVERY_SECONDS=$(( $(date +%s) - RECOVERY_STARTED ))
 check "once catalog-service is back, add-to-cart recovers ON ITS OWN (after ${RECOVERY_SECONDS}s)" \
     "200" "$RECOVERED_STATUS"
-# A trial call has succeeded; the breaker needs three to close. Two more reads make that certain.
-request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}" >/dev/null
-request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}" >/dev/null
-scrape
-check "and the circuit breaker is CLOSED again" "1" \
-    "$(metric resilience4j_circuitbreaker_state name=catalog state=closed)"
+# One trial call has succeeded; the breaker closes after THREE, judged together. They are made
+# against a catalog-service that has just started, whose first requests can exceed the 500 ms read
+# timeout (cold JIT, empty pools) - so a trial can fail, the breaker correctly re-opens for another
+# 10 s, and closing takes a second half-open round. "Two more requests, then assert CLOSED" failed
+# one cold run in three for exactly that reason: it asserted a state at an instant rather than the
+# claim, which is that it closes ON ITS OWN. So: keep asking, as a real client would, for up to 45 s.
+BREAKER_CLOSED="0"
+for _ in $(seq 1 45); do
+    request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    scrape
+    BREAKER_CLOSED="$(metric resilience4j_circuitbreaker_state name=catalog state=closed)"
+    [ "$BREAKER_CLOSED" = "1" ] && break
+    sleep 1
+done
+check "and the circuit breaker is CLOSED again" "1" "$BREAKER_CLOSED"
 request DELETE "/api/cart/items/$RES_PRODUCT_ID" >/dev/null
 
 # --------------------------------------------------------------------------------------------
