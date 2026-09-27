@@ -89,6 +89,14 @@
 			what gateway-service's integration tests are for.
 		-->
 		<spring-cloud.version>2025.1.3</spring-cloud.version>
+		<!--
+			Resilience4j, for Phase 22. Not managed by Spring Boot, so pinned here. 2.4.0 ships a
+			`resilience4j-spring-boot4` module built against Boot 4.0 / Spring 7 - the Boot 3 module
+			would reach for auto-configuration packages Boot 4 moved. Chosen over Spring Cloud
+			CircuitBreaker (which the 2025.1.3 train would supply) because that abstraction has no
+			retry and no bulkhead of its own; this phase needs all three.
+		-->
+		<resilience4j.version>2.4.0</resilience4j.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
 		<!--

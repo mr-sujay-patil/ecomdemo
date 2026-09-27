@@ -12,56 +12,51 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 20d: Microservices Split - the last two services (tag: phase-20-complete, PRs #29-#32)
-**What exists now:** FIVE deployables, sixteen containers, five databases. `customer-service` owns
-`users` (customer_db, 8083/5435) and is the only issuer of user tokens; `notification-service` owns
-`notification` + `processed_event` (notification_db, 8085/5436) and has no business API at all;
-`catalog-service` and `inventory-service` as before; `ecomdemo-app` is order-service in all but name,
-keeping only cart/orders/outbox/batch plus two public proxies. Smoke **275 passed / 0 failed** from a
-COLD stack on `main`; **1459 MiB of 3916**. Verified and tagged 2026-09-26 at `f819d3e`.
-**Key code:** `common/.../jwt/CurrentUser` (reads CLAIMS, no repository); `common/.../clients/customer/`;
-`ecomdemo-app/.../identity/` (the auth + customer proxies); `customer-service/` and
-`notification-service/` whole modules; V15 (snapshot + backfill username, drop the user FKs) and V16
-(drop users/notification/processed_event).
-**Config & infrastructure:** `CUSTOMER_BASE_URL`; customer-db 5435, notification-db 5436; 320M caps on
-the two new services; Alloy and Prometheus cover all five; the Dockerfile copies five module poms.
-**Tests:** OrderPlacedConsumerIT (publishes a MAP, not its own record), CustomerIntegrationTest (the one
-base that CAN log in), ProductProxyAccessTest, EveryModuleWithIntegrationTestsRunsThemTest.
-**❗ Gotchas - read `docs/test-reports/phase-20d.md` §0 first.** Failsafe was never bound in the four
-extracted services, so their *IT tests had NOT RUN since 20b - `verify` printed BUILD SUCCESS the whole
-time, because an unbound plugin reports nothing. Binding them found five real defects. Also: a
-package-private `@BeforeEach` is not inherited across packages; the resource server needs its OWN
-authenticationEntryPoint or a bad token returns an empty body; `TokenView` guessed its field names and
-produced a 400 that blamed the caller for a response-side error; and the outbox relay stops the batch at
-the first failure, so a warm-up row left pending during an outage starves the row under test.
-**Follow-ups (not done):** rename `ecomdemo-app` to order-service (cosmetic, touches every image tag);
-Phase 21's gateway replaces both proxies and removes the plaintext password from the app's memory; the
-Phase 19 dashboard defect is now the oldest open item; a failed compensating release still leaks a
-reservation; HS256 shared secret.
+## Phase 22: Resilience (tag: phase-22-complete, PR #35)
+**What exists now:** every `ecomdemo-app` → catalog-service call goes through
+Retry(CircuitBreaker(Bulkhead(HTTP call with a timeout))). catalog-service down: add-to-cart is a 503
++ Retry-After in ~0.6 s, the breaker opens after 5 failed calls (refusals ~20 ms), CHECKOUT STILL
+SUCCEEDS (cart snapshot), and it recovers on its own ~10 s after a restart. Grafana dashboard
+"EcomDemo Resilience". Smoke **313 / 0** cold on the WSL2 workstation.
+**Key code:** `ecomdemo-app/.../resilience/` (`ResilientCatalog`, `CatalogResilienceConfig` - a static
+BeanPostProcessor wrapping the HTTP `CatalogClient` IN PLACE, so the ITs' @Primary fake is untouched);
+`common/.../clients/catalog/CatalogProperties` (connect/read/bulk-read timeouts, two RestClients);
+`common/.../shared/ServiceUnavailableException` → 503 in `GlobalExceptionHandler`.
+**Config & infrastructure:** `resilience4j.*.instances.catalog.*` and `ecomdemo.catalog.*-timeout` in the
+app's application.properties (250 ms connect, 500 ms read, 30 s bulk; 2 attempts; window 10 / min 5 /
+50 %; open 10 s; bulkhead 20). `resilience4j.version` 2.4.0 in the parent. `scripts/failure-demo.sh`.
+**Tests:** ResilientCatalogTest (loads the SHIPPED resilience4j.* properties into R4j's own
+auto-config; includes the worst-case budget sum), CatalogClientTimeoutTest (real slow HttpServer),
+DashboardMetricsTest (+ resilience series from the real binders); smoke §Resilience (18 checks).
+**Gotchas:** a STOPPED container is not refused - cached IP → SYN unanswered (connect timeout); expired
+cache → name resolution hangs ~12 s (the connect timeout does NOT cover DNS; the read timeout bounds it).
+Timeouts compose: attempts × read timeout + backoff must fit the budget. `resilience4j-micrometer` must
+not be test-scoped. Windows reserved 9022-9121 (WinNAT) → Prometheus 9090 failed; use PROMETHEUS_PORT.
+A VM pause made one `verify` take 86 min.
+**Follow-ups (not done):** cold-start poison-message partition stall (seen once in 3 cold runs); the
+gateway has no breaker on its own `/api/products` route; notification-service at 97 % of its 320M cap;
+resilience for the inventory calls (checkout's real dependency); Phase 21 recorded no decisions.
 
-## Phase 20c: Microservices Split - catalog-service (tag: NONE - see below, PR #28)
-**What exists now:** THREE deployables. `catalog-service` owns `product` in `catalog_db` (Flyway
-V1-V2) and the Redis cache that serves it; `inventory-service` owns stock; `ecomdemo-app` is the
-rest, plus the PUBLIC `/api/products` which forwards to catalog-service. 426 tests
-(5 + 34 + 41 + 281 + 65), smoke **270 cold / 271 warm**, twelve containers, **1486 MiB of 3916**.
-**TWO of five services remain. `phase-20-complete` is NOT tagged.**
-**Key code:** `common/.../clients/` (CatalogGateway, InventoryGateway, ServiceIdentityConfig - the
-clients and the identity a caller signs with); `catalog-service/` whole module;
-`ecomdemo-app/.../catalog/ProductController` (the temporary public proxy, replaced by Phase 21's
-gateway); `V14__drop_product.sql`.
-**Config & infrastructure:** `catalog-db` (5434) + `catalog-service` (8081), 384M each;
-`CATALOG_BASE_URL`; Alloy and Prometheus cover all three services; Dockerfile copies three module
-poms and `DockerfileCoversEveryModuleTest` checks it does.
-**Tests:** CatalogSchemaTest, ProductProxyAccessTest, DockerfileCoversEveryModuleTest,
-CatalogIntegrationTest (base: containers + a SERVICE token, because this service has no login).
-**Gotchas:** THREE more failures that passed every test and still broke the container -
-`spring-boot-restclient` at TEST scope (the RestClient.Builder bean is auto-configured there, so the
-test classpath had a bean the runtime did not); the Dockerfile's per-module COPY list going stale;
-and `InMemoryCatalog` storing a stock number instead of asking inventory for it on every read, which
-four ITs caught. Also: product ids are only unique within catalog_db, so anything counting by a
-foreign id across a re-provision needs its window scoped - the smoke race check found two orders
-holding "the same" product.
-**Follow-ups (not done, out of scope):** extract customer-service and notification-service;
-`order-service` is the residue. That is 20d. Still open: the CSV import's partial-failure window, a
-failed compensating release leaking a reservation, the HS256 shared secret, and the Phase 19
-dashboard defect.
+## Phase 21: API Gateway (tag: phase-21-complete, PR #33)
+**What exists now:** SIX deployables, seventeen containers. `gateway-service` (Spring Cloud Gateway
+5.0.3, train 2025.1.3, reactive/Netty) owns host port **8080** and routes to all five services; the
+app moved to **8084** (white-box checks only). JWT validated at the edge, Redis rate limiter (50/s,
+burst 100, per caller), CORS, correlation-ID filter. The app's three proxies are gone, so a login's
+plaintext password never passes through `ecomdemo-app`. Smoke **295 / 0**; **1387 MiB of 3916**.
+Verified and tagged 2026-09-26 at `f7d5021` (on the Mac).
+**Key code:** `gateway-service/.../gateway/` - `GatewaySecurityConfig`, `GatewayJwtConfig`,
+`RateLimitConfig`, `CorrelationIdWebFilter`, `ServiceIdentityFilter` (mints a SERVICE token for
+anonymously-permitted paths, ordered AFTER security, never replaces a caller's token), `ApiErrors`.
+**Config & infrastructure:** `GATEWAY_PORT=8080`, `APP_PORT=8084` in `.env`; routes in
+`gateway-service/src/main/resources/application.yml`; the smoke script has `BASE_URL` (gateway) and
+`APP_URL` (app, for actuator/api-docs).
+**Tests:** EdgeSecurityIT (edge decisions, NO upstreams), gateway 7 unit + 15 ITs; smoke burst check
+(one curl, one connection, 300 requests, 40 in flight -> 429s).
+**Gotchas:** springdoc types in a scanned `@Configuration` break a service that omits the optional dep;
+Maven exclusions are per DECLARATION (a `test-jar` declaration inherited none -> Tomcat at test scope);
+`@AutoConfigureWebTestClient` is for MOCK slices; a burst check slower than the refill rate tests the
+client, not the limiter. The gateway's actuator answers under the same paths as the app's - point
+white-box checks at `APP_URL`.
+**Follow-ups (not done):** catalog-service has no springdoc; only `ecomdemo-app` logs structured, so a
+correlation ID dies at the hop; the gateway does no request logging; HS256 shared secret; Phase 19
+dashboard defect; a failed compensating release leaks a reservation.

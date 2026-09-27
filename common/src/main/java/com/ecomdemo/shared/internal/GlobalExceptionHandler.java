@@ -4,6 +4,7 @@ import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.shared.AuthMessages;
+import com.ecomdemo.shared.ServiceUnavailableException;
 import java.util.stream.Collectors;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.security.access.AccessDeniedException;
@@ -12,6 +13,7 @@ import org.springframework.security.authentication.AuthenticationTrustResolverIm
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -47,6 +49,22 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<ApiError> handleConflict(ConflictException ex) {
         return build(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    /**
+     * 503: a service this request needs is down, overloaded, or behind an open circuit breaker.
+     *
+     * <p>{@code Retry-After} is in whole seconds, rounded UP and never zero: "retry after 0"
+     * invites exactly the immediate retry a breaker is open to prevent. The message is the
+     * exception's own — it names the dependency and what happened, never a host, a stack trace or
+     * an exception class, because those are for the log, not the client.
+     */
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<ApiError> handleServiceUnavailable(ServiceUnavailableException ex) {
+        long seconds = Math.max(1, (ex.retryAfter().toMillis() + 999) / 1000);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, Long.toString(seconds))
+                .body(new ApiError(HttpStatus.SERVICE_UNAVAILABLE.value(), ex.getMessage()));
     }
 
     /**

@@ -20,9 +20,13 @@ import org.springframework.web.client.RestClient;
 public class CatalogClient implements CatalogGateway {
 
     private final RestClient rest;
+    private final RestClient bulk;
 
-    CatalogClient(RestClient catalogRestClient) {
+    // Two clients that differ only in their read timeout; see CatalogProperties. The parameter
+    // names are what select the beans - there are several RestClients in the context.
+    CatalogClient(RestClient catalogRestClient, RestClient catalogBulkRestClient) {
         this.rest = catalogRestClient;
+        this.bulk = catalogBulkRestClient;
     }
 
     @Override
@@ -77,7 +81,7 @@ public class CatalogClient implements CatalogGateway {
 
     @Override
     public List<ProductSnapshot> upsertAll(List<ProductUpsert> products) {
-        return rest.post()
+        return bulk.post()
                 .uri("/api/products/batch")
                 .body(products)
                 .retrieve()
