@@ -12,6 +12,27 @@
 # The file is `compose.yaml`, not `docker-compose.yml`: that is the name the Compose
 # specification settled on, and `version:` at the top is long obsolete.
 
+# ---------------------------------------------------------------------------------------------
+# Observability settings every Spring service shares (Phase 23)
+# ---------------------------------------------------------------------------------------------
+# A top-level key starting with `x-` is an EXTENSION FIELD: Compose ignores it, which makes it a
+# safe place to hang a YAML anchor (`&name`). Each service merges it into its own environment
+# with `<<: *observability-env`, so the six services cannot disagree about where spans go or how
+# many are kept - the same reason ecomdemo-observability.properties exists on the Java side.
+x-observability-env: &observability-env
+  # Structured logging (Phase 16, every service since Phase 23). Empty outside compose, so
+  # `./mvnw spring-boot:run` on a laptop keeps the readable pattern layout; `ecs` here because a
+  # container's stdout is read by Alloy and parsed as JSON, never by a person scrolling.
+  LOG_FORMAT: ${LOG_FORMAT:-ecs}
+  # Where finished spans are sent: Tempo's OTLP/HTTP receiver. Setting this is what makes Boot
+  # create the exporter at all. There is deliberately no `depends_on: tempo` - tracing is not a
+  # reason for a shop to refuse to start. With Tempo down the exporter drops spans and logs a
+  # warning; the requests they describe are unaffected.
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://tempo:4318/v1/traces
+  # 1.0 = record every trace. Right for a laptop and required by the smoke test; production would
+  # use something like 0.1 (the default in the properties file explains the trade-off).
+  TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-1.0}
+
 services:
 
   # -------------------------------------------------------------------------------------------
@@ -117,6 +138,7 @@ services:
         # then fail, which is a strange first impression of `docker compose up`.
         condition: service_healthy
     environment:
+      <<: *observability-env
       # --- CONTAINER NETWORKING -------------------------------------------------------------
       # `db` is a hostname here, resolved by Compose's own DNS on the network it creates for this
       # project. Not localhost: in a container, localhost is that container. And not 5432 on the
@@ -156,11 +178,6 @@ services:
       CATALOG_BASE_URL: http://catalog-service:8081
       CUSTOMER_BASE_URL: http://customer-service:8083
 
-      # Structured logging (Phase 16). Empty everywhere else, so `./mvnw spring-boot:run` on a
-      # laptop keeps the readable pattern layout; `ecs` here because this container's stdout is
-      # read by Alloy and parsed as JSON, never by a person scrolling. See the logging section of
-      # application.properties.
-      LOG_FORMAT: ${LOG_FORMAT:-ecs}
     volumes:
       # The batch working directory (Phase 14). A named volume rather than container-local space,
       # because a restart of a failed import re-reads the file it was given BY PATH: if the
@@ -267,6 +284,7 @@ services:
       customer-db:
         condition: service_healthy
     environment:
+      <<: *observability-env
       CUSTOMER_DB_HOST: customer-db
       CUSTOMER_DB_PORT: 5432
       CUSTOMER_DB_NAME: ${CUSTOMER_DB_NAME:-customer}
@@ -337,6 +355,7 @@ services:
         # others, which merely lose a feature.
         condition: service_healthy
     environment:
+      <<: *observability-env
       NOTIFICATION_DB_HOST: notification-db
       NOTIFICATION_DB_PORT: 5432
       NOTIFICATION_DB_NAME: ${NOTIFICATION_DB_NAME:-notification}
@@ -416,6 +435,7 @@ services:
         # keeps the first `docker compose up` free of errors that mean nothing.
         condition: service_healthy
     environment:
+      <<: *observability-env
       CATALOG_DB_HOST: catalog-db
       CATALOG_DB_PORT: 5432
       CATALOG_DB_NAME: ${CATALOG_DB_NAME:-catalog}
@@ -465,6 +485,7 @@ services:
       kafka:
         condition: service_healthy
     environment:
+      <<: *observability-env
       INVENTORY_DB_HOST: inventory-db
       INVENTORY_DB_PORT: 5432
       INVENTORY_DB_NAME: ${INVENTORY_DB_NAME:-inventory}
@@ -531,6 +552,7 @@ services:
       inventory-service:
         condition: service_healthy
     environment:
+      <<: *observability-env
       # The route targets, by compose service name on the internal network. The application is
       # still `app:8080` in here - only its HOST mapping moved to 8084.
       APP_BASE_URL: http://app:8080
@@ -676,6 +698,29 @@ services:
     # worth calling - http://localhost:3100/ready returns 503 with a reason until the ingester has
     # joined its own ring - but nothing inside this container can call it, so the check lives in
     # scripts/smoke-test.sh, on the host, where curl exists.
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # Tempo (Phase 23) - stores the traces
+  # -------------------------------------------------------------------------------------------
+  tempo:
+    image: grafana/tempo:3.0.3
+    container_name: ecomdemo-tempo
+    command:
+      - -target=all
+      - -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./docker/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      # The write-ahead log and the trace blocks. Named for the same reason Loki's are: the trace
+      # anyone wants to look at is usually the one from before the restart.
+      - tempo-data:/var/tempo
+    ports:
+      # The query API, published for the smoke test and for curl. Grafana reaches Tempo at
+      # `tempo:3200`, and the services send spans to `tempo:4318`, both on the compose network -
+      # so the OTLP receiver needs no host port at all.
+      - "${TEMPO_PORT:-3200}:3200"
+    # NO HEALTHCHECK, for the reason Loki has none: the image is distroless (no shell, no wget).
+    # GET /ready is the real readiness signal, and scripts/smoke-test.sh calls it from the host.
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
@@ -856,6 +901,9 @@ volumes:
 
   # Loki's chunks and index.
   loki-data:
+
+  # Tempo's write-ahead log and trace blocks (Phase 23).
+  tempo-data:
 
   # Alloy's read positions, so a restart does not re-ship every container's whole log.
   alloy-data:

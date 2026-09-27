@@ -34,7 +34,8 @@ import org.springframework.context.annotation.Import;
         "com.ecomdemo.clients",
         "com.ecomdemo.jwt",
         "com.ecomdemo.logging",
-        "com.ecomdemo.shared"
+        "com.ecomdemo.shared",
+        "com.ecomdemo.tracing"
 })
 @ConfigurationPropertiesScan(basePackages = {
         "com.ecomdemo.catalog",
