@@ -30,6 +30,7 @@ After auto-compaction, or whenever unsure of the state, rerun this sequence befo
 | Git rules, commands, verification checklist | `docs/process/git-workflow.md` |
 | Testing before a PR and after a merge | `docs/process/testing-protocol.md` |
 | What to load, checkpoint and summary rules | `docs/process/context-management.md` |
+| Machine setup, WSL2, and which machine ran a result | `docs/process/development-environment.md` |
 | Current phase scope | `docs/phases/phase-XX-*.md` (one file) |
 | In-phase checkpoint | `docs/progress/CURRENT.md` |
 | Last two phases' summaries | `docs/progress/RECENT.md` |
