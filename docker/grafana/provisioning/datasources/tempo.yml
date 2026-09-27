@@ -1,0 +1,41 @@
+# Grafana datasource provisioning: Tempo (Phase 23).
+#
+# Same mechanism and reasoning as prometheus.yml and loki.yml next to it: the datasource exists
+# because this file does, and deleting the Grafana volume costs nothing.
+
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    # Proxied through Grafana's backend, because `tempo` resolves only on the compose network.
+    access: proxy
+    url: http://tempo:3200
+    # Fixed UID: loki.yml's derived field points at it, and a generated UID would break that link
+    # every time the Grafana volume was recreated.
+    uid: ecomdemo-tempo
+    isDefault: false
+    editable: false
+    jsonData:
+      # TRACES TO LOGS: the "Logs for this span" button on every span. It is the other half of the
+      # derived field in loki.yml, and the two together are the phase's "linked from Loki to Tempo"
+      # in both directions.
+      #
+      # A custom query rather than Grafana's generated one because the generated one searches the
+      # log TEXT for the ID (`|= "<id>"`), a full scan of every line. Alloy stores the trace ID as
+      # STRUCTURED METADATA (see config.alloy), so this is a field comparison instead. The stream
+      # selector matches every service on purpose: "every log line of this trace" is the question,
+      # and the trace already knows which services it crossed.
+      tracesToLogsV2:
+        datasourceUid: ecomdemo-loki
+        customQuery: true
+        query: '{service_name=~".+"} | trace_id = `${__trace.traceId}`'
+        # A span's own start and end are the tightest honest window, but a log line and a span are
+        # timestamped by different clocks at slightly different moments. A minute either side
+        # costs nothing and keeps the edge lines in.
+        spanStartTimeShift: '-1m'
+        spanEndTimeShift: '1m'
+      # Finding a trace by its ID needs nothing else; the search tab uses TraceQL, which Tempo
+      # answers without any extra configuration.
+      search:
+        hide: false

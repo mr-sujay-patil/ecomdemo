@@ -147,6 +147,7 @@ loki.process "ecs" {
       level          = "log.level",
       logger         = "log.logger",
       correlation_id = "correlation_id",
+      trace_id       = "traceId",
     }
   }
 
@@ -163,9 +164,14 @@ loki.process "ecs" {
   // home for a high-cardinality identifier: one value per request would be one stream per request
   // as a label, while as metadata it costs nothing to write and is found with
   // `| correlation_id = "..."` at query time.
+  //
+  // The trace ID (Phase 23) is the same kind of value and goes to the same place. It is what
+  // Tempo's "Logs for this span" button queries (`| trace_id = "..."`, see tempo.yml), so a line
+  // without it is a line that cannot be reached from its trace.
   stage.structured_metadata {
     values = {
       correlation_id = "",
+      trace_id       = "",
       logger         = "",
     }
   }
