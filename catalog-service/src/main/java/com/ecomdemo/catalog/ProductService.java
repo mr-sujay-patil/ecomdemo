@@ -11,7 +11,9 @@ import java.util.Map;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.clients.catalog.ProductUpsert;
+import com.ecomdemo.outbox.Outbox;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Caching;
@@ -72,10 +74,20 @@ public class ProductService {
      */
     private final InventoryGateway inventory;
 
+    /**
+     * Phase 28: every write announces {@link ProductChanged} through the outbox, in its own
+     * transaction, so the search index hears about exactly the changes that committed. Here rather
+     * than in the controller, because the CSV import and the description generator write through
+     * this class too, and an index that only heard about the REST API's edits would drift.
+     */
+    private final Outbox outbox;
+
     public ProductService(ProductRepository productRepository,
-            InventoryGateway inventory) {
+            InventoryGateway inventory,
+            Outbox outbox) {
         this.inventory = inventory;
         this.productRepository = productRepository;
+        this.outbox = outbox;
     }
 
     /**
@@ -125,6 +137,7 @@ public class ProductService {
         Product product = new Product(
                 request.name(), request.description(), request.price(), request.category());
         Product saved = productRepository.save(product);
+        announce(saved.getId());
 
         // The stock row is created here, by the code that creates the product, because there is
         // no foreign key to do it - see the V11 migration for why adding one would be a liability
@@ -159,6 +172,7 @@ public class ProductService {
         product.setPrice(request.price());
         product.setCategory(request.category());
         Product saved = productRepository.save(product);
+        announce(id);
 
         inventory.setStockLevel(id, request.stockQuantity());
 
@@ -177,7 +191,9 @@ public class ProductService {
     public Product replaceDescription(Long id, String description) {
         Product product = requireProduct(id);
         product.setDescription(description);
-        return productRepository.save(product);
+        Product saved = productRepository.save(product);
+        announce(id);
+        return saved;
     }
 
     /** A delete has to remove both: the entry for this id, and the listing that contained it. */
@@ -187,6 +203,7 @@ public class ProductService {
     @Transactional
     public void delete(Long id) {
         productRepository.delete(requireProduct(id));
+        announce(id);
         inventory.forget(id);
     }
 
@@ -199,6 +216,41 @@ public class ProductService {
      */
     public Product requireProduct(Long id) {
         return productRepository.findById(id).orElseThrow(() -> NotFoundException.product(id));
+    }
+
+    /**
+     * These products, in the order the ids were given, skipping any that no longer exist; with one
+     * stock lookup for all of them. For the semantic search, whose ranking is the order.
+     *
+     * <p>Not cached, and reading the database rather than trusting the index: the index holds what
+     * the product said when it was last embedded, which can be a second behind an edit.
+     */
+    public List<ProductResponse> findAllInOrder(List<Long> ids) {
+        if (ids.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, Product> byId = productRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Product::getId, product -> product));
+        List<Long> found = ids.stream().filter(byId::containsKey).toList();
+        Map<Long, Integer> quantities = inventory.quantitiesFor(found);
+        return found.stream()
+                .map(id -> ProductResponse.from(byId.get(id), quantities.getOrDefault(id, 0)))
+                .toList();
+    }
+
+    /** The product, or empty if it does not exist (any more): for callers to whom that is not an error. */
+    public Optional<Product> findProduct(Long id) {
+        return productRepository.findById(id);
+    }
+
+    /**
+     * Writes the event into the CURRENT transaction; {@code Outbox.append} refuses to run without
+     * one. The product id is the Kafka key, so every event about one product lands on one
+     * partition, in order.
+     */
+    private void announce(Long productId) {
+        ProductChanged event = ProductChanged.of(productId);
+        outbox.append(ProductChanged.AGGREGATE, productId, event.eventId(), event);
     }
 
     /**
@@ -287,6 +339,7 @@ public class ProductService {
     public List<ProductSnapshot> upsertAll(List<ProductUpsert> products) {
         List<Product> entities = products.stream().map(this::toEntity).toList();
         List<Product> saved = productRepository.saveAll(entities);
+        saved.forEach(product -> announce(product.getId()));
         return saved.stream()
                 // stockQuantity is null, deliberately: the import sets stock through its OWN call
                 // to inventory-service, and a number invented here would be a guess about another

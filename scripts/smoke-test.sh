@@ -3337,9 +3337,26 @@ LLM_METRIC_BEFORE="$(catalog_scrape \
     | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
 [ "$LLM_METRIC_BEFORE" = "MISSING" ] && LLM_METRIC_BEFORE=0
 
+# Up to three attempts, the way a client honouring Retry-After would. A real model's output varies
+# from call to call: in Phase 28's real-model runs llama3.2 once wrote a 71-character SEO title, the
+# service refused it with 503 "unusable answer" (correctly - that is the graceful degradation), and
+# the next call was fine. Only THAT kind of refusal is retried; "not configured" and "did not answer"
+# are the same every time. Headers are kept per attempt, so the Retry-After check below reads the
+# refusal it describes, not a new request that might succeed.
 as_admin
-LLM_STATUS="$(request POST "/api/products/$LLM_PRODUCT/generate-description")"
-cp "$BODY" "$BODY.llm"
+LLM_ATTEMPTS=0
+while :; do
+    LLM_ATTEMPTS=$((LLM_ATTEMPTS + 1))
+    LLM_STATUS="$(curl -sS -o "$BODY" -D "$BODY.llm.headers" -w '%{http_code}' -X POST \
+        "$BASE_URL/api/products/$LLM_PRODUCT/generate-description" -H "Authorization: Bearer $AUTH")"
+    cp "$BODY" "$BODY.llm"
+    if [ "$LLM_STATUS" = "503" ] && [ "$LLM_ATTEMPTS" -lt 3 ] \
+        && jget "d['message']" | grep -q "unusable answer"; then
+        printf '        attempt %s: the model broke the limits, refused with 503 and retried\n' "$LLM_ATTEMPTS"
+        continue
+    fi
+    break
+done
 
 case "$LLM_STATUS" in
     200)
@@ -3371,8 +3388,7 @@ case "$LLM_STATUS" in
                 "200" "503: $(jget "d['message']") (a model is configured but did not answer usably)"
         fi
         check "a refusal says when to retry (Retry-After)" "True" \
-            "$(curl -sS -o /dev/null -D - -X POST "$BASE_URL/api/products/$LLM_PRODUCT/generate-description" \
-                -H "Authorization: Bearer $AUTH" | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+            "$(grep -qi '^retry-after: [1-9]' "$BODY.llm.headers" && echo True || echo False)"
         request GET "/api/products/$LLM_PRODUCT" >/dev/null
         check "and the product is left exactly as it was" "$LLM_ORIGINAL" "$(jget "d['description']")"
         ;;
@@ -3381,7 +3397,7 @@ case "$LLM_STATUS" in
             "$LLM_STATUS: $(python3 -c "print(open('$BODY.llm').read()[:200])" 2>/dev/null)"
         ;;
 esac
-rm -f "$BODY.llm"
+rm -f "$BODY.llm" "$BODY.llm.headers"
 
 LLM_METRIC_AFTER="$(catalog_scrape \
     | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
@@ -3392,6 +3408,134 @@ as_admin
 request DELETE "/api/products/$LLM_PRODUCT" >/dev/null
 check "the probe product is deleted, generation history and all" "404" \
     "$(request GET "/api/products/$LLM_PRODUCT")"
+as_customer
+
+# --------------------------------------------------------------------------------------------
+# Semantic search (Phase 28)
+# --------------------------------------------------------------------------------------------
+# GET /api/products/search?q=... embeds the query and returns the products nearest in meaning,
+# from pgvector. Like the LLM section, the MODEL is the operator's choice (AI_EMBEDDING_PROVIDER):
+# what must hold either way is checked every run - who may start and watch the backfill, and that
+# every product write is announced through the outbox and published to Kafka - and the search
+# itself only when a model answers. Without one it is a SKIP with the setup steps, never a pass.
+section "Semantic search"
+
+# The phase's query. It shares no word with "Noise-Cancelling Headphones - Over-ear ANC headphones,
+# 30h battery", so keyword search cannot find it; the check below proves that against the database
+# rather than asserting it.
+SEARCH_QUERY="I want to listen to music without hearing the plane"
+SEARCH_EXPECTED="Noise-Cancelling Headphones"
+
+urlq() { python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "$1"; }
+
+catalog_sql() {
+    ctr_exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+        psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" -c "$1" 2>/dev/null | tr -d '\r '
+}
+
+as_anonymous
+check "search is public, and an empty query is a 400" "400" "$(request GET "/api/products/search?q=%20")"
+check "starting the embedding backfill needs a token (401)" "401" \
+    "$(request POST /api/products/embeddings/backfill)"
+as_customer
+check "and an ADMIN one: a customer gets 403" "403" "$(request POST /api/products/embeddings/backfill)"
+check "a backfill's progress is ADMIN-only too, although it is a GET under /api/products" "403" \
+    "$(request GET /api/products/embeddings/backfill/1)"
+
+as_admin
+SEARCH_BACKFILL_STATUS="$(request POST /api/products/embeddings/backfill)"
+cp "$BODY" "$BODY.search"
+
+# Every product write is announced, model or not: the index built later depends on it.
+request POST /api/products \
+    '{"name":"Search Probe Flask","description":"Vacuum-insulated steel bottle that keeps water ice cold for 24 hours","price":1599.00,"stockQuantity":2,"category":"OUTDOOR"}' \
+    >/dev/null
+SEARCH_PRODUCT="$(jget "d['id']")"
+check "creating a product writes ProductChanged to catalog's outbox, in the same transaction" "1" \
+    "$(catalog_sql "SELECT count(*) FROM outbox_event WHERE event_type = 'ProductChanged' AND aggregate_id = '$SEARCH_PRODUCT';")"
+SEARCH_PUBLISHED=0
+for _ in $(seq 1 30); do
+    SEARCH_PUBLISHED="$(catalog_sql "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$SEARCH_PRODUCT' AND published_at IS NOT NULL;")"
+    [ "${SEARCH_PUBLISHED:-0}" -ge 1 ] && break
+    sleep 1
+done
+check "and the relay publishes it to catalog.product-changed" "1" "$SEARCH_PUBLISHED"
+
+case "$SEARCH_BACKFILL_STATUS" in
+    202)
+        SEARCH_EXECUTION="$(python3 -c "import json; print(json.load(open('$BODY.search'))['executionId'])")"
+        for _ in $(seq 1 120); do
+            request GET "/api/products/embeddings/backfill/$SEARCH_EXECUTION" >/dev/null
+            case "$(jget "d['status']")" in COMPLETED|FAILED|STOPPED) break ;; esac
+            sleep 1
+        done
+        check "the backfill job completes" "COMPLETED" "$(jget "d['status']")"
+        printf '        %s products read, %s embedded; failure: %s\n' \
+            "$(jget "d['read']")" "$(jget "d['written']")" "$(jget "d['failure']")"
+
+        # The probe was created after the backfill STARTED, so the event is what indexes it.
+        # Waited for by its row rather than by a search, so this does not depend on the ranking.
+        SEARCH_INDEXED=0
+        for _ in $(seq 1 30); do
+            SEARCH_INDEXED="$(catalog_sql "SELECT count(*) FROM product_embedding WHERE id = $SEARCH_PRODUCT;")"
+            [ "${SEARCH_INDEXED:-0}" -ge 1 ] && break
+            sleep 1
+        done
+        check "a new product is embedded from its event, with no backfill (outbox -> Kafka -> indexer)" "1" \
+            "$SEARCH_INDEXED"
+        check "every product has an embedding" "0" \
+            "$(catalog_sql "SELECT count(*) FROM product p WHERE NOT EXISTS (SELECT 1 FROM product_embedding e WHERE e.id = p.id);")"
+
+        as_anonymous
+        check "the phase's natural-language query answers 200" "200" \
+            "$(request GET "/api/products/search?q=$(urlq "$SEARCH_QUERY")")"
+        printf '        "%s" -> %s\n' "$SEARCH_QUERY" \
+            "$(jget "', '.join('%s %.3f' % (h['product']['name'], h['similarity']) for h in d['results'][:3])")"
+        check "and ranks the product it means first" "$SEARCH_EXPECTED" \
+            "$(jget "d['results'][0]['product']['name'] if d['results'] else 'NO RESULTS'")"
+        SEARCH_WORDS="$(python3 -c "import sys; print(' '.join(w for w in sys.argv[1].lower().split() if len(w) > 3))" "$SEARCH_QUERY")"
+        SEARCH_KEYWORD_HITS=0
+        for word in $SEARCH_WORDS; do
+            hits="$(catalog_sql "SELECT count(*) FROM product WHERE name = '$SEARCH_EXPECTED' AND (name ILIKE '%$word%' OR description ILIKE '%$word%');")"
+            SEARCH_KEYWORD_HITS=$((SEARCH_KEYWORD_HITS + ${hits:-0}))
+        done
+        check "which keyword search misses: none of the query's words is in its name or description" "0" \
+            "$SEARCH_KEYWORD_HITS"
+        request GET "/api/products/search?q=$(urlq "$SEARCH_QUERY")&category=ACCESSORIES" >/dev/null
+        check "a category filter runs inside the vector query" "True" \
+            "$(jget "all(h['product']['category'] == 'ACCESSORIES' for h in d['results']) and all(h['product']['name'] != '$SEARCH_EXPECTED' for h in d['results'])")"
+        request GET "/api/products/search?q=$(urlq "$SEARCH_QUERY")&maxPrice=3000" >/dev/null
+        check "and so does a price range" "True" \
+            "$(jget "all(float(h['product']['price']) <= 3000 for h in d['results'])")"
+
+        SEARCH_INDEXING="$(catalog_scrape \
+            | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_search_indexing_seconds_count outcome=indexed)"
+        check "indexing and searching are measured in catalog-service's metrics" "True" \
+            "$(python3 -c "print('$SEARCH_INDEXING' != 'MISSING' and float('$SEARCH_INDEXING') > 0)")"
+        ;;
+    503)
+        if python3 -c "import json; print(json.load(open('$BODY.search'))['message'])" | grep -q "not configured"; then
+            skip "the phase's natural-language query ranks the product it means first" \
+                "no embedding model configured. To run it: install Ollama on the host, run 'ollama pull nomic-embed-text' and set AI_EMBEDDING_PROVIDER=ollama in .env (or AI_EMBEDDING_PROVIDER=openai with OPENAI_API_KEY); then 'docker compose up -d catalog-service' and run this script again"
+        else
+            fail "the backfill job starts" "202" "503: $(python3 -c "import json; print(json.load(open('$BODY.search'))['message'])")"
+        fi
+        as_anonymous
+        check "search without a model is a 503 that says when to retry" "True" \
+            "$(curl -sS -o /dev/null -D - "$BASE_URL/api/products/search?q=laptop" \
+                | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+        ;;
+    *)
+        fail "the backfill job starts, or is refused with 503 when there is no model" "202 or 503" \
+            "$SEARCH_BACKFILL_STATUS: $(python3 -c "print(open('$BODY.search').read()[:200])" 2>/dev/null)"
+        ;;
+esac
+rm -f "$BODY.search"
+
+as_admin
+request DELETE "/api/products/$SEARCH_PRODUCT" >/dev/null
+check "the probe product is deleted, and its embedding with it" "0" \
+    "$(catalog_sql "SELECT count(*) FROM product_embedding WHERE id = $SEARCH_PRODUCT;")"
 as_customer
 
 # --------------------------------------------------------------------------------------------

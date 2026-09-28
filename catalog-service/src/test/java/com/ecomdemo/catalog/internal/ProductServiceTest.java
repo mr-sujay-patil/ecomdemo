@@ -4,6 +4,8 @@ import com.ecomdemo.catalog.ProductService;
 import com.ecomdemo.catalog.Product;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.clients.catalog.ProductUpsert;
+import com.ecomdemo.catalog.ProductChanged;
+import com.ecomdemo.outbox.Outbox;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -11,6 +13,8 @@ import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
@@ -57,6 +61,10 @@ class ProductServiceTest {
      */
     @Mock
     private com.ecomdemo.clients.inventory.InventoryClient inventory;
+
+    /** Phase 28: every write announces ProductChanged through it, for the search index. */
+    @Mock
+    private Outbox outbox;
 
     @InjectMocks
     private ProductService productService;
@@ -334,6 +342,70 @@ class ProductServiceTest {
             assertThat(saved).singleElement()
                     .extracting(ProductSnapshot::stockQuantity)
                     .isNull();
+        }
+    }
+
+    /**
+     * Phase 28: the search index learns about changes from these events, so a write that forgot to
+     * announce itself would leave that product unsearchable (or findable by its OLD description)
+     * with nothing failing anywhere.
+     */
+    @Nested
+    @DisplayName("every write announces ProductChanged, and a refused one announces nothing")
+    class Announcements {
+
+        @Captor
+        private ArgumentCaptor<Object> event;
+
+        @Test
+        @DisplayName("create announces the id the database assigned")
+        void create() {
+            when(productRepository.save(any(Product.class))).thenReturn(TestData.product(99L, "Desk Mat", "1299.00"));
+
+            productService.create(VALID_REQUEST);
+
+            verify(outbox).append(eq(ProductChanged.AGGREGATE), eq(99L), any(), event.capture());
+            assertThat(event.getValue()).isInstanceOfSatisfying(ProductChanged.class,
+                    changed -> assertThat(changed.productId()).isEqualTo(99L));
+        }
+
+        @Test
+        @DisplayName("update, a new description and delete each announce their product")
+        void updateDescriptionAndDelete() {
+            Product existing = TestData.product(3L, "Keyboard", "8999.00");
+            when(productRepository.findById(3L)).thenReturn(Optional.of(existing));
+            when(productRepository.save(existing)).thenAnswer(saveReturnsItsArgument());
+
+            productService.update(3L, VALID_REQUEST);
+            productService.replaceDescription(3L, "Generated copy");
+            productService.delete(3L);
+
+            verify(outbox, times(3)).append(eq(ProductChanged.AGGREGATE), eq(3L), any(), any());
+        }
+
+        @Test
+        @DisplayName("the bulk upsert announces every product it saved")
+        void upsertAll() {
+            when(productRepository.findById(3L)).thenReturn(Optional.of(TestData.product(3L, "A", "1.00")));
+            when(productRepository.findById(4L)).thenReturn(Optional.of(TestData.product(4L, "B", "1.00")));
+            when(productRepository.saveAll(anyList())).thenAnswer(call -> call.getArgument(0));
+
+            productService.upsertAll(List.of(
+                    new ProductUpsert(3L, "A", "a", new BigDecimal("1.00"), "TEST"),
+                    new ProductUpsert(4L, "B", "b", new BigDecimal("2.00"), "TEST")));
+
+            verify(outbox).append(eq(ProductChanged.AGGREGATE), eq(3L), any(), any());
+            verify(outbox).append(eq(ProductChanged.AGGREGATE), eq(4L), any(), any());
+        }
+
+        @Test
+        @DisplayName("an update of a missing product announces nothing")
+        void refusedWriteIsSilent() {
+            when(productRepository.findById(404L)).thenReturn(Optional.empty());
+
+            assertThatThrownBy(() -> productService.update(404L, VALID_REQUEST)).isInstanceOf(NotFoundException.class);
+
+            verifyNoInteractions(outbox);
         }
     }
 

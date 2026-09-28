@@ -8,6 +8,17 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 28: Semantic Search — products can be found by what they are for, not only by their words.**
+`GET /api/products/search?q=I want to listen to music without hearing the plane` returns the
+Noise-Cancelling Headphones first, although no word of the query is in their name or description.
+Each product's text is embedded into a 768-number vector and stored next to it in catalog-service's
+PostgreSQL with **pgvector** (HNSW index, cosine distance); category and price filters run inside the
+same query. Every product change goes through the **outbox** to Kafka, and catalog's own indexer
+re-embeds it; a **Spring Batch** job backfills everything else. The embedding model is a choice:
+`AI_EMBEDDING_PROVIDER=ollama` (`nomic-embed-text`, free), `openai`, or `none`, the default, with which
+search answers 503 and everything else works. See [Semantic search](#semantic-search) and
+[`docs/test-reports/phase-28.md`](docs/test-reports/phase-28.md).
+
 **Phase 27: LLM Integration — catalog-service can write product copy with a language model.**
 `POST /api/products/{id}/generate-description` (ADMIN) asks the configured chat model for a
 description, tags and an SEO title as **structured output**, validates the answer, saves the
@@ -622,6 +633,9 @@ is the trade, and the retry budget is what makes it honest.
 | `PUT` | `/api/products/{id}` | **ADMIN** | Replace a product |
 | `DELETE` | `/api/products/{id}` | **ADMIN** | Delete a product (204) |
 | `POST` | `/api/products/{id}/generate-description` | **ADMIN** | Write the description, tags and SEO title with the configured LLM (Phase 27); 503 if none |
+| `GET` | `/api/products/search?q=…` | anyone | Search by meaning; optional `category`, `minPrice`, `maxPrice`, `limit` (Phase 28); 503 if no embedding model |
+| `POST` | `/api/products/embeddings/backfill` | **ADMIN** | Embed every product again, as a background job (202 + execution id) |
+| `GET` | `/api/products/embeddings/backfill/{executionId}` | **ADMIN** | That run's progress, and how many products are indexed |
 | `GET` | `/api/cart` | **CUSTOMER** | Your cart with its server-calculated total |
 | `POST` | `/api/cart/items` | **CUSTOMER** | Add a product, or increase an existing line |
 | `PUT` | `/api/cart/items/{productId}` | **CUSTOMER** | Set the quantity of a line |
@@ -2765,6 +2779,119 @@ on PostgreSQL and Redis: the saved description, the evicted cache, the history r
 CASCADE and the Prometheus series. `DescriptionGenerationNotConfiguredIT` proves the default
 starts and answers 503. The smoke test's **LLM integration** section checks the real model when
 one is configured, and reports that one check as **SKIP**, with setup steps, when none is.
+
+## Semantic search
+
+Phase 28 lets a shopper describe what they want instead of guessing the words a product uses.
+
+```bash
+curl -s --get localhost:8080/api/products/search \
+  --data-urlencode "q=I want to listen to music without hearing the plane" \
+  --data-urlencode "maxPrice=20000"
+```
+
+```json
+{"query":"I want to listen to music without hearing the plane",
+ "results":[{"product":{"id":4,"name":"Noise-Cancelling Headphones","description":"Over-ear ANC headphones, 30h battery",
+             "price":14999.00,"stockQuantity":25,"category":"AUDIO"},"similarity":0.578}]}
+```
+
+A real answer from `nomic-embed-text`. None of *want, listen, music, without, hearing, plane* appears
+in that product's name or description, so a keyword search finds nothing (the smoke test checks that
+against the database). The embedding model knows that noise-cancelling headphones are what you want
+on a plane.
+
+### Setting it up
+
+| `AI_EMBEDDING_PROVIDER` | Needs | Model (override with) |
+|---|---|---|
+| `none` (default) | nothing — search and the backfill answer **503** "not configured"; everything else works | — |
+| `ollama` | Ollama on the host, then `ollama pull nomic-embed-text` (274 MB) | `nomic-embed-text` (`OLLAMA_EMBEDDING_MODEL`) |
+| `openai` | `OPENAI_API_KEY`; a fraction of a cent for the whole catalogue | `text-embedding-3-small` at 768 dimensions (`OPENAI_EMBEDDING_MODEL`) |
+
+It is independent of `AI_CHAT_PROVIDER`; one Ollama serves both if you use it for both (pull both
+models). After switching a model on, index what already exists **once**:
+
+```bash
+docker compose up -d catalog-service
+curl -s -X POST localhost:8080/api/products/embeddings/backfill -H "Authorization: Bearer $TOKEN"
+# {"executionId":1,"status":"STARTED",...}   then, until COMPLETED:
+curl -s localhost:8080/api/products/embeddings/backfill/1 -H "Authorization: Bearer $TOKEN"
+# {"executionId":1,"status":"COMPLETED","read":10,"written":10,...,"indexedProducts":10,"totalProducts":10}
+```
+
+From then on every create, edit and delete keeps the index current by itself, a second or two later.
+
+### How it works
+
+```
+ProductService.update ─┬─ UPDATE product ...                       ┐ one transaction
+                       └─ INSERT outbox_event (ProductChanged{id})  ┘
+outbox relay (1 s) ──────> Kafka  catalog.product-changed  (key = product id)
+ProductIndexer ──────────> read the product as it is NOW → embed → UPSERT product_embedding
+GET /search?q= ──────────> embed the query → nearest vectors (+ filters) → current rows + stock
+```
+
+- **Storage.** `product_embedding` (V4): the product's id (with `ON DELETE CASCADE`), the embedded
+  text, JSON metadata for the filters, and a `vector(768)`. An **HNSW** index makes "nearest" a walk of
+  a few hops through a graph instead of a comparison with every row. Spring AI's `PgVectorStore` does
+  the SQL; Flyway owns the schema.
+- **Why the outbox.** Embedding inside the write would hold a database transaction open for a
+  network call, and make every edit fail while the model is down. Through the outbox a write never
+  waits: the event exists if and only if the write committed, and the embedding catches up.
+- **Failures.** The indexer tries three times, then dead-letters the event to
+  `catalog.product-changed-dlt`, and the product is simply not searchable yet. The backfill repairs
+  that. A search while the model is down is a **503 with `Retry-After: 30`**, never an empty list
+  that would look like "no such product".
+- **The backfill** is a Spring Batch job: keyset paging over `product`, 20 products per model call,
+  its progress in the JDBC job repository (so any pod can report on it, and a failed run restarts from
+  its last chunk).
+
+### Tuning: the threshold is the model's, not yours
+
+Nearest-neighbour search always returns neighbours. Ask an electronics shop for "a sofa" and the
+closest product still comes back, so a **minimum similarity** decides what counts as a match. How
+high it should be depends on the model:
+
+| Provider | Min similarity | Prefixes | Where it came from |
+|---|---|---|---|
+| `ollama` (nomic-embed-text) | 0.5 | `search_query:` / `search_document:` | **measured**: see the test report, §3 |
+| `openai` (text-embedding-3-small) | 0.3 | none | a starting point, **not measured** (no key) |
+
+On nomic, every product scored between 0.39 and 0.65 for every query, relevant or not. The ranking at
+the top was right (the intended product first for 5 of 7 queries, first or second for all 7), but no
+threshold separates everything: 0.5 drops "a garden hose" and keeps "a sofa" → desk mat (0.62). That
+is what **hybrid search** (keyword and vector together) and re-rankers exist for. Override with
+`SEARCH_MIN_SIMILARITY`, `SEARCH_QUERY_PREFIX`, `SEARCH_DOCUMENT_PREFIX`.
+
+### Concepts
+
+- **Embeddings.** A model maps a text to a point in a space of 768 dimensions, trained so that texts
+  that mean similar things land close together, whatever words they use. The same model must embed
+  both the products and the query: vectors from two models are in two different spaces.
+- **Cosine similarity.** The angle between two vectors: 1 means the same direction. Direction carries
+  the meaning, and length mostly carries how long the text was, so the angle is what gets compared
+  (pgvector's `<=>`, cosine distance = 1 − similarity).
+- **HNSW.** Hierarchical Navigable Small World: an index that finds APPROXIMATE nearest neighbours by
+  walking a layered graph. It is fast at any size, at the cost of occasionally missing the true
+  nearest one. The alternative (IVFFlat) clusters the vectors and needs data to be built on.
+- **Semantic vs keyword vs hybrid.** Keyword search matches words: it is exact, explainable, and good
+  for names and part numbers ("SSD 1TB"). Semantic search matches meaning: it copes with paraphrase,
+  and is weak on exact tokens and on "none of these". Hybrid search runs both and merges the rankings.
+  This phase is semantic only; hybrid is a follow-up.
+- **Keeping embeddings in sync.** An index is a copy, and copies go stale. This one is kept current by
+  events for every change, repaired by a backfill for everything events missed, and never trusted for
+  the product's data: results are re-read from the catalogue.
+
+### Tests
+
+`ConceptEmbeddingModel` stands in for a model in the tests: a deterministic toy that knows six
+concepts, so "protect my computer while commuting" lands next to the laptop sleeve with no shared
+word. `SemanticSearchApiIT` (10) runs search, filters, the threshold, the backfill and the index's
+life cycle on a real pgvector; `EmbeddingSyncIT` runs API → outbox → **Kafka** → indexer → search with
+nothing called by hand; `SemanticSearchNotConfiguredIT` proves the default starts and answers 503.
+The smoke test's **Semantic search** section checks the outbox every run, and the real model's
+ranking (with the keyword baseline) when one is configured, a **SKIP** with setup steps otherwise.
 
 ## Code quality
 

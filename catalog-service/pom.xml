@@ -65,6 +65,40 @@
 			<artifactId>spring-ai-starter-model-ollama</artifactId>
 		</dependency>
 
+		<!--
+			Phase 28: semantic search. Spring AI's PgVectorStore keeps each product's embedding in
+			this service's own PostgreSQL (the pgvector extension), next to the product row, and
+			turns a search into one SQL query: nearest vectors by cosine distance, filtered by
+			metadata. No second database to run, back up or keep in step. The embeddings come from
+			the same two providers as Phase 27, chosen by AI_EMBEDDING_PROVIDER.
+		-->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-vector-store-pgvector</artifactId>
+		</dependency>
+
+		<!--
+			Phase 28: the embedding sync. Every product change writes a ProductChanged event to the
+			outbox in the same transaction (the Phase 24 library), and this service's own indexer
+			consumes it. A lost embedding is a product nobody can find by meaning, so the event
+			gets the same durability as a saga step.
+		-->
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-outbox</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+
+		<!--
+			Phase 28: the backfill is a Spring Batch job. `-jdbc`, because without it Spring Batch 6
+			keeps its JobRepository in memory (Phase 14's lesson): a backfill that dies halfway
+			could not restart from its last chunk, and nothing would record that it ever ran.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-batch-jdbc</artifactId>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -219,6 +253,12 @@
 		<dependency>
 			<groupId>org.testcontainers</groupId>
 			<artifactId>testcontainers-postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- Phase 28: EmbeddingSyncIT runs the outbox -> Kafka -> indexer path against a real broker. -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>testcontainers-kafka</artifactId>
 			<scope>test</scope>
 		</dependency>
 
