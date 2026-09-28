@@ -56,9 +56,15 @@ class LoggingStackConfigTest {
         @Test
         @DisplayName("the property that consumes LOG_FORMAT is still there to consume it")
         void thePropertyReadsTheEnvironmentVariable() throws Exception {
-            String properties = Files.readString(Path.of("src/main/resources/application.properties"));
+            // Since Phase 23 every service shares the property through one file in common, so the
+            // chain has two links: the shared file sets it, and the application imports the file.
+            String shared = Files.readString(
+                    ProjectRoot.resolve("common/src/main/resources/ecomdemo-observability.properties"));
+            String application = Files.readString(Path.of("src/main/resources/application.properties"));
 
-            assertThat(properties).contains("logging.structured.format.console=${LOG_FORMAT:}");
+            assertThat(shared).contains("logging.structured.format.console=${LOG_FORMAT:}");
+            assertThat(application)
+                    .contains("spring.config.import=classpath:ecomdemo-observability.properties");
         }
     }
 

@@ -28,7 +28,7 @@ datasources:
       # query for EVERY line sharing it - which is the phase's "Done when" as a single click
       # rather than a hand-typed LogQL expression. `datasourceUid` points the generated query back
       # at Loki itself; pointing it at a tracing datasource instead is how the same mechanism
-      # becomes logs-to-traces in Phase 23.
+      # becomes logs-to-traces - the second field below (Phase 23).
       derivedFields:
         - name: correlation_id
           matcherType: regex
@@ -36,6 +36,16 @@ datasources:
           datasourceUid: ecomdemo-loki
           url: '{service_name="app"} | correlation_id = `${__value.raw}`'
           urlDisplayLabel: 'All logs for this request'
+        # LOGS TO TRACES (Phase 23). Micrometer Tracing puts the trace ID into the MDC and the
+        # ECS JSON writes it as `traceId`: always 32 lower-case hex characters, the W3C format.
+        # With `datasourceUid` pointing at Tempo, the `url` is not a query but the trace ID
+        # itself, and the button opens that trace - every service's spans for this one request.
+        - name: trace_id
+          matcherType: regex
+          matcherRegex: '"traceId"\s*:\s*"([0-9a-f]{32})"'
+          datasourceUid: ecomdemo-tempo
+          url: '${__value.raw}'
+          urlDisplayLabel: 'View trace'
       # The maximum number of lines a query returns. Left at Grafana's default rather than raised:
       # a query that needs more than a thousand lines is a query that needs a narrower filter, and
       # the browser is what pays for the difference.

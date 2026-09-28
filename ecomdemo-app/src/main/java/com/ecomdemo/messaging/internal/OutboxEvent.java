@@ -68,6 +68,14 @@ public class OutboxEvent {
     @Column(nullable = false, updatable = false, columnDefinition = "TEXT")
     private String payload;
 
+    /**
+     * The W3C {@code traceparent} of the request that wrote this row, or {@code null} when there
+     * was no trace (rows from before Phase 23, or tracing switched off). V17 explains why it has
+     * to be stored rather than looked up: by the time the relay runs, the request is long over.
+     */
+    @Column(name = "trace_parent", length = 55, updatable = false)
+    private String traceParent;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -90,12 +98,14 @@ public class OutboxEvent {
             String aggregateType,
             String aggregateId,
             String eventType,
-            String payload) {
+            String payload,
+            String traceParent) {
         this.eventId = eventId;
         this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
         this.eventType = eventType;
         this.payload = payload;
+        this.traceParent = traceParent;
         this.createdAt = Instant.now();
         this.attempts = 0;
     }
@@ -165,6 +175,10 @@ public class OutboxEvent {
 
     public String getPayload() {
         return payload;
+    }
+
+    public String getTraceParent() {
+        return traceParent;
     }
 
     public Instant getCreatedAt() {

@@ -94,13 +94,13 @@ class FlywayMigrationTest {
     }
 
     @Test
-    @DisplayName("V1 to V8 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V17 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -150,7 +150,8 @@ class FlywayMigrationTest {
                 "drop product stock",
                 "drop product",
                 "cart and orders hold a user id",
-                "drop users notifications and processed events");
+                "drop users notifications and processed events",
+                "outbox event trace parent");
     }
 
     @Test

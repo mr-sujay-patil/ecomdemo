@@ -44,7 +44,8 @@ class OutboxEventRepositoryTest {
                         "Order",
                         orderId,
                         OrderPlacedEvent.class.getSimpleName(),
-                        "{\"orderId\":" + orderId + "}"));
+                        "{\"orderId\":" + orderId + "}",
+                        null));
     }
 
     /** Persists a row and back-dates its timestamps, which no production code path can do. */
@@ -145,7 +146,7 @@ class OutboxEventRepositoryTest {
     @DisplayName("the event id is unique, because republication must reuse it")
     void refusesADuplicateEventId() {
         UUID eventId = UUID.randomUUID();
-        entityManager.persistAndFlush(new OutboxEvent(eventId, "Order", "1", "OrderPlacedEvent", "{}"));
+        entityManager.persistAndFlush(new OutboxEvent(eventId, "Order", "1", "OrderPlacedEvent", "{}", null));
 
         // The consumer recognises a duplicate by this id. Two rows carrying the same one would
         // mean two different events claiming to be the same event, and the consumer would silently
@@ -155,7 +156,8 @@ class OutboxEventRepositoryTest {
                                 () ->
                                         entityManager.persistAndFlush(
                                                 new OutboxEvent(
-                                                        eventId, "Order", "2", "OrderPlacedEvent", "{}"))))
+                                                        eventId, "Order", "2", "OrderPlacedEvent", "{}",
+                                                        null))))
                 .isNotNull();
     }
 }

@@ -2,6 +2,7 @@ package com.ecomdemo.messaging;
 
 import com.ecomdemo.messaging.internal.OutboxEventRepository;
 import com.ecomdemo.messaging.internal.OutboxEvent;
+import com.ecomdemo.messaging.internal.OutboxTracing;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -84,9 +85,11 @@ public class OutboxWriter {
     private static final ObjectMapper PAYLOAD_MAPPER = JacksonUtils.enhancedObjectMapper();
 
     private final OutboxEventRepository outbox;
+    private final OutboxTracing tracing;
 
-    public OutboxWriter(OutboxEventRepository outbox) {
+    public OutboxWriter(OutboxEventRepository outbox, OutboxTracing tracing) {
         this.outbox = outbox;
+        this.tracing = tracing;
     }
 
     /**
@@ -114,7 +117,10 @@ public class OutboxWriter {
                         ORDER_AGGREGATE,
                         String.valueOf(event.orderId()),
                         OrderPlacedEvent.class.getSimpleName(),
-                        payload));
+                        payload,
+                        // The checkout's trace, frozen with the payload so the relay can publish
+                        // in it later (Phase 23; OutboxTracing explains why it must be stored).
+                        tracing.currentTraceParent()));
 
         // DEBUG, not INFO. One of these per order says nothing a healthy system needs to report -
         // the interesting lines come from the relay, which is where something can actually go

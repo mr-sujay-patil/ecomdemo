@@ -144,6 +144,22 @@
 		</dependency>
 
 		<!--
+			Distributed tracing (Phase 23). The same facade idea one level up: code and libraries
+			record OBSERVATIONS against Micrometer's API, and Micrometer Tracing turns each one into
+			a span. This starter bridges those spans to the OpenTelemetry SDK, which propagates the
+			W3C `traceparent` header and exports finished spans over OTLP to Tempo.
+
+			It also brings micrometer-registry-otlp, a PUSH metrics registry. Metrics stay on the
+			Prometheus pull model, so application.properties switches that registry off rather than
+			excluding it here: the exclusion would be one more thing every service had to repeat.
+			Every service declares this starter; this comment is the one that explains it.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-opentelemetry</artifactId>
+		</dependency>
+
+		<!--
 			Resilience4j (Phase 22): the circuit breaker, retry and bulkhead around every call to
 			catalog-service. The Boot module turns `resilience4j.*` properties into configured
 			registries, and binds every instance a registry creates to Micrometer - which is where

@@ -93,6 +93,11 @@ class StockChangedListenerConfig {
         ConcurrentKafkaListenerContainerFactory<String, ProductCacheEvictor.ProductStockChanged>
                 factory = new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumers);
+        // Observed, so a stock change is traced from inventory-service's send into this eviction
+        // (Phase 23). `spring.kafka.listener.observation-enabled` reaches only Boot's own factory,
+        // and this one is built by hand. The container finds the ObservationRegistry in the
+        // context itself, because unlike the outbox relay's template this factory IS a bean.
+        factory.getContainerProperties().setObservationEnabled(true);
         return factory;
     }
 }

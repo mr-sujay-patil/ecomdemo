@@ -1,0 +1,45 @@
+# Grafana Tempo (Phase 23): stores traces and answers queries for them.
+#
+# SINGLE-BINARY mode (`-target=all` in compose): the distributor that receives spans, the ingester
+# that batches them, the compactor and the querier all run in one process. Production splits them
+# so each scales on its own; one laptop has nothing to scale, and one container is one thing to
+# understand. The shape follows Tempo's own example/docker-compose/single-binary for v3.0.3.
+#
+# Tempo stores traces as blocks of objects in plain storage (here, the local disk) and indexes
+# almost nothing. That is its whole design bet, the same one Loki makes for logs: finding a trace
+# BY ITS ID needs no index, and the ID is exactly what a log line, an exemplar or a response
+# header hands you. Searching by attribute works too (TraceQL), it just scans.
+
+# Lets Grafana stream partial search results instead of waiting for the whole answer.
+stream_over_http_enabled: true
+
+server:
+  # The query API: /api/traces/<id>, /api/search, /ready. Grafana and the smoke test use it.
+  http_listen_port: 3200
+  log_level: info
+
+distributor:
+  receivers:
+    # OTLP is OpenTelemetry's own wire protocol; every service's exporter speaks OTLP over HTTP
+    # (protobuf) to port 4318. gRPC on 4317 is the other half of the standard and is left off:
+    # nothing here sends it, and an open port nobody uses is an open port.
+    otlp:
+      protocols:
+        http:
+          # 0.0.0.0, not `tempo:4318`: bind every interface in the container, so the address a
+          # sender uses (compose DNS name, or the container IP) does not decide whether it works.
+          endpoint: "0.0.0.0:4318"
+
+storage:
+  trace:
+    backend: local
+    # The write-ahead log: spans land here first, so a crash loses nothing already accepted.
+    wal:
+      path: /var/tempo/wal
+    # Finished blocks. On a laptop, the local disk; in production an object store (S3, GCS).
+    local:
+      path: /var/tempo/blocks
+
+# Tempo's anonymous usage report to Grafana Labs. Off: a demo stack has no business phoning home.
+usage_report:
+  reporting_enabled: false

@@ -62,12 +62,17 @@ class OutboxBatchPublisher {
     private final OutboxEventRepository outbox;
     private final OutboxKafkaSender sender;
     private final OutboxProperties properties;
+    private final OutboxTracing tracing;
 
     OutboxBatchPublisher(
-            OutboxEventRepository outbox, OutboxKafkaSender sender, OutboxProperties properties) {
+            OutboxEventRepository outbox,
+            OutboxKafkaSender sender,
+            OutboxProperties properties,
+            OutboxTracing tracing) {
         this.outbox = outbox;
         this.sender = sender;
         this.properties = properties;
+        this.tracing = tracing;
     }
 
     /**
@@ -84,7 +89,8 @@ class OutboxBatchPublisher {
         int published = 0;
         for (OutboxEvent event : pending) {
             try {
-                awaitAck(event);
+                // In the trace of the checkout that wrote the row, not a trace of the relay's.
+                tracing.inTraceOf(event, () -> awaitAck(event));
                 event.markPublished();
                 published++;
             } catch (Exception e) {

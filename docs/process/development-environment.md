@@ -127,11 +127,12 @@ Each of these cost time to prove environmental; they are written down so the nex
 - **Windows reserves port ranges for Hyper-V/WinNAT**, and they move — on 2026-09-27 the range
   9022-9121 blocked Prometheus' 9090 (*"ports are not available … /forwards/expose returned
   unexpected status: 500"*) and a few hours later did not. Check with
-  `/mnt/c/Windows/System32/netsh.exe interface ipv4 show excludedportrange protocol=tcp`. Either set
-  `PROMETHEUS_PORT` in `.env` (and export it when running the smoke test, whose `PROMETHEUS_URL`
-  follows it) or, in an admin PowerShell,
-  `net stop winnat` then `net start winnat`. Change only the HOST side: `"${PROMETHEUS_PORT:-9090}:9090"`
-  — Prometheus listens on 9090 inside its container whatever the host uses.
+  `/mnt/c/Windows/System32/netsh.exe interface ipv4 show excludedportrange protocol=tcp`. On
+  2026-09-28 it was 9014-9113 and the user moved Prometheus' HOST port to **19090** for good:
+  `"${PROMETHEUS_PORT:-19090}:9090"` in compose, the same default in the smoke test's
+  `PROMETHEUS_URL`, and in `.env.example`. Open Prometheus at http://localhost:19090. Only the host
+  side moved — inside the network it is still `prometheus:9090`. If 19090 is ever reserved, check
+  the ranges again and set `PROMETHEUS_PORT` in `.env`.
 - **A stopped container's name takes ~12 s to fail to resolve** inside the Compose network (Docker's
   DNS forwards the unknown name upstream). It is why Phase 22's retry budget is built on the read
   timeout, not the connect timeout.

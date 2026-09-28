@@ -1,5 +1,6 @@
 package com.ecomdemo.messaging.internal;
 
+import io.micrometer.observation.ObservationRegistry;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -75,13 +76,21 @@ class OutboxKafkaSender implements DisposableBean {
     private final DefaultKafkaProducerFactory<String, String> producerFactory;
     private final KafkaTemplate<String, String> template;
 
-    OutboxKafkaSender(ProducerFactory<?, ?> applicationProducerFactory) {
+    OutboxKafkaSender(
+            ProducerFactory<?, ?> applicationProducerFactory, ObservationRegistry observations) {
         Map<String, Object> properties =
                 new HashMap<>(applicationProducerFactory.getConfigurationProperties());
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
         this.producerFactory = new DefaultKafkaProducerFactory<>(properties);
         this.template = new KafkaTemplate<>(producerFactory);
+        // Observed, so each send is a span and writes the `traceparent` header (Phase 23). Both
+        // calls are needed for the same reason the producer properties are copied above: this
+        // template is not a bean. `spring.kafka.template.observation-enabled` configures only
+        // Boot's template, and a template finds the registry itself only when the context
+        // initialises it as a bean. Without the registry, "enabled" observes into a no-op.
+        this.template.setObservationEnabled(true);
+        this.template.setObservationRegistry(observations);
     }
 
     CompletableFuture<SendResult<String, String>> send(String topic, String key, String payload) {

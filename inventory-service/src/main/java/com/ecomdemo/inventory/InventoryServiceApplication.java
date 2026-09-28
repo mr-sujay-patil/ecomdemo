@@ -26,6 +26,7 @@ import org.springframework.context.annotation.Import;
  *       application and is put back on this service's log lines.
  *   <li>{@code shared} — the exception handler, so a 404 from here has the same {@code ApiError}
  *       shape as a 404 from anywhere else, and the OpenAPI document.
+ *   <li>{@code tracing} — which requests become spans: health checks and scrapes do not.
  * </ul>
  *
  * <p>{@link MetricsConfig} is imported rather than scanned for the same reason the list exists: its
@@ -36,7 +37,8 @@ import org.springframework.context.annotation.Import;
         "com.ecomdemo.inventory",
         "com.ecomdemo.jwt",
         "com.ecomdemo.logging",
-        "com.ecomdemo.shared"
+        "com.ecomdemo.shared",
+        "com.ecomdemo.tracing"
 })
 @ConfigurationPropertiesScan(basePackages = {"com.ecomdemo.inventory", "com.ecomdemo.jwt"})
 @Import(MetricsConfig.class)

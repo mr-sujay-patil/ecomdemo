@@ -845,8 +845,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V16, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V17, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -946,7 +946,7 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V16, all successful" \
+    skip "flyway_schema_history shows V1-V17, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
@@ -1623,9 +1623,9 @@ check "JVM and pool meters are published for the USE panels" "True" \
 # --- Prometheus and Grafana ------------------------------------------------------------------------
 # Only meaningful against the compose stack. Skipped, never passed, when they are not reachable:
 # a monitoring check that quietly succeeds because nothing was there to check is worse than none.
-# Follows PROMETHEUS_PORT, the variable compose.yaml publishes Prometheus on, so moving the host port
-# (Windows can reserve 9090 - see docs/process/development-environment.md) needs one setting, not two.
-PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:${PROMETHEUS_PORT:-9090}}"
+# Follows PROMETHEUS_PORT, the variable compose.yaml publishes Prometheus on, and defaults to the same
+# 19090 compose does (Windows can reserve 9090 - see docs/process/development-environment.md).
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:${PROMETHEUS_PORT:-19090}}"
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 GRAFANA_AUTH="${GRAFANA_USER:-admin}:${GRAFANA_PASSWORD:-admin}"
 
@@ -2757,6 +2757,154 @@ for _ in $(seq 1 45); do
 done
 check "and the circuit breaker is CLOSED again" "1" "$BREAKER_CLOSED"
 request DELETE "/api/cart/items/$RES_PRODUCT_ID" >/dev/null
+
+# --------------------------------------------------------------------------------------------
+# Distributed tracing (Phase 23)
+# --------------------------------------------------------------------------------------------
+# The phase's "done when": ONE checkout is ONE trace, across every service it touches - including
+# the half that happens later, on another thread, through the outbox and Kafka.
+#
+# The script chooses the trace id itself and sends it as a W3C `traceparent` header, exactly as an
+# upstream system (a mobile app, another company's service) would. That is what makes the check
+# deterministic: there is nothing to search for, only an id to look up. It also tests the first hop
+# of propagation - the gateway must CONTINUE the caller's trace rather than start its own.
+#
+# The whole section needs Tempo, and is SKIPPED, never passed, when Tempo is not reachable.
+section "Distributed tracing"
+
+TEMPO_URL="${TEMPO_URL:-http://localhost:3200}"
+
+# random_hex <bytes> -> that many random bytes as lower-case hex (W3C ids are hex, never all zero)
+random_hex() { python3 -c "import secrets, sys; print(secrets.token_hex(int(sys.argv[1])))" "$1"; }
+
+# tempo_trace <trace-id> <python-expression> -> evaluates the expression over the trace, or "none"
+#
+# The expression sees `spans`: one dict per span with service, name, kind, span_id, parent_id and
+# attrs. Tempo returns OTLP JSON, in which ids are BYTES and so arrive base64-encoded; they are
+# turned back into the hex a traceparent uses, so they can be compared with what was sent.
+tempo_trace() {
+    curl -sS "$TEMPO_URL/api/v2/traces/$1" 2>/dev/null | python3 -c "
+import base64, json, re, sys
+def hexid(v):
+    if not v: return ''
+    return v if re.fullmatch(r'[0-9a-f]{16}|[0-9a-f]{32}', v) else base64.b64decode(v).hex()
+def value(v):
+    return next(iter(v.values()), None) if isinstance(v, dict) else v
+try:
+    d = json.load(sys.stdin)
+    spans = []
+    for rs in d.get('trace', d).get('resourceSpans', []):
+        res = {a['key']: value(a['value']) for a in rs.get('resource', {}).get('attributes', [])}
+        for ss in rs.get('scopeSpans', []):
+            for sp in ss.get('spans', []):
+                spans.append({'service': res.get('service.name'), 'name': sp.get('name'),
+                              'kind': sp.get('kind'), 'span_id': hexid(sp.get('spanId')),
+                              'parent_id': hexid(sp.get('parentSpanId')),
+                              'attrs': {a['key']: value(a['value']) for a in sp.get('attributes', [])}})
+    print(eval(sys.argv[1]) if spans else 'none')
+except Exception:
+    print('none')
+" "$2"
+}
+
+if curl -fsS "$TEMPO_URL/ready" >/dev/null 2>&1; then
+    check "Tempo is ready" "200" "$(curl -sS -o /dev/null -w '%{http_code}' "$TEMPO_URL/ready")"
+
+    # --- Sampling: the edge's decision is obeyed ---------------------------------------------
+    # Sent FIRST so that by the time the checkout's trace below has arrived, this one has had every
+    # chance to arrive as well. Flags `00` = "not sampled". The services are parent-based: they
+    # follow the flag instead of tossing their own coin, so this request must leave no trace at all
+    # - even though compose samples 100% of the requests that arrive WITHOUT a decision.
+    UNSAMPLED_TRACE_ID="$(random_hex 16)"
+    as_customer
+    curl -sS -o /dev/null "$BASE_URL/api/products" -H "Authorization: Bearer $AUTH" \
+        -H "traceparent: 00-$UNSAMPLED_TRACE_ID-$(random_hex 8)-00"
+
+    # --- One checkout, with a trace id the script chose ------------------------------------------
+    TRACE_ID="$(random_hex 16)"
+    CLIENT_SPAN_ID="$(random_hex 8)"
+    request GET /api/products >/dev/null
+    TRACE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
+    request POST /api/cart/items "{\"productId\":$TRACE_PRODUCT_ID,\"quantity\":1}" >/dev/null
+    check "a checkout sent with a W3C traceparent returns 201" "201" \
+        "$(curl -sS -o "$BODY" -w '%{http_code}' -X POST "$BASE_URL/api/orders" \
+            -H "Authorization: Bearer $AUTH" -H "traceparent: 00-$TRACE_ID-$CLIENT_SPAN_ID-01")"
+    TRACE_ORDER_ID="$(jget "d['id']")"
+
+    # Spans are exported in batches (every 5 s by default), and the Kafka half starts only when the
+    # relay publishes - up to a second later - and notification-service consumes. So poll rather
+    # than sleep for a guess - and poll for BOTH ends. Each service flushes on its own timer, so
+    # the last hop arriving does not mean the first has: notification-service's batch has been
+    # seen in Tempo before the gateway's, which failed the gateway check below on a trace that
+    # was complete a few seconds later.
+    TRACE_SERVICES="none"
+    for _ in $(seq 1 45); do
+        TRACE_SERVICES="$(tempo_trace "$TRACE_ID" "','.join(sorted({s['service'] for s in spans}))")"
+        case "$TRACE_SERVICES" in *gateway-service*notification-service*) break ;; esac
+        sleep 1
+    done
+    check "Tempo has the checkout's trace, under the id the client chose" "True" \
+        "$([ "$TRACE_SERVICES" != "none" ] && echo True || echo False)"
+    check "with spans from at least 4 services (${TRACE_SERVICES})" "True" \
+        "$(tempo_trace "$TRACE_ID" "len({s['service'] for s in spans}) >= 4")"
+
+    # Each of these is one hop of propagation, and each can break on its own.
+    check "the gateway CONTINUED the caller's trace: its server span's parent is the span id sent" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'gateway-service' and s['parent_id'] == '$CLIENT_SPAN_ID' for s in spans)")"
+    check "the application's span is in it (gateway -> app over HTTP)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'ecomdemo' for s in spans)")"
+    check "inventory-service's reservation is in it (app -> inventory over HTTP)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'inventory-service' for s in spans)")"
+    check "the outbox relay's span is in it, carrying the order id (the async hop)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['name'] == 'outbox relay' and str(s['attrs'].get('order.id')) == '$TRACE_ORDER_ID' for s in spans)")"
+    check "notification-service's consumer span is in it (app -> Kafka -> notification)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'notification-service' and s['kind'] in ('SPAN_KIND_CONSUMER', 5) for s in spans)")"
+
+    # Checked last: the checkout's trace arriving proves the export window has passed.
+    check "a request whose traceparent said NOT sampled left no trace (parent-based sampling)" "none" \
+        "$(tempo_trace "$UNSAMPLED_TRACE_ID" "len(spans)")"
+
+    # --- Logs carry the trace id, in every service ---------------------------------------------
+    # The link from a trace to its log lines is a Loki query on `trace_id`, which Alloy stores as
+    # structured metadata. Lines from more than one service under one id is the cross-service
+    # question the correlation id could not answer before every service logged JSON.
+    TRACE_LOG_SERVICES=0
+    for _ in $(seq 1 30); do
+        TRACE_LOG_SERVICES="$(curl -sSG "$LOKI_URL/loki/api/v1/query_range" \
+            --data-urlencode "query={service_name=~\".+\"} | trace_id = \`$TRACE_ID\`" \
+            --data-urlencode "since=15m" --data-urlencode "limit=1000" 2>/dev/null | python3 -c "
+import json, sys
+try:
+    print(len({s['stream'].get('service_name') for s in json.load(sys.stdin)['data']['result']}))
+except Exception:
+    print(0)
+")"
+        [ "${TRACE_LOG_SERVICES:-0}" -ge 3 ] && break
+        sleep 1
+    done
+    check "Loki finds that trace id on log lines from at least 3 services" "True" \
+        "$([ "${TRACE_LOG_SERVICES:-0}" -ge 3 ] && echo True || echo False)"
+
+    # --- And Grafana can follow the links ------------------------------------------------------
+    if curl -fsS "$GRAFANA_URL/api/health" >/dev/null 2>&1; then
+        check "Grafana has the Tempo datasource" "tempo" \
+            "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/datasources/uid/ecomdemo-tempo" \
+                | python3 -c "import json,sys; print(json.load(sys.stdin).get('type'))" 2>/dev/null)"
+        check "and can fetch the checkout's trace through it" "200" \
+            "$(curl -sS -o /dev/null -w '%{http_code}' -u "$GRAFANA_AUTH" \
+                "$GRAFANA_URL/api/datasources/proxy/uid/ecomdemo-tempo/api/v2/traces/$TRACE_ID")"
+        check "Loki's trace_id derived field links to Tempo" "ecomdemo-tempo" \
+            "$(curl -sS -u "$GRAFANA_AUTH" "$GRAFANA_URL/api/datasources/uid/ecomdemo-loki" | python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+print(next((f.get('datasourceUid') for f in d['jsonData'].get('derivedFields', []) if f['name'] == 'trace_id'), None))
+" 2>/dev/null)"
+    else
+        skip "Grafana tracing checks" "no Grafana at $GRAFANA_URL"
+    fi
+else
+    skip "distributed tracing checks" "no Tempo at $TEMPO_URL (set TEMPO_URL to override)"
+fi
 
 # --------------------------------------------------------------------------------------------
 # Summary
