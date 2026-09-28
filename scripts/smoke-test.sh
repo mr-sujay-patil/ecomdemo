@@ -3291,6 +3291,21 @@ section "LLM integration"
 
 CATALOG_URL="${CATALOG_URL:-http://localhost:8081}"
 
+# catalog_scrape -> every catalog-service instance's /actuator/prometheus, concatenated.
+# EVERY instance, because a counter lives in one JVM: in the cluster catalog-service runs two to four
+# pods behind the Ingress, and the generation lands on whichever the Ingress picked. METRIC_PY sums
+# matching series, so the concatenation reads as the service's total - the same answer Prometheus
+# would give with sum().
+catalog_scrape() {
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        for pod in $(kube get pods -l app.kubernetes.io/name=catalog-service -o name 2>/dev/null); do
+            kube exec "$pod" -- wget -qO- http://localhost:8081/actuator/prometheus 2>/dev/null
+        done
+    else
+        curl -sS "$CATALOG_URL/actuator/prometheus" 2>/dev/null
+    fi
+}
+
 LLM_ORIGINAL="Phase 27 smoke probe, written by a person."
 as_admin
 request POST /api/products \
@@ -3308,7 +3323,7 @@ as_admin
 check "an unknown product is a 404, before any model is asked" "404" \
     "$(request POST /api/products/999999/generate-description)"
 
-LLM_METRIC_BEFORE="$(curl -sS "$CATALOG_URL/actuator/prometheus" 2>/dev/null \
+LLM_METRIC_BEFORE="$(catalog_scrape \
     | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
 [ "$LLM_METRIC_BEFORE" = "MISSING" ] && LLM_METRIC_BEFORE=0
 
@@ -3332,7 +3347,7 @@ case "$LLM_STATUS" in
             -c "SELECT count(*) FROM product_description_generation WHERE product_id = $LLM_PRODUCT;" \
             2>/dev/null | tr -d '\r ')"
         check "and kept in the generation history" "1" "$LLM_ROWS"
-        LLM_TOKENS="$(curl -sS "$CATALOG_URL/actuator/prometheus" 2>/dev/null \
+        LLM_TOKENS="$(catalog_scrape \
             | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_tokens_total type=prompt)"
         check "the tokens it cost are counted in catalog-service's metrics" "True" \
             "$(python3 -c "print('$LLM_TOKENS' != 'MISSING' and float('$LLM_TOKENS') > 0)")"
@@ -3358,7 +3373,7 @@ case "$LLM_STATUS" in
 esac
 rm -f "$BODY.llm"
 
-LLM_METRIC_AFTER="$(curl -sS "$CATALOG_URL/actuator/prometheus" 2>/dev/null \
+LLM_METRIC_AFTER="$(catalog_scrape \
     | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
 check "every generation attempt is counted, whatever its outcome" "True" \
     "$(python3 -c "print('$LLM_METRIC_AFTER' != 'MISSING' and float('$LLM_METRIC_AFTER') > float('$LLM_METRIC_BEFORE'))")"
