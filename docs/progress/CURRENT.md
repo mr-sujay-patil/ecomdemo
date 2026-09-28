@@ -3,28 +3,34 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-28
-- **Phase:** between 24 and 25 — `fix/spring-modulith-2` (agreed with the user; not a phase)
-- **Branch:** fix/spring-modulith-2 (cut from `main` at `67f6889`)
-- **Step:** PR_OPEN
+- **Phase:** 25 — Container Orchestration (Kubernetes, kind)
+- **Branch:** feature/phase-25-kubernetes (cut from `main` at `8047753`)
+- **Step:** WAITING_FOR_USER
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** see `gh pr list --head fix/spring-modulith-2`
-- **Waiting for user:** YES — review of the fix PR; also Dependabot #39 (ArchUnit, CI green) to merge
+- **PR:** none yet
+- **Waiting for user:** YES — the phase's manual step: install `kind` (kubectl v1.36.1 is present;
+  helm optional). Docker has 24 CPUs / ~31 GB, enough.
 
-## Phase 24 merge verification — PASSED, `phase-24-complete` TAGGED at `67f6889`
-PR #40 merged as a merge commit (2 parents); 0 missing commits, 0 diffs, branch alive; CI on `main`
-green; `verify` on `main` 524 tests (stack down); cold smoke **361/0/0**.
+## Merge verification before this phase — all PASSED
+- Phase 24: PR #40 merge commit `67f6889`; 0 missing, 0 diffs; CI green; `verify` 524; cold smoke
+  361/0/0; tagged `phase-24-complete`.
+- Fix PR #41 (Spring Modulith 2.1.1, not a phase, no tag): merge commit `8047753`; 0 missing, 0 diffs,
+  branch alive; CI green; `verify` 524; cold smoke 361/0/0. Dependabot #38 auto-closed.
+- Dependabot #39 (ArchUnit 1.5.1, CI green) is still OPEN — the user's to merge.
 
-## This branch
-- [x] `spring-modulith.version` 2.1.1 (supersedes Dependabot #38, which failed to compile)
-- [x] `ModularityTest`: `new Documenter(MODULES, Documenter.Options.defaults().withOutputFolder(...))`
-- [x] docs/modules regenerated: style only, all 14 diagrams keep identical `Rel(...)` lines
-- Verified: `verify` 524/0/0; cold smoke 361/0/0.
+## Checklist (from the phase file's "What you'll implement")
+- [ ] Deployment, Service, ConfigMap and Secret per service
+- [ ] Probes and resource limits
+- [ ] An Ingress in front of the gateway
+- [ ] Infrastructure through Helm charts or manifests
+- [ ] An HPA
+- [ ] Rolling update and self-healing demos
+- [ ] Smoke test runs against the Ingress URL; deleting a pod keeps the flow working
+- [ ] README, decisions, test report, RECENT rotation, tracker 🔵
 
 ## Next action
-Waiting for review of the fix PR. On `approved, merge it`: merge with `--merge`, verify it (ancestor,
-no diffs, `verify`, cold smoke on a COPY of the script), then START PHASE 25 per
-`execution-protocol.md` §3 (its first commit marks Phase 24 ✅ in the ROADMAP tracker). Dependabot
-#38 closes itself once `main` has 2.1.1; #39 is the user's to merge.
+When the user says `done` (kind installed): verify `kind version`, then plan the manifests and
+implement the checklist.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
