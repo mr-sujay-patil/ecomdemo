@@ -3,46 +3,50 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-28
-- **Phase:** 27 — LLM Integration (Spring AI)
-- **Branch:** feature/phase-27-spring-ai (cut from `main` at `615889c`)
-- **Step:** VERIFYING (merge verification FAILED; follow-up fix PR open)
+- **Phase:** 28 — Semantic Search (pgvector)
+- **Branch:** feature/phase-28-semantic-search (cut from `main` at `1106b0d`)
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #43 merged (`190f782`); follow-up PR for the verification failure: see Next action
-- **Waiting for user:** YES - review of the follow-up PR
+- **PR:** —
+- **Waiting for user:** NO
 
-## Merge verification before this phase — all PASSED
-- Phase 25: PR #42 merge commit `615889c` (2 parents); branch is an ancestor of main; 0 missing, 0 diffs,
-  branch alive; CI on main green (run 36440494284); `verify` 524/0/0/0; cold compose smoke 360/0/0
-  (fresh volumes: probe "different database" path), then restart keeping volumes 361/0/0 (probe
-  survived, name and price kept). Tagged `phase-25-complete`.
-- **Phase 26 (AKS) SKIPPED** by the user (2026-09-28): tracker ⏭️, decision recorded, no branch, no tag.
-- Pre-flight for 27: tree clean, no open PRs. No LLM key in the environment, no Ollama installed.
+## Merge verification before this phase — PASSED
+- Phase 27: PR #43 (`190f782`) + follow-up PR #44 (`1106b0d`, the smoke dashboard-query poll). First
+  verification FAILED (cold smoke 368/1/0 twice, the dashboard query race) → fixed in #44. Second: git
+  checks PASS (0 missing, 0 diffs, branch alive), CI on main green (run 36456544229), `verify` 539/0/0/0,
+  cold compose smoke 369/0/0 (the user's `.env` has AI_CHAT_PROVIDER=ollama). Tagged `phase-27-complete`.
+
+## Design (decided at the start; see decisions.md when written)
+- catalog-db image → `pgvector/pgvector:0.8.6-pg18-trixie` (compose, k8s, catalog's Testcontainer).
+  Debian vs Alpine collation → V4 REINDEXes `idx_product_name`, `idx_product_category`.
+- `product_embedding` (id = product id, FK ON DELETE CASCADE, content, metadata json, vector(768), HNSW
+  cosine). PgVectorStore built BY HAND only when an EmbeddingModel exists (`spring.ai.vectorstore.type=none`),
+  like Phase 27's ChatClient. `AI_EMBEDDING_PROVIDER` openai (text-embedding-3-small @768) | ollama
+  (nomic-embed-text, 768) | none (default).
+- Sync: ProductChanged{productId} via the shared outbox (`@EnableOutbox`) in every write transaction →
+  topic `catalog.product-changed` → catalog's own indexer (own group) re-embeds CURRENT state or deletes.
+- Backfill: Spring Batch job (`spring-boot-starter-batch-jdbc`), ADMIN `POST /api/products/embeddings/backfill`.
+- `GET /api/products/search?q=&category=&minPrice=&maxPrice=&limit=` (public GET at the gateway).
 
 ## Checklist (from the phase file's "What you'll implement")
-- [x] Spring AI 2.0.1 (built on Boot 4.1.1) in catalog-service: OpenAI + Ollama starters
-- [x] `POST /api/products/{id}/generate-description` (ADMIN at the gateway) → `ProductCopy` record
-- [x] Prompt templates: `prompts/product-description-{system,user}.st`
-- [x] `AI_CHAT_PROVIDER` = openai | ollama | none (default); OPENAI_API_KEY from env
-- [x] AI_TIMEOUT (OpenAI option; own OllamaApi client), 1 retry, all failures → 503; `ecomdemo.ai.tokens`, `ecomdemo.ai.generations`
-- [x] Saved to product + `product_description_generation` (V3); failures leave the product unchanged
-- [x] Smoke section "LLM integration": auth, 404, 503+Retry-After+unchanged, metrics; 200 path checks JSON, save, history, tokens; no provider → SKIP with setup steps
-- [x] Testing protocol (verify 539; compose cold 367/0/1; real Ollama 370/0/0; k8s 346/0/5), test report,
-  README, decisions (12), RECENT rotation (Phase 24 archived), tracker 🔵
+- [ ] pgvector extension + product_embedding (Flyway V4), images switched
+- [ ] Embedding provider config; vector store only when configured; 503 otherwise
+- [ ] Embeddings on create/update (outbox → Kafka → indexer), delete handled
+- [ ] Spring Batch backfill + endpoint
+- [ ] `GET /api/products/search` with metadata filters
+- [ ] Tests (unit, IT with a deterministic fake embedding model, e2e through Kafka)
+- [ ] Smoke section "Semantic search"
+- [ ] Testing protocol, test report, README, decisions, RECENT rotation, tracker 🔵
 
 ## Next action
-Merge verification of PR #43: git checks PASS (merge `190f782`, 0 missing, 0 diffs, branch alive), CI
-on main PASS, `verify` 539/0/0/0 PASS, cold compose smoke FAILED twice (368/1/0: "the dashboard's
-orders-per-minute query returns data", a first-order vs. second-scrape race). NOT tagged. Fix on this
-branch: the check polls up to 45s; cold runs 369/0/0 twice (the user's .env now has
-AI_CHAT_PROVIDER=ollama, so the model check runs for real: 369 fresh, 370 kept volumes).
-STOPPED at the follow-up PR #44 (https://github.com/mr-sujay-patil/ecomdemo/pull/44). On `approved, merge it`: `gh pr merge <n> --merge`. On `merged,
-continue`: rerun merge verification (git checks, CI, verify, cold smoke on a COPY), tag
-`phase-27-complete`, then Phase 28 (semantic search).
+Implement the checklist top to bottom on this branch. catalog-service/pom.xml already has the three
+new dependencies (uncommitted until the first feature commit).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
 - Never edit `scripts/smoke-test.sh` while it runs; run a copy.
-- The persistence probe makes the smoke count path-dependent: +1 check with kept volumes (Phase 27: 367/368 no model, 369/370 with a model).
+- The persistence probe makes the smoke count path-dependent: +1 check with kept volumes.
+- The user's `.env` sets AI_CHAT_PROVIDER=ollama (host Ollama). Never print `.env`.
 - Repo-local git identity `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
