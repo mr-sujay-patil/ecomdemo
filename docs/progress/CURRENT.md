@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-28
 - **Phase:** 29 — AI Shopping Assistant (RAG + tool calling)
 - **Branch:** feature/phase-29-ai-assistant (cut from `main` at `5fb6ac1`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #46 https://github.com/mr-sujay-patil/ecomdemo/pull/46
+- **Waiting for user:** YES - review of the Phase 29 PR
 
 ## Merge verification before this phase — PASSED
 - Phase 28: PR #45 merged as `5fb6ac1` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
@@ -47,15 +47,18 @@
 - [x] Evaluation set: 11 cases (`scripts/assistant-eval.{json,py}`). qwen2.5:7b 11/11 x3; llama3.2 8/11 x3
   -> default ASSISTANT_OLLAMA_MODEL=qwen2.5:7b (user must `ollama pull qwen2.5:7b`)
 - [x] Smoke section "Shopping assistant" (+ k8s object loop)
-- [ ] Testing protocol: verify (last full: 604/0/0 before tuning), cold compose default (AI none), cold
-  compose real models (throwaway Ollama `ecomdemo-eval-ollama` + volume `ecomdemo-eval-ollama` with
-  qwen2.5:7b, llama3.2, nomic), outage, k8s in place; then test report, README, decisions, RECENT
-  rotation (archive Phase 27), tracker, PR
+- [x] Testing protocol: verify 610/0/0; eval qwen2.5:7b 11/11 x3 (final build); compose cold default
+  380/0/3, cold real models 405/0/0; outage 503 Retry-After 30; k8s in place 360/0/7 (gateway needed a
+  rollout restart); test report, README, decisions (15), RECENT (Phase 27 archived), tracker 🔵
 
 ## Next action
-Run the testing protocol (above). Real-model runs: OLLAMA_BASE_URL=http://ecomdemo-eval-ollama:11434
-(throwaway container on ecomdemo_default, GPU). Remove the container AND volume when done. The gateway
-caches upstream IPs: after recreating app, restart the gateway (follow-up, not this phase).
+STOPPED at PR #46, waiting for the user. Do NOT merge unless the user says `approved, merge it`
+(`gh pr merge 46 --merge`). On `merged, continue`: merge verification (git checks, CI on main, `verify`,
+cold compose smoke on a COPY). NOTE: the user's `.env` enables Ollama; unless they have pulled
+`qwen2.5:7b` the assistant section FAILS - ask them to pull it, or run the smoke with
+`ASSISTANT_OLLAMA_MODEL=llama3.2` exported (llama3.2 usually passes the smoke's retried checks, but
+record which). Then tag `phase-29-complete`, then Phase 30 (Gatling). Throwaway Ollama removed; compose
+(user's .env) and kind are running.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
