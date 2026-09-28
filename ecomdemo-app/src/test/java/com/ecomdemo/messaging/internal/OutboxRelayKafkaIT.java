@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
@@ -112,10 +113,16 @@ class OutboxRelayKafkaIT extends IntegrationTest {
         return response.getBody();
     }
 
-    private Optional<OutboxEvent> rowFor(long orderId) {
+    private List<OutboxEvent> rowsFor(long orderId) {
         return outbox.findAll().stream()
                 .filter(event -> event.getAggregateId().equals(String.valueOf(orderId)))
-                .findFirst();
+                .sorted(Comparator.comparing(OutboxEvent::getId))
+                .toList();
+    }
+
+    /** The order's FIRST row - since Phase 24, the OrderCreated that checkout wrote. */
+    private Optional<OutboxEvent> rowFor(long orderId) {
+        return rowsFor(orderId).stream().findFirst();
     }
 
     @Test
@@ -153,7 +160,7 @@ class OutboxRelayKafkaIT extends IntegrationTest {
     }
 
     @Test
-    @DisplayName("the row carries the order's own event id, and the payload the consumer reads")
+    @DisplayName("the checkout's row is OrderCreated: the order's own event id and the lines to reserve")
     void theRowIsTheMessage() {
         ProductSnapshot product = createProduct("Outbox Payload Lamp", 5);
 
@@ -162,12 +169,33 @@ class OutboxRelayKafkaIT extends IntegrationTest {
         await().atMost(TIMEOUT).untilAsserted(() -> assertThat(rowFor(order.id())).isPresent());
         OutboxEvent row = rowFor(order.id()).orElseThrow();
 
+        // Phase 24: checkout's event is the saga's first step. (It was OrderPlaced until then;
+        // that is now written on confirmation - see the next test.)
         assertThat(row.getAggregateType()).isEqualTo("Order");
-        assertThat(row.getEventType()).isEqualTo("OrderPlacedEvent");
+        assertThat(row.getEventType()).isEqualTo("OrderCreatedEvent");
         assertThat(row.getEventId()).isNotNull();
         assertThat(row.getPayload())
                 .contains("\"orderId\":" + order.id())
-                .contains("it-outbox-shopper");
+                .contains("it-outbox-shopper")
+                .contains("\"productId\":" + product.id());
+    }
+
+    @Test
+    @DisplayName("the saga's reply confirms the order, and only then is OrderPlaced written and published")
+    void orderPlacedFollowsConfirmation() {
+        ProductSnapshot product = createProduct("Outbox Confirmed Lamp", 5);
+
+        OrderResponse order = placeAnOrderFor(product, 1);
+
+        // OrderCreated -> relay -> Kafka -> the fake inventory and payment -> PaymentCompleted ->
+        // Kafka -> this application's saga listener -> CONFIRMED + OrderPlaced in the outbox ->
+        // relay -> Kafka. Every hop but the fake's is production code.
+        await().atMost(TIMEOUT).untilAsserted(() -> {
+            List<OutboxEvent> rows = rowsFor(order.id());
+            assertThat(rows).extracting(OutboxEvent::getEventType)
+                    .containsExactly("OrderCreatedEvent", "OrderPlacedEvent");
+            assertThat(rows).allMatch(OutboxEvent::isPublished);
+        });
     }
 
     /**

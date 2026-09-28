@@ -2,6 +2,7 @@ package com.ecomdemo.order.internal;
 
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.order.dto.OrderResponse;
+import com.ecomdemo.order.dto.OrderStatusResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -42,17 +43,20 @@ public class OrderController {
             description =
                     """
                     Takes no body: it always checks out your own cart. Stock is checked for \
-                    every line first, then reduced, the order is saved with the names and prices \
+                    every line first, the order is saved PENDING with the names and prices \
                     copied in, and the cart is emptied.
 
-                    The whole sequence is one database transaction, so a failure anywhere in it \
-                    leaves the catalogue, the cart and the order history exactly as they were. \
-                    If another checkout changes the same products at the same time, this one is \
-                    retried a few times and then answered with 409.
+                    The order is not final yet. Stock is reserved and payment taken \
+                    asynchronously, by a saga across inventory-service and payment-service, and \
+                    the order becomes CONFIRMED or CANCELLED a few seconds later - poll \
+                    GET /api/orders/{id}/status. The stock check here is a courtesy that answers \
+                    an obviously short cart at once; the reservation is the guarantee, so an \
+                    order can still be cancelled for stock if another checkout took the last \
+                    units first.
                     """)
     @ApiResponse(
             responseCode = "201",
-            description = "The order was placed. The Location header points at it.")
+            description = "The order was accepted as PENDING. The Location header points at it.")
     @ApiResponse(
             responseCode = "401",
             description = "No Bearer token, or one that is invalid or expired",
@@ -113,5 +117,32 @@ public class OrderController {
     public OrderResponse get(
             @Parameter(description = "Id of the order", example = "1") @PathVariable Long id) {
         return orderService.findById(id);
+    }
+
+    @GetMapping("/{id}/status")
+    @Operation(
+            summary = "Where one of your orders stands in the saga",
+            description =
+                    "PENDING until stock and payment are settled, then CONFIRMED or CANCELLED "
+                            + "(with the reason). The thing to poll after checkout. Same "
+                            + "ownership rule as GET /api/orders/{id}.")
+    @ApiResponse(responseCode = "200", description = "The order's status")
+    @ApiResponse(
+            responseCode = "401",
+            description = "No Bearer token, or one that is invalid or expired",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
+            responseCode = "403",
+            description = "Authenticated, but not as a CUSTOMER, or the order belongs to another account",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    @ApiResponse(
+            responseCode = "404",
+            description = "No order with that id",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    public OrderStatusResponse status(
+            @Parameter(description = "Id of the order", example = "1") @PathVariable Long id) {
+        // Through findById on purpose: that is where the role and ownership rules are, and a
+        // second secured method would be a second place for them to drift apart.
+        return OrderStatusResponse.from(orderService.findById(id));
     }
 }

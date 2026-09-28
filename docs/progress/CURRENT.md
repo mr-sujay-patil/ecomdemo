@@ -26,9 +26,10 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - [x] 3. New mock `payment-service` (+ payment-db, host ports 8086 / 5437): consumes
       `inventory.stock-reserved` → PaymentCompleted/PaymentFailed (declines amount > limit);
       Dockerfile, compose, Prometheus, Alloy wired (CI builds the reactor, nothing to add). 9 tests
-- [ ] 4. App: PENDING/CONFIRMED/CANCELLED (V19), checkout writes OrderCreated, listeners for
-      rejected/completed/failed; CONFIRMED publishes OrderPlaced (notification unchanged);
-      `GET /api/orders/{id}/status`
+- [x] 4. App: PENDING/CONFIRMED/CANCELLED (V19, PLACED rows → CONFIRMED), checkout = pre-check +
+      PENDING + OrderCreated (no HTTP reserve/release), `OrderSagaHandler` (conditional UPDATE =
+      semantic lock), CONFIRMED publishes OrderPlaced, `GET /api/orders/{id}/status`, sales report
+      counts CONFIRMED only. ITs use `FakeSagaParticipants` over real Kafka. verify: 524 tests
 - [ ] 5. Tests per service + smoke "Saga": normal → CONFIRMED; forced decline → CANCELLED, stock restored
 - [ ] 6. Orchestration alternative documented; README, decisions, test report, RECENT, tracker 🔵
 
@@ -50,12 +51,12 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Step 4, the order service (ecomdemo-app): V19 orders.status PENDING/CONFIRMED/CANCELLED (+ reason,
-updated_at; old PLACED rows → CONFIRMED); checkout = pre-check + PENDING order + OrderCreatedEvent
-(no HTTP reserve/release, no compensation sync); listeners for inventory.stock-rejected,
-payments.completed, payments.failed (only PENDING moves); CONFIRMED appends OrderPlacedEvent;
-declare orders.created (+dlt); `GET /api/orders/{id}/status`; fix app Kafka consumer props (the old
-notification group/default type is still there). Then update affected app tests.
+Step 5: smoke test. Read scripts/smoke-test.sh sections that assume synchronous stock (grep for
+`POST /api/orders`, stock checks, container count 18 → 20, service lists); add a helper
+`wait_for_order_status <id> <STATUS>` polling `/api/orders/{id}/status`; add section "Saga":
+normal order → CONFIRMED + stock reduced; order > 10000.00 → CANCELLED, reason, stock restored,
+payment row FAILED in payment-db, stock_reservation RELEASED. Then cold run: `docker compose down`,
+`up --build --wait`, `scripts/smoke-test.sh`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

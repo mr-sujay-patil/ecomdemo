@@ -1,6 +1,7 @@
 package com.ecomdemo.messaging.internal;
 
 import com.ecomdemo.messaging.KafkaTopics;
+import com.ecomdemo.messaging.OrderCreatedEvent;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.outbox.OutboxRoutes;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +19,7 @@ class OutboxRoutesConfig {
     @Bean
     OutboxRoutes outboxRoutes() {
         return OutboxRoutes.builder()
+                .route(OrderCreatedEvent.class, KafkaTopics.ORDERS_CREATED)
                 .route(OrderPlacedEvent.class, KafkaTopics.ORDERS_PLACED)
                 .build();
     }

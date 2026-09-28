@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -97,13 +98,13 @@ class FlywayMigrationTest {
     }
 
     @Test
-    @DisplayName("V1 to V18 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V19 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -155,7 +156,8 @@ class FlywayMigrationTest {
                 "cart and orders hold a user id",
                 "drop users notifications and processed events",
                 "outbox event trace parent",
-                "processed event for saga replies");
+                "processed event for saga replies",
+                "order saga states");
     }
 
     @Test
@@ -215,6 +217,26 @@ class FlywayMigrationTest {
                         Integer.class))
                 .as("this database must keep no copy of another service's table")
                 .isZero();
+    }
+
+    @Test
+    @DisplayName("V19 allows exactly the saga's three states, and no longer PLACED")
+    void ordersHaveTheSagaStates() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        String insert = "INSERT INTO orders (placed_at, status, total_amount, user_id, username) "
+                + "VALUES (CURRENT_TIMESTAMP, ?, 0, 1, 'flyway-test')";
+
+        try {
+            for (String state : List.of("PENDING", "CONFIRMED", "CANCELLED")) {
+                assertThat(jdbc.update(insert, state)).isEqualTo(1);
+            }
+            // V19 rewrote every PLACED row to CONFIRMED and then forbade the word, so nothing can
+            // bring the pre-saga status back.
+            assertThatThrownBy(() -> jdbc.update(insert, "PLACED"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            jdbc.update("DELETE FROM orders WHERE username = 'flyway-test'");
+        }
     }
 
     @Test

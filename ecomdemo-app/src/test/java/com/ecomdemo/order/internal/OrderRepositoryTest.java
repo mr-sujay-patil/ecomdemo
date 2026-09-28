@@ -115,7 +115,7 @@ class OrderRepositoryTest {
 
         // Then
         assertThat(found).isPresent();
-        assertThat(found.get().getStatus()).isEqualTo(OrderStatus.PLACED);
+        assertThat(found.get().getStatus()).isEqualTo(OrderStatus.PENDING);
         assertThat(found.get().getItems())
                 .extracting(OrderItem::getProductName, OrderItem::getUnitPrice)
                 .containsExactly(tuple("Lamp", new BigDecimal("1500.00")));
@@ -138,6 +138,46 @@ class OrderRepositoryTest {
 
         // When / Then
         assertThat(orderRepository.findByIdWithItems(id)).isPresent();
+    }
+
+    @Test
+    void transition_whenTheOrderIsPending_movesItOnceAndRecordsWhyAndWhen() {
+        // Given: a new order is PENDING (Phase 24)
+        Long id = persistOrder("2026-01-01T10:00:00Z", List.of(line("Lamp", "1500.00", 1))).getId();
+        Instant decidedAt = Instant.parse("2026-01-01T10:00:03Z");
+
+        // When
+        int moved = orderRepository.transition(
+                id, OrderStatus.CANCELLED, "Payment declined: too much", decidedAt);
+
+        // Then
+        assertThat(moved).isEqualTo(1);
+        Order cancelled = orderRepository.findByIdWithItems(id).orElseThrow();
+        assertThat(cancelled.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(cancelled.getStatusReason()).isEqualTo("Payment declined: too much");
+        assertThat(cancelled.getStatusChangedAt()).isEqualTo(decidedAt);
+    }
+
+    @Test
+    void transition_whenTheOrderIsAlreadyDecided_changesNothing() {
+        // Given: the saga has already confirmed it
+        Long id = persistOrder("2026-01-01T10:00:00Z", List.of(line("Lamp", "1500.00", 1))).getId();
+        orderRepository.transition(id, OrderStatus.CONFIRMED, null, Instant.now());
+
+        // When: a late or duplicate reply tries to cancel it
+        int moved = orderRepository.transition(id, OrderStatus.CANCELLED, "too late", Instant.now());
+
+        // Then: the semantic lock held - only PENDING can move, and only once
+        assertThat(moved).isZero();
+        Order order = orderRepository.findByIdWithItems(id).orElseThrow();
+        assertThat(order.getStatus()).isEqualTo(OrderStatus.CONFIRMED);
+        assertThat(order.getStatusReason()).isNull();
+    }
+
+    @Test
+    void transition_whenTheOrderDoesNotExist_movesNothing() {
+        assertThat(orderRepository.transition(987_654L, OrderStatus.CONFIRMED, null, Instant.now()))
+                .isZero();
     }
 
     private Order persistOrder(String placedAt, List<Line> lines) {

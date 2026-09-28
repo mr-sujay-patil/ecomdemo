@@ -33,6 +33,7 @@ Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoA
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Messaging, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Metrics, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Outbox, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Serviceclients, "uses", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Order, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Resilience, EcomdemoApplication.EcomdemoApplication.Serviceclients, "depends on", $techn="", $tags="", $link="")

@@ -29,8 +29,9 @@ import java.util.List;
  * it must still show what the customer actually paid years later, even after the catalogue
  * price has changed. For the same reason each line snapshots the product's name and price.
  *
- * <p>{@code @Enumerated(STRING)} stores "PLACED" rather than the ordinal 0 — reordering the
- * enum constants later would silently rewrite the meaning of existing rows.
+ * <p>{@code @Enumerated(STRING)} stores "PENDING" rather than the ordinal 0 — reordering the
+ * enum constants later would silently rewrite the meaning of existing rows. Phase 24 is the
+ * proof: it replaced {@code PLACED} with three states, and V19 rewrote the old rows by NAME.
  *
  * <p>Since Phase 8 an order also records <em>who</em> placed it. That single field is what makes
  * "my orders" answerable and what every authorization decision in {@code OrderService} is made
@@ -51,6 +52,17 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private OrderStatus status;
+
+    /**
+     * Why the order was cancelled, in the shopper's terms; {@code null} otherwise (Phase 24). Set
+     * by the saga's reply, never by a request - see {@code OrderRepository.transition}.
+     */
+    @Column(name = "status_reason", length = 500)
+    private String statusReason;
+
+    /** When the saga moved the order out of PENDING; {@code null} while it is still pending. */
+    @Column(name = "status_changed_at")
+    private Instant statusChangedAt;
 
     @Column(name = "total_amount", nullable = false, precision = 12, scale = 2)
     private BigDecimal totalAmount;
@@ -100,7 +112,9 @@ public class Order {
         this.placedAt = placedAt;
         this.userId = userId;
         this.username = username;
-        this.status = OrderStatus.PLACED;
+        // Every order starts PENDING since Phase 24: checkout no longer knows whether stock and
+        // payment will come through. The saga's replies move it on.
+        this.status = OrderStatus.PENDING;
         this.totalAmount = BigDecimal.ZERO;
     }
 
@@ -121,6 +135,14 @@ public class Order {
 
     public OrderStatus getStatus() {
         return status;
+    }
+
+    public String getStatusReason() {
+        return statusReason;
+    }
+
+    public Instant getStatusChangedAt() {
+        return statusChangedAt;
     }
 
     public BigDecimal getTotalAmount() {

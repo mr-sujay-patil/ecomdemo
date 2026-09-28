@@ -1,9 +1,12 @@
 package com.ecomdemo.order.internal;
 
 import com.ecomdemo.order.Order;
+import com.ecomdemo.order.OrderStatus;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -32,4 +35,31 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      */
     @Query("select distinct o from Order o left join fetch o.items where o.id = :id")
     Optional<Order> findByIdWithItems(@Param("id") Long id);
+
+    /**
+     * Moves an order out of PENDING, if - and only if - it is still PENDING. Phase 24's semantic
+     * lock, as one statement.
+     *
+     * <p>A conditional UPDATE rather than load, check, save. The check and the write are one
+     * atomic step in the database, so no interleaving of two replies can let both through, and a
+     * late or duplicate reply for an order that has already been decided changes nothing and
+     * reports zero rows. The caller acts on that number: only the reply that actually moved the
+     * order goes on to publish anything.
+     *
+     * <p>{@code clearAutomatically} because the persistence context may hold this order from
+     * before the update; without it a later read in the same transaction would see PENDING.
+     *
+     * @return 1 if this call moved the order, 0 if it was already decided (or does not exist)
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Order o
+               set o.status = :to, o.statusReason = :reason, o.statusChangedAt = :at
+             where o.id = :id and o.status = com.ecomdemo.order.OrderStatus.PENDING
+            """)
+    int transition(
+            @Param("id") Long id,
+            @Param("to") OrderStatus to,
+            @Param("reason") String reason,
+            @Param("at") Instant at);
 }

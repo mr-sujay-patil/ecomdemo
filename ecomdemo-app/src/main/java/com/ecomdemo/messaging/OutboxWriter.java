@@ -32,7 +32,13 @@ public class OutboxWriter {
         this.outbox = outbox;
     }
 
-    /** Appends an {@link OrderPlacedEvent}, keyed by its order id. */
+    /** Appends an {@link OrderCreatedEvent}, keyed by its order id: the saga's first step. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void append(OrderCreatedEvent event) {
+        outbox.append(ORDER_AGGREGATE, event.orderId(), event.eventId(), event);
+    }
+
+    /** Appends an {@link OrderPlacedEvent}, keyed by its order id: the order is CONFIRMED. */
     @Transactional(propagation = Propagation.MANDATORY)
     public void append(OrderPlacedEvent event) {
         outbox.append(ORDER_AGGREGATE, event.orderId(), event.eventId(), event);
