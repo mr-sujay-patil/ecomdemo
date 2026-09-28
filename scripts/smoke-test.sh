@@ -395,6 +395,63 @@ notification_psql_query() {
         -d "${NOTIFICATION_DB_NAME:-notification}" -c "$1" 2>/dev/null
 }
 
+# inventory_psql_query / payment_psql_query <sql> -> the saga's other two databases (Phase 24): the
+# reservations inventory-service holds, and the payments payment-service decided.
+inventory_psql_query() {
+    docker exec "${INVENTORY_DB_CONTAINER:-ecomdemo-inventory-db}" \
+        psql -qtAX -U "${INVENTORY_DB_USER:-inventory}" \
+        -d "${INVENTORY_DB_NAME:-inventory}" -c "$1" 2>/dev/null
+}
+
+payment_psql_query() {
+    docker exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" \
+        psql -qtAX -U "${PAYMENT_DB_USER:-payment}" \
+        -d "${PAYMENT_DB_NAME:-payment}" -c "$1" 2>/dev/null
+}
+
+# wait_for_order_status <order_id> [seconds] -> prints the order's status once it has LEFT PENDING,
+# or PENDING if the saga did not decide within the bound (default 90s).
+#
+# Phase 24: checkout answers 201 with a PENDING order, and CONFIRMED or CANCELLED arrives a few
+# seconds later, after inventory-service and payment-service have each read an event and answered.
+# This polls GET /api/orders/{id}/status the way a client would, as the CURRENT caller ($AUTH).
+# Warm, a decision takes about three seconds (three outbox relays at a one-second poll, plus the
+# hops); the bound is generous for the same reason wait_for_notification's is - cold consumers
+# joining their groups - and every check that uses it is about the OUTCOME, not the latency.
+#
+# Its own body file, so that it does not overwrite $BODY under a caller that is still reading it.
+wait_for_order_status() {
+    local order_id="$1" seconds="${2:-90}" status="PENDING" status_body _
+    status_body="$(mktemp)"
+    for _ in $(seq 1 "$seconds"); do
+        curl -sS -o "$status_body" "$BASE_URL/api/orders/$order_id/status" \
+            -H "Authorization: Bearer $AUTH" 2>/dev/null
+        status="$(python3 -c "import json;print(json.load(open('$status_body'))['status'])" 2>/dev/null \
+            || echo PENDING)"
+        [ "$status" != "PENDING" ] && break
+        sleep 1
+    done
+    rm -f "$status_body"
+    echo "$status"
+}
+
+# wait_for_stock <product_id> <expected> [tenths] -> prints the last stock figure seen, having polled
+# the catalogue (through the gateway, as a shopper sees it) until it shows <expected>.
+#
+# Two eventually-consistent steps stand between a checkout and this number since Phase 24: the saga
+# reserves the stock after checkout returns, and the catalogue's cache hears about it through
+# `inventory.stock-changed`. Polled in 0.2s steps (default 300 = 60s), like the Phase 20b checks.
+wait_for_stock() {
+    local product_id="$1" expected="$2" tenths="${3:-300}" seen="" _
+    for _ in $(seq 1 "$tenths"); do
+        request GET "/api/products/$product_id" >/dev/null
+        seen="$(jget "d['stockQuantity']")"
+        [ "$seen" = "$expected" ] && break
+        sleep 0.2
+    done
+    echo "$seen"
+}
+
 # --------------------------------------------------------------------------------------------
 section "Readiness"
 
@@ -584,7 +641,7 @@ request GET /api/cart >/dev/null
 check "cart starts empty" "0" "$(jget "len(d['items'])")"
 
 # --------------------------------------------------------------------------------------------
-# 1. Happy path: list -> add -> view -> place -> read back -> stock decreased
+# 1. Happy path: list -> add -> view -> place -> read back -> CONFIRMED -> stock decreased
 # --------------------------------------------------------------------------------------------
 section "Happy path"
 
@@ -621,7 +678,8 @@ check "cart total is calculated server-side" "$EXPECTED_TOTAL" \
 STATUS="$(request POST /api/orders)"
 check "POST /api/orders returns 201" "201" "$STATUS"
 ORDER_ID="$(jget "d['id']")"
-check "order status is PLACED" "PLACED" "$(jget "d['status']")"
+# PENDING, not PLACED, since Phase 24: checkout starts a saga and answers before it finishes.
+check "order status is PENDING - the saga has only started" "PENDING" "$(jget "d['status']")"
 check "order total matches the cart total" "$EXPECTED_TOTAL" "$(jget "d['totalAmount']")"
 check "order line snapshots the product name" "$PRODUCT_NAME" "$(jget "d['items'][0]['productName']")"
 
@@ -633,9 +691,13 @@ STATUS="$(request GET /api/orders)"
 check "GET /api/orders returns 200" "200" "$STATUS"
 check "placed order appears in the list" "True" "$(jget "any(o['id'] == $ORDER_ID for o in d)")"
 
+check "the saga CONFIRMS the order: stock reserved, payment taken" "CONFIRMED" \
+    "$(wait_for_order_status "$ORDER_ID")"
+
 STATUS="$(request GET "/api/products/$PRODUCT_ID")"
 check "GET /api/products/$PRODUCT_ID returns 200" "200" "$STATUS"
-check "stock decreased by $QUANTITY" "$((STOCK_BEFORE - QUANTITY))" "$(jget "d['stockQuantity']")"
+check "stock decreased by $QUANTITY" "$((STOCK_BEFORE - QUANTITY))" \
+    "$(wait_for_stock "$PRODUCT_ID" "$((STOCK_BEFORE - QUANTITY))")"
 
 request GET /api/cart >/dev/null
 check "cart is empty after checkout" "0" "$(jget "len(d['items'])")"
@@ -709,7 +771,7 @@ check "the spec is titled EcomDemo API" "EcomDemo API" "$(jget "d['info']['title
 # gateway can aggregate its services' specifications, which is the real fix and its own piece of work.
 # OpenApiDocumentationTest asserts the same absence in a unit test, so the day somebody closes the gap,
 # both it and this list fail and say what to update.
-API_PATHS="/api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id}"
+API_PATHS="/api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id} /api/orders/{id}/status"
 for path in $API_PATHS; do
     check "the spec documents $path" "True" "$(jget "'$path' in d['paths']")"
 done
@@ -1041,9 +1103,11 @@ check "two simultaneous checkouts return exactly one 201 and one 409" "201,409" 
 # So the claim is "the unit was sold once", and it is about inventory - not about how fast a cache
 # hears. Polling states that, and reports the convergence time so a window quietly growing from 200ms
 # to four seconds is visible rather than merely still passing.
+# Phase 24 lengthened the window: the unit is now taken by the saga after the 201, so the figure
+# waits for the reservation as well as for the cache. Up to 60s, still reporting the time taken.
 RACE_CONVERGED=false
 RACE_ELAPSED=0
-for _ in $(seq 1 50); do
+for _ in $(seq 1 300); do
     request GET "/api/products/$RACE_ID" >/dev/null
     if [ "$(jget "d['stockQuantity']")" = "0" ]; then
         RACE_CONVERGED=true
@@ -1292,12 +1356,13 @@ check "buying 2 of them succeeds" "201" "$(request POST /api/orders)"
 # rather than merely still passing. A fixed `sleep 5` would hide exactly that.
 #
 # What did NOT become eventually consistent is worth saying: a shopper is never sold stock that is
-# not there. The reservation is synchronous and inventory-service holds the row lock, so the
-# catalogue may briefly ADVERTISE a stale number, and checkout still refuses. Stale display,
-# correct sale.
+# not there. Since Phase 24 the reservation is a saga step rather than part of checkout, but it is
+# still made against inventory-service's locked rows, and an order it cannot cover is CANCELLED
+# rather than sold. Stale display, correct sale. The polls below allow up to 60s, because the
+# reservation itself now happens after the 201.
 CONVERGED=false
 ELAPSED=0
-for _ in $(seq 1 50); do
+for _ in $(seq 1 300); do
     request GET "/api/products/$EVICTION_ID" >/dev/null
     if [ "$(jget "d['stockQuantity']")" = "3" ]; then
         CONVERGED=true
@@ -1309,7 +1374,7 @@ done
 check "the product page converges on 3, not the pre-sale 5 (took ${ELAPSED}ms)" "true" "$CONVERGED"
 
 CONVERGED=false
-for _ in $(seq 1 50); do
+for _ in $(seq 1 300); do
     request GET /api/products >/dev/null
     if [ "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")" = "3" ]; then
         CONVERGED=true
@@ -2092,8 +2157,10 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     #
     # The notification check immediately below this one has polled since Phase 17 and says why.
     # This one simply never got the same treatment when the outbox arrived.
+    # Up to 60s (was 20): since Phase 24 orders.placed is published on CONFIRMATION, after the
+    # saga's three steps, not the moment checkout commits.
     TOPIC_GROWTH=0
-    for _ in $(seq 1 20); do
+    for _ in $(seq 1 60); do
         TOPIC_GROWTH=$(( $(topic_message_count orders.placed) - OFFSETS_BEFORE ))
         [ "$TOPIC_GROWTH" -ge 1 ] && break
         sleep 1
@@ -2229,7 +2296,13 @@ if command -v docker >/dev/null 2>&1 \
     check "the outbox table exists" "1" \
         "$(psql_query "SELECT count(*) FROM information_schema.tables WHERE table_name = 'outbox_event';" | tr -d ' ')"
 
-    OUTBOX_PENDING_BEFORE="$(psql_query "SELECT count(*) FROM outbox_event WHERE published_at IS NULL;" | tr -d ' ')"
+    # Polled rather than read once (Phase 24): the previous section's last order may still be
+    # finishing its saga, and its OrderPlaced row is briefly - and correctly - pending.
+    for _ in $(seq 1 30); do
+        OUTBOX_PENDING_BEFORE="$(psql_query "SELECT count(*) FROM outbox_event WHERE published_at IS NULL;" | tr -d ' ')"
+        [ "${OUTBOX_PENDING_BEFORE:-1}" = "0" ] && break
+        sleep 1
+    done
     check "and nothing is stuck in it before the outage" "0" "${OUTBOX_PENDING_BEFORE:-unknown}"
 
     # --- An ordinary order leaves a published row ----------------------------------------------
@@ -2242,7 +2315,7 @@ if command -v docker >/dev/null 2>&1 \
     # The row is written in the order's own transaction, so it is there the instant the checkout
     # returns - no waiting, no polling. That is the difference this phase made.
     check "its event was written to the outbox in the same transaction" "1" \
-        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID';" | tr -d ' ')"
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID' AND event_type = 'OrderCreatedEvent';" | tr -d ' ')"
 
     OUTBOX_PUBLISHED=0
     for _ in $(seq 1 30); do
@@ -2297,6 +2370,12 @@ if command -v docker >/dev/null 2>&1 \
     # Waiting for the warm-up to publish leaves exactly one pending row during the outage, which is
     # what those checks assume. A test fixture that leaves debris in the machinery it is about to
     # examine is worse than no fixture.
+    #
+    # Phase 24 made "publish" mean the whole SAGA: the warm-up order's second row, OrderPlaced, is
+    # written only once payment-service has answered, a few seconds after the first has gone. So
+    # wait for the order to be CONFIRMED first - otherwise that row could be written just as the
+    # broker stops, and become exactly the debris described above.
+    wait_for_order_status "$WARMUP_ORDER_ID" >/dev/null
     for _ in $(seq 1 30); do
         WARMUP_PENDING="$(psql_query \
             "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$WARMUP_ORDER_ID' AND published_at IS NULL;" \
@@ -2377,11 +2456,13 @@ if command -v docker >/dev/null 2>&1 \
     # Nobody re-places the order and nobody replays anything by hand. The relay finds the row on
     # its next tick and sends it, because the row never stopped being there.
     #
-    # Ninety seconds because recovery is not instant: the broker has to finish starting, and the
-    # producer's client has to notice it is back, which takes as long as its reconnect backoff
-    # takes. The claim is that it arrives, not that it arrives immediately.
+    # 180 seconds (90 until Phase 24) because recovery is not instant: the broker has to finish
+    # starting, and every client has to notice it is back. Since the saga, that is not one
+    # producer and one consumer but the whole chain - OrderCreated, StockReserved,
+    # PaymentCompleted and OrderPlaced each wait on a relay and a consumer that must reconnect.
+    # The claim is that it arrives, not that it arrives immediately.
     OUTAGE_NOTIFIED=0
-    for _ in $(seq 1 90); do
+    for _ in $(seq 1 180); do
         OUTAGE_NOTIFIED="$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
         [ "${OUTAGE_NOTIFIED:-0}" -ge 1 ] && break
         sleep 1
@@ -2391,8 +2472,12 @@ if command -v docker >/dev/null 2>&1 \
     check "once the broker is back, the order IS notified - nothing was lost" "1" \
         "${OUTAGE_NOTIFIED:-0}"
 
-    check "and the outbox row is now marked published" "1" \
-        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID' AND published_at IS NOT NULL;" | tr -d ' ')"
+    # Every row for it, not "the" row: since Phase 24 an order has two in this outbox -
+    # OrderCreated at checkout and OrderPlaced on confirmation - and neither may be left behind.
+    check "and its outbox rows are all marked published" "0" \
+        "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTAGE_ORDER_ID' AND published_at IS NULL;" | tr -d ' ')"
+    check "and the saga finished for it: the order is CONFIRMED" "CONFIRMED" \
+        "$(wait_for_order_status "$OUTAGE_ORDER_ID" 30)"
 
     # Exactly one, not two. The relay retried this row many times during the outage and published
     # it once afterwards; had any of those attempts actually reached the broker, the consumer's
@@ -2716,9 +2801,14 @@ check "those refusals are counted as not_permitted" "True" \
 # The whole point of degrading "gracefully": one dependency down takes out the features that need
 # it and nothing else.
 DEGRADED_ORDER_STATUS="$(request POST /api/orders)"
+DEGRADED_ORDER_ID="$(jget "d['id']")"
 check "checkout of the filled cart SUCCEEDS with catalog-service down - it never needed it" "201" \
     "$DEGRADED_ORDER_STATUS"
 check "and order history still answers" "200" "$(request GET /api/orders)"
+# Phase 24: nor does the saga. Inventory reserves by product id and payment charges the total the
+# event carries, so the order is decided with the catalogue still down.
+check "and the saga still CONFIRMS it without the catalogue" "CONFIRMED" \
+    "$(wait_for_order_status "$DEGRADED_ORDER_ID")"
 as_anonymous
 check "the application itself stays healthy - an open breaker is not a health failure" "200" \
     "$(app_request GET /actuator/health)"
@@ -2837,26 +2927,43 @@ if curl -fsS "$TEMPO_URL/ready" >/dev/null 2>&1; then
     # the last hop arriving does not mean the first has: notification-service's batch has been
     # seen in Tempo before the gateway's, which failed the gateway check below on a trace that
     # was complete a few seconds later.
+    #
+    # Phase 24 made the async half the LONG half: the checkout's trace now runs through the whole
+    # saga - app -> inventory -> payment -> app -> notification, four outbox relays - before
+    # notification-service writes its span. 90s (was 45), and the poll waits for payment-service
+    # as well, which is the saga's middle.
     TRACE_SERVICES="none"
-    for _ in $(seq 1 45); do
+    for _ in $(seq 1 90); do
         TRACE_SERVICES="$(tempo_trace "$TRACE_ID" "','.join(sorted({s['service'] for s in spans}))")"
-        case "$TRACE_SERVICES" in *gateway-service*notification-service*) break ;; esac
+        case "$TRACE_SERVICES" in *gateway-service*notification-service*payment-service*) break ;; esac
         sleep 1
     done
     check "Tempo has the checkout's trace, under the id the client chose" "True" \
         "$([ "$TRACE_SERVICES" != "none" ] && echo True || echo False)"
-    check "with spans from at least 4 services (${TRACE_SERVICES})" "True" \
-        "$(tempo_trace "$TRACE_ID" "len({s['service'] for s in spans}) >= 4")"
+    # At least 5 since Phase 24 (was 4): payment-service joined the checkout's story.
+    check "with spans from at least 5 services (${TRACE_SERVICES})" "True" \
+        "$(tempo_trace "$TRACE_ID" "len({s['service'] for s in spans}) >= 5")"
 
     # Each of these is one hop of propagation, and each can break on its own.
     check "the gateway CONTINUED the caller's trace: its server span's parent is the span id sent" "True" \
         "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'gateway-service' and s['parent_id'] == '$CLIENT_SPAN_ID' for s in spans)")"
     check "the application's span is in it (gateway -> app over HTTP)" "True" \
         "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'ecomdemo' for s in spans)")"
-    check "inventory-service's reservation is in it (app -> inventory over HTTP)" "True" \
-        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'inventory-service' for s in spans)")"
+    check "inventory-service's stock pre-check is in it (app -> inventory over HTTP)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'inventory-service' and s['kind'] in ('SPAN_KIND_SERVER', 2) for s in spans)")"
+    # The relay's tag became `outbox.aggregate_id` in Phase 24, when the outbox became a library
+    # used by services whose aggregates are not orders.
     check "the outbox relay's span is in it, carrying the order id (the async hop)" "True" \
-        "$(tempo_trace "$TRACE_ID" "any(s['name'] == 'outbox relay' and str(s['attrs'].get('order.id')) == '$TRACE_ORDER_ID' for s in spans)")"
+        "$(tempo_trace "$TRACE_ID" "any(s['name'] == 'outbox relay' and str(s['attrs'].get('outbox.aggregate_id')) == '$TRACE_ORDER_ID' for s in spans)")"
+    # The saga's hops, each continued through an outbox row's stored traceparent (Phase 23's
+    # mechanism, now in three services): OrderCreated -> inventory, StockReserved -> payment,
+    # PaymentCompleted -> back to the order service.
+    check "inventory-service's reservation is in it (the saga's step 2, a Kafka consumer)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'inventory-service' and s['kind'] in ('SPAN_KIND_CONSUMER', 5) for s in spans)")"
+    check "payment-service's charge is in it (the saga's step 3, a Kafka consumer)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'payment-service' and s['kind'] in ('SPAN_KIND_CONSUMER', 5) for s in spans)")"
+    check "the order service's confirmation is in it (payments.completed consumed by the app)" "True" \
+        "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'ecomdemo' and s['kind'] in ('SPAN_KIND_CONSUMER', 5) for s in spans)")"
     check "notification-service's consumer span is in it (app -> Kafka -> notification)" "True" \
         "$(tempo_trace "$TRACE_ID" "any(s['service'] == 'notification-service' and s['kind'] in ('SPAN_KIND_CONSUMER', 5) for s in spans)")"
 
@@ -2905,6 +3012,176 @@ print(next((f.get('datasourceUid') for f in d['jsonData'].get('derivedFields', [
 else
     skip "distributed tracing checks" "no Tempo at $TEMPO_URL (set TEMPO_URL to override)"
 fi
+
+# --------------------------------------------------------------------------------------------
+# Saga: distributed transactions (Phase 24)
+# --------------------------------------------------------------------------------------------
+# The phase's "done when": success AND failure both end CONSISTENTLY. Consistency here is checked
+# in all three databases the saga touches, not just in the order's status - a CANCELLED order with
+# its stock still held in inventory would be exactly the inconsistency a saga exists to prevent.
+#
+#   success:  PENDING -> StockReserved -> PaymentCompleted -> CONFIRMED, stock taken, payment kept
+#   failure:  PENDING -> StockReserved -> PaymentFailed    -> CANCELLED, stock GIVEN BACK
+#                                                             (inventory's compensation)
+#   refusal:  PENDING -> StockRejected                     -> CANCELLED, nothing to give back
+#
+# The failure is FORCED, deterministically: payment-service declines any total above
+# PAYMENT_DECLINE_ABOVE (10000.00 by default), so the script buys 2 x 6000.00.
+section "Saga (distributed transactions)"
+
+PAYMENT_URL="${PAYMENT_URL:-http://localhost:8086}"
+check "payment-service is ready" "200" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' "$PAYMENT_URL/actuator/health/readiness")"
+as_anonymous
+check "and has no business API: a payment cannot be asked for, only caused by an event" "403" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PAYMENT_URL/api/payments")"
+
+if command -v docker >/dev/null 2>&1 && docker exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1; then
+    SAGA_TOPICS="$(docker exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-topics.sh \
+        --bootstrap-server localhost:9092 --list 2>/dev/null)"
+    MISSING_TOPICS=""
+    for topic in orders.created inventory.stock-reserved inventory.stock-rejected \
+        payments.completed payments.failed; do
+        for name in "$topic" "$topic-dlt"; do
+            printf '%s\n' "$SAGA_TOPICS" | grep -qx "$name" || MISSING_TOPICS="$MISSING_TOPICS $name"
+        done
+    done
+    check "the saga's five topics and their dead-letter topics exist" "" "${MISSING_TOPICS# }"
+else
+    skip "the saga's five topics and their dead-letter topics exist" "no Kafka container"
+fi
+
+saga_product() { # saga_product <name> <price> <stock> -> the new product's id
+    as_admin
+    request POST /api/products \
+        "{\"name\":\"$1\",\"description\":\"Phase 24 smoke probe\",\"price\":$2,\"stockQuantity\":$3,\"category\":\"TEST\"}" \
+        >/dev/null
+    jget "d['id']"
+}
+
+empty_cart() {
+    request GET /api/cart >/dev/null
+    for product_id in $(jget "' '.join(str(i['productId']) for i in d['items'])"); do
+        request DELETE "/api/cart/items/$product_id" >/dev/null
+    done
+}
+
+# --- Success -------------------------------------------------------------------------------------
+SAGA_OK_PRODUCT="$(saga_product "Saga Probe" 25.00 5)"
+as_customer
+empty_cart
+request POST /api/cart/items "{\"productId\":$SAGA_OK_PRODUCT,\"quantity\":2}" >/dev/null
+check "a normal checkout is accepted (201)" "201" "$(request POST /api/orders)"
+SAGA_OK_ORDER="$(jget "d['id']")"
+check "as PENDING: the saga decides the rest" "PENDING" "$(jget "d['status']")"
+check "the saga ends CONFIRMED" "CONFIRMED" "$(wait_for_order_status "$SAGA_OK_ORDER")"
+request GET "/api/orders/$SAGA_OK_ORDER/status" >/dev/null
+check "the status endpoint gives no reason for a confirmed order" "None" "$(jget "d['reason']")"
+check "and says when it was decided" "True" "$(jget "d['changedAt'] is not None")"
+check "the stock was taken: the catalogue converges on 3" "3" "$(wait_for_stock "$SAGA_OK_PRODUCT" 3)"
+if docker exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
+    check "payment-service kept a COMPLETED payment for the order total" "COMPLETED|50.00" \
+        "$(payment_psql_query "SELECT status || '|' || amount FROM payment WHERE order_id = $SAGA_OK_ORDER;")"
+    check "inventory-service holds its reservation as RESERVED" "RESERVED|2" \
+        "$(inventory_psql_query "SELECT status || '|' || quantity FROM stock_reservation WHERE order_id = $SAGA_OK_ORDER AND product_id = $SAGA_OK_PRODUCT;")"
+else
+    skip "the saga's rows in the payment and inventory databases" "no payment-db container"
+fi
+check "and only a CONFIRMED order is announced: the shopper is thanked" "1" \
+    "$(wait_for_notification "$SAGA_OK_ORDER")"
+
+# --- Failure: payment declined, stock compensated -------------------------------------------------
+SAGA_FAIL_PRODUCT="$(saga_product "Saga Declined Probe" 6000.00 5)"
+as_customer
+empty_cart
+request POST /api/cart/items "{\"productId\":$SAGA_FAIL_PRODUCT,\"quantity\":2}" >/dev/null
+check "a checkout over the payment limit is ALSO accepted - nobody knows yet" "201" \
+    "$(request POST /api/orders)"
+SAGA_FAIL_ORDER="$(jget "d['id']")"
+check "the saga ends CANCELLED" "CANCELLED" "$(wait_for_order_status "$SAGA_FAIL_ORDER")"
+request GET "/api/orders/$SAGA_FAIL_ORDER/status" >/dev/null
+check "and the status says why" "True" \
+    "$(jget "d['reason'].startswith('Payment declined: 12000.00 exceeds the limit')")"
+if docker exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
+    check "payment-service kept the decline, with its reason" "FAILED|12000.00" \
+        "$(payment_psql_query "SELECT status || '|' || amount FROM payment WHERE order_id = $SAGA_FAIL_ORDER;")"
+    # THE COMPENSATION. Polled: it runs in inventory-service when it reads payments.failed, which
+    # is independent of - and may land after - the order service cancelling on the same event.
+    RELEASED=""
+    for _ in $(seq 1 60); do
+        RELEASED="$(inventory_psql_query "SELECT status || '|' || quantity FROM stock_reservation WHERE order_id = $SAGA_FAIL_ORDER;")"
+        [ "$RELEASED" = "RELEASED|2" ] && break
+        sleep 1
+    done
+    check "inventory COMPENSATED: the reservation is RELEASED" "RELEASED|2" "$RELEASED"
+else
+    skip "the saga's rows in the payment and inventory databases" "no payment-db container"
+fi
+check "the stock is restored: the catalogue converges back on 5" "5" \
+    "$(wait_for_stock "$SAGA_FAIL_PRODUCT" 5)"
+check "no OrderPlaced was published for it" "0" \
+    "$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$SAGA_FAIL_ORDER' AND event_type = 'OrderPlacedEvent';" | tr -d ' ')"
+check "so nobody was thanked for an order that did not happen" "0" \
+    "$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $SAGA_FAIL_ORDER;" | tr -d ' ')"
+check "the cancelled order is still in the shopper's history, as CANCELLED" "CANCELLED" \
+    "$(request GET "/api/orders/$SAGA_FAIL_ORDER" >/dev/null; jget "d['status']")"
+
+# --- Refusal: the pre-check passed, the reservation did not ---------------------------------------
+# Two shoppers, one unit, two checkouts in parallel. Both pass the stock PRE-CHECK - it is a read,
+# and the reservation happens a moment later in inventory-service - so both are usually accepted.
+# Then the reservation, made against a locked row, gives the unit to exactly one. The other is
+# CANCELLED with the same words the pre-check would have used. That is the "pre-check is a
+# courtesy, the reservation is the guarantee" claim, observed.
+SAGA_LAST_PRODUCT="$(saga_product "Saga Last Unit Probe" 30.00 1)"
+as_customer; empty_cart
+request POST /api/cart/items "{\"productId\":$SAGA_LAST_PRODUCT,\"quantity\":1}" >/dev/null
+as_other; empty_cart
+request POST /api/cart/items "{\"productId\":$SAGA_LAST_PRODUCT,\"quantity\":1}" >/dev/null
+SAGA_RACE_A="$(mktemp)"; SAGA_RACE_B="$(mktemp)"
+curl -sS -o "$SAGA_RACE_A" -X POST "$BASE_URL/api/orders" -H "Authorization: Bearer $CUSTOMER_TOKEN" &
+curl -sS -o "$SAGA_RACE_B" -X POST "$BASE_URL/api/orders" -H "Authorization: Bearer $OTHER_TOKEN" &
+wait
+SAGA_RACE_IDS=""
+SAGA_RACE_OUTCOMES=""
+for pair in "$SAGA_RACE_A:$CUSTOMER_TOKEN" "$SAGA_RACE_B:$OTHER_TOKEN"; do
+    file="${pair%%:*}"; token="${pair#*:}"
+    id="$(python3 -c "import json;print(json.load(open('$file')).get('id') or '')" 2>/dev/null)"
+    if [ -n "$id" ]; then
+        as_token "$token"
+        SAGA_RACE_OUTCOMES="$SAGA_RACE_OUTCOMES $(wait_for_order_status "$id")"
+        SAGA_RACE_IDS="$SAGA_RACE_IDS $id"
+    else
+        SAGA_RACE_OUTCOMES="$SAGA_RACE_OUTCOMES REFUSED"   # the pre-check saw 0: also correct
+    fi
+done
+rm -f "$SAGA_RACE_A" "$SAGA_RACE_B"
+SAGA_RACE_SORTED="$(printf '%s\n' $SAGA_RACE_OUTCOMES | sort | paste -sd, -)"
+check "one unit, two buyers: exactly one CONFIRMED (${SAGA_RACE_SORTED})" "True" \
+    "$(case "$SAGA_RACE_SORTED" in CANCELLED,CONFIRMED|CONFIRMED,REFUSED) echo True ;; *) echo False ;; esac)"
+check "and the stock is 0, never -1" "0" "$(wait_for_stock "$SAGA_LAST_PRODUCT" 0)"
+if [ "$SAGA_RACE_SORTED" = "CANCELLED,CONFIRMED" ]; then
+    # The StockRejected path: nothing was reserved for the loser, so nothing is released.
+    SAGA_REJECTED_REASON=""
+    for id in $SAGA_RACE_IDS; do
+        for token in "$CUSTOMER_TOKEN" "$OTHER_TOKEN"; do
+            as_token "$token"
+            [ "$(request GET "/api/orders/$id/status")" = "200" ] || continue
+            [ "$(jget "d['status']")" = "CANCELLED" ] && SAGA_REJECTED_REASON="$(jget "d['reason']")"
+        done
+    done
+    check "the loser was cancelled by inventory, for stock" "True" \
+        "$(case "$SAGA_REJECTED_REASON" in *"requested 1, available 0"*) echo True ;; *) echo False ;; esac)"
+else
+    skip "the loser was cancelled by inventory, for stock" \
+        "the second checkout was refused by the pre-check this time (${SAGA_RACE_SORTED}); both are correct"
+fi
+
+as_admin
+for product_id in "$SAGA_OK_PRODUCT" "$SAGA_FAIL_PRODUCT" "$SAGA_LAST_PRODUCT"; do
+    request DELETE "/api/products/$product_id" >/dev/null
+done
+as_customer
+pass "the saga probe products are cleaned up"
 
 # --------------------------------------------------------------------------------------------
 # Summary

@@ -51,12 +51,11 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Step 5: smoke test. Read scripts/smoke-test.sh sections that assume synchronous stock (grep for
-`POST /api/orders`, stock checks, container count 18 → 20, service lists); add a helper
-`wait_for_order_status <id> <STATUS>` polling `/api/orders/{id}/status`; add section "Saga":
-normal order → CONFIRMED + stock reduced; order > 10000.00 → CANCELLED, reason, stock restored,
-payment row FAILED in payment-db, stock_reservation RELEASED. Then cold run: `docker compose down`,
-`up --build --wait`, `scripts/smoke-test.sh`.
+Step 5 in progress: smoke-test.sh edited (helpers wait_for_order_status / wait_for_stock /
+inventory_ & payment_psql_query; happy path, race, caching, messaging, outbox outage, tracing,
+degraded checkout adapted; new section "Saga (distributed transactions)"). NOT YET RUN. Next: cold
+run - `docker compose down`, `docker compose up --build --wait`, `scripts/smoke-test.sh`; fix until
+green; then commit `test(smoke): ...`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
