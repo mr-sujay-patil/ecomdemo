@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-28
 - **Phase:** 24 — Distributed Transactions (Saga pattern, choreography over Kafka)
 - **Branch:** feature/phase-24-saga (cut from `main` at `a2d5b8c`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -15,24 +15,40 @@ PR #37 merged as a merge commit (2 parents); 0 missing commits, 0 diffs, branch 
 green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down); cold smoke
 **327/0/0** (this machine).
 
-## Checklist (from the phase file's "What you'll implement")
-- [ ] A new mock `payment-service`
-- [ ] The saga: `OrderCreated` (PENDING) → `StockReserved` / `StockRejected` →
-      `PaymentCompleted` / `PaymentFailed` → `CONFIRMED` / `CANCELLED`
-- [ ] Compensation that releases stock when payment fails
-- [ ] Outbox publishers and idempotent consumers throughout
-- [ ] An order status endpoint
-- [ ] The orchestration alternative documented
-- [ ] End-to-end test: success and failure both end consistently; smoke: CONFIRMED, and a forced
-      payment failure ends CANCELLED with the stock restored
-- [ ] README, decisions, test report, RECENT rotation, tracker 🔵
+## Checklist (from the phase file's "What you'll implement", split into steps)
+- [ ] 1. `outbox` Maven module (`com.ecomdemo.outbox`): the app's outbox moved + generalised (row
+      stores its `topic`), idempotent-consumer `processed_event` claim, DLT error handler. App on it
+      with V18; behaviour unchanged, build green
+- [ ] 2. inventory-service: outbox + processed_event + `stock_reservation`; consumes
+      `orders.created` → StockReserved/StockRejected; consumes `payments.failed` → release (compensation)
+- [ ] 3. New mock `payment-service` (+ payment-db): consumes `inventory.stock-reserved` →
+      PaymentCompleted/PaymentFailed; Dockerfile, compose, Prometheus, Alloy, CI
+- [ ] 4. App: PENDING/CONFIRMED/CANCELLED (V19), checkout writes OrderCreated, listeners for
+      rejected/completed/failed; CONFIRMED publishes OrderPlaced (notification unchanged);
+      `GET /api/orders/{id}/status`
+- [ ] 5. Tests per service + smoke "Saga": normal → CONFIRMED; forced decline → CANCELLED, stock restored
+- [ ] 6. Orchestration alternative documented; README, decisions, test report, RECENT, tracker 🔵
 
-## Planning decisions
-- (to be filled after surveying the current checkout flow)
+## Planning decisions (user chose all three recommended options, 2026-09-28)
+- **Checkout = hybrid.** Read-only `requireAvailable` pre-check stays (instant 409), then the order is
+  saved PENDING + `OrderCreatedEvent` in the outbox → 201 with status PENDING. No HTTP reserve/release.
+- **Shared `outbox` module** (new reactor module, artifact `ecomdemo-outbox`), used by app, inventory,
+  payment. Each service has its own `outbox_event` + `processed_event` tables (Flyway per service).
+  Each service's app class adds the package to component, entity and repository scanning.
+- **Payment declines above a limit**: `PAYMENT_DECLINE_ABOVE` (default 10000.00). Smoke buys enough
+  units to exceed it.
+- Topics (publisher declares topic + `-dlt`; 3 partitions; key = order id): `orders.created` (app),
+  `inventory.stock-reserved`, `inventory.stock-rejected` (inventory), `payments.completed`,
+  `payments.failed` (payment). `orders.placed` now published on CONFIRMED.
+- Saga listeners: blocking retries (DefaultErrorHandler, FixedBackOff) → `<topic>-dlt` with partition
+  chosen by Kafka (DLT has 1 partition). Keeps per-order ordering; no retry topics.
+- Semantic lock = order PENDING (only PENDING → CONFIRMED/CANCELLED; late/duplicate events ignored)
+  and inventory's `stock_reservation` rows (RESERVED/RELEASED) which say what to give back.
+- Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Survey the current checkout (app order + inventory reservation + outbox + Kafka topics), record the
-saga design under "Planning decisions", then implement the checklist in order.
+Step 1: create the `outbox` module (move `ecomdemo-app/.../messaging/internal/Outbox*`), add the
+`topic` column (app V18), wire the app onto it; `./mvnw clean verify` must stay green.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
