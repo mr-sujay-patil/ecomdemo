@@ -25,13 +25,14 @@
 - [x] `AI_CHAT_PROVIDER` = openai | ollama | none (default); OPENAI_API_KEY from env
 - [x] AI_TIMEOUT (OpenAI option; own OllamaApi client), 1 retry, all failures → 503; `ecomdemo.ai.tokens`, `ecomdemo.ai.generations`
 - [x] Saved to product + `product_description_generation` (V3); failures leave the product unchanged
-- [ ] Smoke: endpoint returns structured JSON; without a key → ⚠️ with setup steps, never faked
+- [x] Smoke section "LLM integration": auth, 404, 503+Retry-After+unchanged, metrics; 200 path checks JSON, save, history, tokens; no provider → SKIP with setup steps
 - [ ] Testing protocol, test report, README, decisions, RECENT rotation (Phase 24 archived), tracker 🔵
 
 ## Next action
-User chose **OpenAI + Ollama** (2026-09-28). Code + tests done (ProductCopyGeneratorTest 8,
-ProductDescriptionApiIT 6, DescriptionGenerationNotConfiguredIT 1, all green). Next: smoke-test
-section (⚠️ SKIP with setup steps when no provider), k8s ConfigMap/extra env, then the testing protocol.
+User chose **OpenAI + Ollama** (2026-09-28). Code, tests and smoke section done. Next: testing
+protocol - full `verify`; cold compose smoke (expect LLM generation SKIP); a second compose run
+against a real local model (Ollama in a throwaway container, `AI_CHAT_PROVIDER=ollama`) so the 200
+path is exercised for real; k8s smoke via scripts/k8s-up.sh + k8s-smoke.sh; then the test report.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

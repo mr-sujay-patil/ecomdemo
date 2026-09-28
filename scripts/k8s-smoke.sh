@@ -6,9 +6,9 @@
 # What changes for the smoke test, and nothing else does:
 #   - BASE_URL is the INGRESS (Traefik, localhost:18080), so every API check crosses it;
 #   - SMOKE_PLATFORM=k8s makes its container helpers use `kubectl exec` / `kubectl scale`;
-#   - the two services it reads directly (the app's actuator, payment-service's health) are reached
-#     through `kubectl port-forward` on 18084 / 18086 - ports compose does not use, so both stacks
-#     can be up at once;
+#   - the three services it reads directly (the app's actuator, payment-service's health,
+#     catalog-service's metrics) are reached through `kubectl port-forward` on 18084 / 18086 /
+#     18081 - ports compose does not use, so both stacks can be up at once;
 #   - Prometheus, Grafana, Loki and Tempo stay in compose (the user's Phase 25 decision), so their
 #     URLs point nowhere and those checks are SKIPPED - reported as skipped, never as passed.
 #
@@ -28,9 +28,11 @@ trap cleanup EXIT
 
 kubectl --context "$CONTEXT" -n "$NS" port-forward svc/app 18084:8080 >/dev/null 2>&1 &
 kubectl --context "$CONTEXT" -n "$NS" port-forward svc/payment-service 18086:8086 >/dev/null 2>&1 &
+kubectl --context "$CONTEXT" -n "$NS" port-forward svc/catalog-service 18081:8081 >/dev/null 2>&1 &
 for _ in $(seq 1 30); do
     curl -fsS http://localhost:18084/actuator/health >/dev/null 2>&1 \
-        && curl -fsS http://localhost:18086/actuator/health >/dev/null 2>&1 && break
+        && curl -fsS http://localhost:18086/actuator/health >/dev/null 2>&1 \
+        && curl -fsS http://localhost:18081/actuator/health >/dev/null 2>&1 && break
     sleep 1
 done
 
@@ -40,6 +42,7 @@ SMOKE_PLATFORM=k8s \
 BASE_URL="${BASE_URL:-http://localhost:18080}" \
 APP_URL=http://localhost:18084 \
 PAYMENT_URL=http://localhost:18086 \
+CATALOG_URL=http://localhost:18081 \
 PROMETHEUS_URL="$NOT_IN_CLUSTER" GRAFANA_URL="$NOT_IN_CLUSTER" \
 LOKI_URL="$NOT_IN_CLUSTER" TEMPO_URL="$NOT_IN_CLUSTER" ALLOY_URL="$NOT_IN_CLUSTER" \
 SMOKE_STATE_FILE="${SMOKE_STATE_FILE:-.smoke-state-k8s}" \
