@@ -2,7 +2,10 @@ package com.ecomdemo.inventory;
 
 import com.ecomdemo.shared.InsufficientStockException;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -40,10 +43,15 @@ import org.springframework.transaction.annotation.Transactional;
 public class InventoryService {
 
     private final ProductStockRepository stock;
+    private final StockReservationRepository reservations;
     private final StockChangePublisher stockChanges;
 
-    public InventoryService(ProductStockRepository stock, StockChangePublisher stockChanges) {
+    public InventoryService(
+            ProductStockRepository stock,
+            StockReservationRepository reservations,
+            StockChangePublisher stockChanges) {
         this.stock = stock;
+        this.reservations = reservations;
         this.stockChanges = stockChanges;
     }
 
@@ -183,6 +191,91 @@ public class InventoryService {
         row.setQuantity(row.getQuantity() + quantity);
         stock.save(row);
         stockChanges.publish(productId);
+    }
+
+    /**
+     * Reserves every line of an order, or none of them. The saga's first local transaction
+     * (Phase 24).
+     *
+     * <p>All or nothing, and that is why it is one method rather than a loop over {@link #reserve}
+     * in the caller: every line is checked against LOCKED rows before any is written, so a cart of
+     * five products that is short on the fourth takes nothing at all. A rejection is returned, not
+     * thrown - "not enough stock" is one of the saga's two ordinary outcomes, and the caller
+     * publishes it as an event. Throwing would roll back the caller's transaction, including the
+     * {@code processed_event} marker and the outbox row that announces the rejection.
+     *
+     * <p>Lines for the same product are added together first, so a cart that somehow listed one
+     * product twice is checked against its real total rather than twice against the full stock.
+     *
+     * <p>Each reserved line is remembered in {@code stock_reservation}: see {@link StockReservation}
+     * for why the compensation needs it.
+     */
+    @Transactional
+    public ReservationResult reserveForOrder(Long orderId, List<ReservationLine> lines) {
+        Map<Long, ReservationLine> byProduct = new LinkedHashMap<>();
+        for (ReservationLine line : lines) {
+            byProduct.merge(
+                    line.productId(),
+                    line,
+                    (a, b) -> new ReservationLine(a.productId(), a.productName(), a.quantity() + b.quantity()));
+        }
+
+        Map<Long, ProductStock> rows = stock.lockAllByProductIdIn(byProduct.keySet()).stream()
+                .collect(Collectors.toMap(ProductStock::getProductId, Function.identity()));
+
+        for (ReservationLine line : byProduct.values()) {
+            ProductStock row = rows.get(line.productId());
+            int available = row == null ? 0 : row.getQuantity();
+            if (available < line.quantity()) {
+                // The same words checkout's pre-check uses, so a shopper whose order is cancelled
+                // for stock reads the message they would have got had they been a moment earlier.
+                return ReservationResult.rejected(
+                        new InsufficientStockException(line.productName(), line.quantity(), available)
+                                .getMessage());
+            }
+        }
+
+        for (ReservationLine line : byProduct.values()) {
+            ProductStock row = rows.get(line.productId());
+            row.reduce(line.quantity());
+            reservations.save(new StockReservation(orderId, line.productId(), line.quantity()));
+            stockChanges.publish(line.productId());
+        }
+        return ReservationResult.reservedAll();
+    }
+
+    /**
+     * Gives back everything an order still holds. The saga's COMPENSATING transaction, run when
+     * payment fails (Phase 24).
+     *
+     * <p>Idempotent by construction, not only by the caller's {@code processed_event} check: it
+     * releases only reservations still {@code RESERVED} and marks each {@code RELEASED} in the
+     * same transaction, so a second call finds nothing to give back. Compensation is the one step
+     * of a saga that must not fail and must not happen twice, so it gets both guards.
+     *
+     * @return how many reservations were released; zero for an order that holds nothing
+     */
+    @Transactional
+    public int releaseForOrder(Long orderId) {
+        List<StockReservation> held =
+                reservations.findByOrderIdAndStatus(orderId, StockReservation.Status.RESERVED);
+        if (held.isEmpty()) {
+            return 0;
+        }
+
+        Set<Long> productIds = held.stream().map(StockReservation::getProductId).collect(Collectors.toSet());
+        Map<Long, ProductStock> rows = stock.lockAllByProductIdIn(productIds).stream()
+                .collect(Collectors.toMap(ProductStock::getProductId, Function.identity()));
+
+        for (StockReservation reservation : held) {
+            // As in release(): a row swept since the reservation is recreated, never refused.
+            ProductStock row = rows.computeIfAbsent(
+                    reservation.getProductId(), id -> stock.save(new ProductStock(id, 0)));
+            row.setQuantity(row.getQuantity() + reservation.getQuantity());
+            reservation.markReleased();
+            stockChanges.publish(reservation.getProductId());
+        }
+        return held.size();
     }
 
     /** Forgets a product's stock entirely, for when the catalogue deletes the product. */

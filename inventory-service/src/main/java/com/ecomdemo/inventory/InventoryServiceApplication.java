@@ -1,6 +1,7 @@
 package com.ecomdemo.inventory;
 
 import com.ecomdemo.metrics.MetricsConfig;
+import com.ecomdemo.outbox.EnableOutbox;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
@@ -32,6 +33,9 @@ import org.springframework.context.annotation.Import;
  * <p>{@link MetricsConfig} is imported rather than scanned for the same reason the list exists: its
  * package holds the one bean that does not belong here. It tags every metric with the service name,
  * which is what lets one Prometheus tell the services apart.
+ *
+ * <p>{@code @EnableOutbox} since Phase 24: this service takes part in the saga, so it now needs the
+ * same "change my data AND announce it" guarantee the order service has had since Phase 18.
  */
 @SpringBootApplication(scanBasePackages = {
         "com.ecomdemo.inventory",
@@ -42,6 +46,7 @@ import org.springframework.context.annotation.Import;
 })
 @ConfigurationPropertiesScan(basePackages = {"com.ecomdemo.inventory", "com.ecomdemo.jwt"})
 @Import(MetricsConfig.class)
+@EnableOutbox
 public class InventoryServiceApplication {
 
     public static void main(String[] args) {

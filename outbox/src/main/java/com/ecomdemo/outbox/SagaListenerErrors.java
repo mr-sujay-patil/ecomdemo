@@ -15,6 +15,7 @@ import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.DeadLetterPublishingRecoverer;
 import org.springframework.kafka.listener.DefaultErrorHandler;
+import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.stereotype.Component;
 import org.springframework.util.backoff.FixedBackOff;
 
@@ -56,30 +57,42 @@ public class SagaListenerErrors implements DisposableBean {
 
     private final DefaultKafkaProducerFactory<String, byte[]> rawProducerFactory;
     private final KafkaTemplate<String, byte[]> rawTemplate;
-    private final KafkaOperations<?, ?> template;
+    private final DefaultKafkaProducerFactory<String, Object> jsonProducerFactory;
+    private final KafkaTemplate<String, Object> jsonTemplate;
 
     /**
      * @param applicationProducerFactory Boot's producer factory; its settings (bootstrap servers,
      *     acks, idempotence) are copied, not its serializers
-     * @param template the service's own {@code KafkaTemplate}, which dead-letters a message that
-     *     WAS deserialised - a record that parsed but failed in the handler
      */
-    public SagaListenerErrors(
-            ProducerFactory<?, ?> applicationProducerFactory, KafkaOperations<?, ?> template) {
-        // A message whose bytes could not be deserialised reaches the recoverer as its RAW bytes.
-        // The service's template has a JSON serializer, which would re-encode those bytes as a
-        // base64 string - a DLT record nobody could compare with the original. So byte[] gets a
-        // producer of its own that writes them verbatim.
+    public SagaListenerErrors(ProducerFactory<?, ?> applicationProducerFactory) {
+        // TWO private producers, one per shape a failed record can have, and NEITHER is a bean -
+        // for the reason recorded in Phase 18 (`OutboxKafkaSender`): any KafkaTemplate bean makes
+        // Boot's own `kafkaTemplate` back off. Nor does this borrow the service's template: that
+        // would tie a library to one service's serializer settings, and the first service to have
+        // a second template (a test's mock was enough) would leave it two to choose from.
         //
-        // NOT a bean, for the reason recorded in Phase 18 (`OutboxKafkaSender`): any
-        // KafkaTemplate bean makes Boot's own `kafkaTemplate` back off.
+        // - A message whose bytes could not be deserialised reaches the recoverer as its RAW
+        //   bytes, and is written back verbatim. A JSON serializer would re-encode them as a
+        //   base64 string - a DLT record nobody could compare with the original.
+        // - A message that parsed but failed in the handler reaches it as the record, and is
+        //   written as JSON without type headers - the same bytes a producer here would send.
+        this.rawProducerFactory = new DefaultKafkaProducerFactory<>(
+                producerProperties(applicationProducerFactory, ByteArraySerializer.class));
+        this.rawTemplate = new KafkaTemplate<>(rawProducerFactory);
+
+        Map<String, Object> json = producerProperties(applicationProducerFactory, JsonSerializer.class);
+        json.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
+        this.jsonProducerFactory = new DefaultKafkaProducerFactory<>(json);
+        this.jsonTemplate = new KafkaTemplate<>(jsonProducerFactory);
+    }
+
+    private static Map<String, Object> producerProperties(
+            ProducerFactory<?, ?> applicationProducerFactory, Class<?> valueSerializer) {
         Map<String, Object> properties =
                 new HashMap<>(applicationProducerFactory.getConfigurationProperties());
         properties.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, ByteArraySerializer.class);
-        this.rawProducerFactory = new DefaultKafkaProducerFactory<>(properties);
-        this.rawTemplate = new KafkaTemplate<>(rawProducerFactory);
-        this.template = template;
+        properties.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, valueSerializer);
+        return properties;
     }
 
     /**
@@ -92,7 +105,7 @@ public class SagaListenerErrors implements DisposableBean {
         // Checked in order: byte[] first, so raw bytes never reach the JSON template.
         Map<Class<?>, KafkaOperations<?, ?>> templates = new LinkedHashMap<>();
         templates.put(byte[].class, rawTemplate);
-        templates.put(Object.class, template);
+        templates.put(Object.class, jsonTemplate);
 
         DeadLetterPublishingRecoverer recoverer =
                 new DeadLetterPublishingRecoverer(
@@ -108,5 +121,6 @@ public class SagaListenerErrors implements DisposableBean {
     @Override
     public void destroy() {
         rawProducerFactory.destroy();
+        jsonProducerFactory.destroy();
     }
 }

@@ -32,6 +32,14 @@
 			<version>${project.version}</version>
 		</dependency>
 
+		<!-- Phase 24: the saga. The outbox for what this service announces, processed_event for
+		     what it receives. -->
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-outbox</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>

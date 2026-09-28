@@ -20,8 +20,9 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
       (`OutboxRoutes` bean per service, NOT a topic column - keeps Phase 18's decision),
       `ProcessedEvents` claim, `SagaListenerErrors` (blocking retries → `-dlt`), `@EnableOutbox`.
       App on it with V18 (`processed_event`); verify green, 492 tests
-- [ ] 2. inventory-service: outbox + processed_event + `stock_reservation`; consumes
-      `orders.created` → StockReserved/StockRejected; consumes `payments.failed` → release (compensation)
+- [x] 2. inventory-service: outbox + processed_event + `stock_reservation` (V3); consumes
+      `orders.created` → StockReserved/StockRejected (all-or-nothing, rows locked FOR UPDATE by id);
+      consumes `payments.failed` → `releaseForOrder` (compensation). InventorySagaTest 9/9 (Postgres)
 - [ ] 3. New mock `payment-service` (+ payment-db): consumes `inventory.stock-reserved` →
       PaymentCompleted/PaymentFailed; Dockerfile, compose, Prometheus, Alloy, CI
 - [ ] 4. App: PENDING/CONFIRMED/CANCELLED (V19), checkout writes OrderCreated, listeners for
@@ -48,10 +49,12 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Step 2: inventory-service joins the saga. Add `ecomdemo-outbox` dep + `@EnableOutbox`, Flyway V3
-(outbox_event incl. trace_parent, processed_event, stock_reservation), OutboxRoutes, topics
-`inventory.stock-reserved`/`-rejected` (+`-dlt`), listeners for `orders.created` and `payments.failed`,
-consumer Kafka config (ErrorHandlingDeserializer + per-listener default type), CommonErrorHandler bean.
+Step 3: new `payment-service` module (copy inventory-service's shape: pom, app class with
+`@EnableOutbox`, Flyway V1 = outbox_event + processed_event + payment, application.properties with
+consumer config, SecurityConfig for actuator only). Consumes `inventory.stock-reserved`; declines
+when amount > `ecomdemo.payment.decline-above` (env PAYMENT_DECLINE_ABOVE, default 10000.00);
+publishes `payments.completed` / `payments.failed` (+ `-dlt`). Then Dockerfile, compose (+payment-db),
+Prometheus scrape, Alloy regex, CI (check .github/workflows/ci.yml for per-module lists).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
