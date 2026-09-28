@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 28: Semantic Search (tag: phase-28-complete, PR #TBD)
+## Phase 28: Semantic Search (tag: phase-28-complete, PR #45)
 **What exists now:** catalog-service `GET /api/products/search?q=&category=&minPrice=&maxPrice=&limit=`
 (public): embeds the query, nearest products by cosine in pgvector (HNSW), filters inside the query,
 threshold per model, results re-read from the catalogue (+stock) with a similarity. Every product write

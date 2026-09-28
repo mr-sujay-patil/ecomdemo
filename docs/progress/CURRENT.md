@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-28
 - **Phase:** 28 — Semantic Search (pgvector)
 - **Branch:** feature/phase-28-semantic-search (cut from `main` at `1106b0d`)
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** —
-- **Waiting for user:** NO
+- **PR:** #45 https://github.com/mr-sujay-patil/ecomdemo/pull/45
+- **Waiting for user:** YES - review of the Phase 28 PR
 
 ## Merge verification before this phase — PASSED
 - Phase 27: PR #43 (`190f782`) + follow-up PR #44 (`1106b0d`, the smoke dashboard-query poll). First
@@ -36,14 +36,15 @@
 - [x] `GET /api/products/search` with metadata filters
 - [x] Tests (unit, IT with a deterministic fake embedding model, e2e through Kafka)
 - [x] Smoke section "Semantic search"
-- [ ] Testing protocol, test report, README, decisions, RECENT rotation, tracker 🔵
+- [x] Testing protocol (verify 570; compose cold 377/0/1; real models 385/0/0; k8s 354/0/6), test report,
+  README, decisions (14), RECENT rotation (Phase 25 archived), tracker 🔵
 
 ## Next action
-Measured nomic-embed-text for real (throwaway container `ecomdemo-ollama-test` on ecomdemo_default, volume
-`ecomdemo-ollama-test`; REMOVE both at the end): per-model defaults (ollama 0.5 + nomic prefixes, openai 0.3
-unmeasured). Smoke "Semantic search" passes with the real model (16 checks). Next: full `./mvnw clean
-verify`, cold compose smoke with no model (expect the new SKIP), real-model run (pull llama3.2 into the
-test container too, both share OLLAMA_BASE_URL), k8s run, then test report / README / decisions / RECENT.
+STOPPED at PR #45, waiting for the user. Do NOT merge unless the user says `approved, merge it`
+(`gh pr merge 45 --merge`). On `merged, continue`: merge verification (git checks, CI on main, `verify`,
+cold compose smoke on a COPY; default config expects 377/0/1 on fresh volumes, 378/0/1 kept), tag
+`phase-28-complete`, then Phase 29 (AI shopping assistant). Throwaway Ollama container removed; compose
+stack (default config) and the kind cluster are running.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
@@ -63,4 +64,5 @@ test container too, both share OLLAMA_BASE_URL), k8s run, then test report / REA
   removed customer proxy.
 - catalog-service is slow on its first requests after a restart (a half-open trial can exceed 500 ms).
 - k8s: the app must stay at 1 replica (no leader election); observability not in the cluster.
-- Phase 27: the OpenAI path is untested against a real key (none here); Ollama path verified for real.
+- Phase 27/28: OpenAI chat and embeddings untested against a real key (none here); Ollama verified for real.
+- In this Claude shell `grep` is a broken Claude Code wrapper function: use `command grep`.
