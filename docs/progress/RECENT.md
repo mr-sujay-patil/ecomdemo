@@ -19,7 +19,7 @@ reserves all lines or none (`inventory.stock-reserved` / `-rejected`), the MOCK 
 (8086, payment-db 5437) charges or declines above `PAYMENT_DECLINE_ABOVE`=10000.00
 (`payments.completed` / `-failed`), the app moves PENDING -> CONFIRMED / CANCELLED; on a decline
 inventory RELEASES the stock (compensation). `GET /api/orders/{id}/status`. 20 containers.
-Smoke __SMOKE__ on the WSL2 workstation.
+Smoke **361 / 0 / 0** on three cold runs of the final code, WSL2 workstation.
 **Key code:** new reactor module `outbox` (`Outbox`, `OutboxRoutes`, `ProcessedEvents`,
 `SagaListenerErrors`, `@EnableOutbox`); app `order/internal/saga/OrderSagaHandler` +
 `OrderRepository.transition` (conditional UPDATE = semantic lock); inventory `saga/InventorySagaHandler`
