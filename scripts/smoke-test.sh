@@ -2944,14 +2944,23 @@ if curl -fsS "$TEMPO_URL/ready" >/dev/null 2>&1; then
     #
     # Phase 24 made the async half the LONG half: the checkout's trace now runs through the whole
     # saga - app -> inventory -> payment -> app -> notification, four outbox relays - before
-    # notification-service writes its span. 90s (was 45), and the poll waits for payment-service
-    # as well, which is the saga's middle.
+    # notification-service writes its span. 90s (was 45), and the poll waits for EVERY hop the checks
+    # below assert, not for the first and the last: the sixth cold run of Phase 24 saw
+    # notification-service's consumer span in Tempo before the order service's own consumer span,
+    # which happened seconds EARLIER but sat in the app's 5 s export batch. The trace was complete a
+    # moment later; the check had simply looked too soon - Phase 23's lesson, one hop further on.
+    TRACE_HOPS_PY="all(any(s['service'] == svc and s['kind'] in kinds for s in spans) for svc, kinds in [
+        ('gateway-service', ('SPAN_KIND_SERVER', 2)),
+        ('inventory-service', ('SPAN_KIND_CONSUMER', 5)),
+        ('payment-service', ('SPAN_KIND_CONSUMER', 5)),
+        ('ecomdemo', ('SPAN_KIND_CONSUMER', 5)),
+        ('notification-service', ('SPAN_KIND_CONSUMER', 5))])"
     TRACE_SERVICES="none"
     for _ in $(seq 1 90); do
-        TRACE_SERVICES="$(tempo_trace "$TRACE_ID" "','.join(sorted({s['service'] for s in spans}))")"
-        case "$TRACE_SERVICES" in *gateway-service*notification-service*payment-service*) break ;; esac
+        [ "$(tempo_trace "$TRACE_ID" "$TRACE_HOPS_PY")" = "True" ] && break
         sleep 1
     done
+    TRACE_SERVICES="$(tempo_trace "$TRACE_ID" "','.join(sorted({s['service'] for s in spans}))")"
     check "Tempo has the checkout's trace, under the id the client chose" "True" \
         "$([ "$TRACE_SERVICES" != "none" ] && echo True || echo False)"
     # At least 5 since Phase 24 (was 4): payment-service joined the checkout's story.
