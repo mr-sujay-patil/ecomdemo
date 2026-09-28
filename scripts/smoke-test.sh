@@ -907,8 +907,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V17, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V19, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok,18:ok,19:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -970,11 +970,19 @@ if HISTORY="$(psql_query \
         | tr -d '\r ')"
     check "customer_db seeded exactly one administrator, at id 1" "1" "$ADMIN_ROW"
 
+    # V16 also dropped `processed_event`; Phase 24's V18 brought it back as the order service's OWN
+    # ledger for the saga's replies, so it is no longer part of this check - see the V18/V19 checks.
     APP_USERS="$(psql_query \
         "SELECT count(*) FROM information_schema.tables \
-         WHERE table_schema = 'public' AND table_name IN ('users', 'notification', 'processed_event');" \
+         WHERE table_schema = 'public' AND table_name IN ('users', 'notification');" \
         | tr -d '\r ')"
-    check "V16 dropped accounts, notifications and the ledger - other services own them" "0" "$APP_USERS"
+    check "V16 dropped accounts and notifications - other services own them" "0" "$APP_USERS"
+
+    check "V18 gave the order service its own processed_event for the saga's replies" "1" \
+        "$(psql_query "SELECT count(*) FROM information_schema.tables \
+            WHERE table_schema = 'public' AND table_name = 'processed_event';" | tr -d '\r ')"
+    check "V19 left no order in the pre-saga PLACED state" "0" \
+        "$(psql_query "SELECT count(*) FROM orders WHERE status NOT IN ('PENDING', 'CONFIRMED', 'CANCELLED');" | tr -d '\r ')"
 
     # The stored credential must be a BCrypt hash, never the password. $2a$ is the algorithm,
     # 10 the cost factor; the whole string is always 60 characters.
@@ -1008,7 +1016,7 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V17, all successful" \
+    skip "flyway_schema_history shows V1-V19, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
