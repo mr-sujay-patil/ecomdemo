@@ -23,8 +23,9 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - [x] 2. inventory-service: outbox + processed_event + `stock_reservation` (V3); consumes
       `orders.created` → StockReserved/StockRejected (all-or-nothing, rows locked FOR UPDATE by id);
       consumes `payments.failed` → `releaseForOrder` (compensation). InventorySagaTest 9/9 (Postgres)
-- [ ] 3. New mock `payment-service` (+ payment-db): consumes `inventory.stock-reserved` →
-      PaymentCompleted/PaymentFailed; Dockerfile, compose, Prometheus, Alloy, CI
+- [x] 3. New mock `payment-service` (+ payment-db, host ports 8086 / 5437): consumes
+      `inventory.stock-reserved` → PaymentCompleted/PaymentFailed (declines amount > limit);
+      Dockerfile, compose, Prometheus, Alloy wired (CI builds the reactor, nothing to add). 9 tests
 - [ ] 4. App: PENDING/CONFIRMED/CANCELLED (V19), checkout writes OrderCreated, listeners for
       rejected/completed/failed; CONFIRMED publishes OrderPlaced (notification unchanged);
       `GET /api/orders/{id}/status`
@@ -49,12 +50,12 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Step 3: new `payment-service` module (copy inventory-service's shape: pom, app class with
-`@EnableOutbox`, Flyway V1 = outbox_event + processed_event + payment, application.properties with
-consumer config, SecurityConfig for actuator only). Consumes `inventory.stock-reserved`; declines
-when amount > `ecomdemo.payment.decline-above` (env PAYMENT_DECLINE_ABOVE, default 10000.00);
-publishes `payments.completed` / `payments.failed` (+ `-dlt`). Then Dockerfile, compose (+payment-db),
-Prometheus scrape, Alloy regex, CI (check .github/workflows/ci.yml for per-module lists).
+Step 4, the order service (ecomdemo-app): V19 orders.status PENDING/CONFIRMED/CANCELLED (+ reason,
+updated_at; old PLACED rows → CONFIRMED); checkout = pre-check + PENDING order + OrderCreatedEvent
+(no HTTP reserve/release, no compensation sync); listeners for inventory.stock-rejected,
+payments.completed, payments.failed (only PENDING moves); CONFIRMED appends OrderPlacedEvent;
+declare orders.created (+dlt); `GET /api/orders/{id}/status`; fix app Kafka consumer props (the old
+notification group/default type is still there). Then update affected app tests.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
