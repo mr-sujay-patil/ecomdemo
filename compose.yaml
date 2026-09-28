@@ -646,9 +646,10 @@ services:
       AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-none}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Its own chat model variables: calling tools reliably is a harder job than catalog's
-      # descriptions, and may want a bigger model.
+      # descriptions. qwen2.5:7b passed the evaluation set where llama3.2 did not (see
+      # application.properties); `ollama pull qwen2.5:7b` on the host.
       ASSISTANT_OPENAI_MODEL: ${ASSISTANT_OPENAI_MODEL:-gpt-4.1-mini}
-      ASSISTANT_OLLAMA_MODEL: ${ASSISTANT_OLLAMA_MODEL:-llama3.2}
+      ASSISTANT_OLLAMA_MODEL: ${ASSISTANT_OLLAMA_MODEL:-qwen2.5:7b}
       OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}

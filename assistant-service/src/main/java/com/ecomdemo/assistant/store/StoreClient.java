@@ -62,18 +62,6 @@ public class StoreClient {
                 : response.results().stream().map(SearchHit::product).toList();
     }
 
-    public Optional<ProductView> product(String token, long productId) {
-        try {
-            return Optional.ofNullable(call(() -> catalog.get()
-                    .uri("/api/products/{id}", productId)
-                    .headers(headers -> headers.setBearerAuth(token))
-                    .retrieve()
-                    .body(ProductView.class), "Product lookup"));
-        } catch (HttpClientErrorException.NotFound e) {
-            return Optional.empty();
-        }
-    }
-
     /**
      * One of the CALLER's orders. Empty both when it does not exist (404) and when it is somebody
      * else's (403): the model is told the same thing either way, so it cannot even learn which

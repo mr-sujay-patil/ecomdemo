@@ -52,6 +52,8 @@ import org.springframework.web.client.HttpClientErrorException;
  *   <li><b>Augment</b>: put them in the system prompt, under rules that say to answer from them.
  *   <li><b>Generate</b>, with the tools available and the conversation so far replayed from Redis.
  *       The model may call tools - each round is another call to it - before it answers.
+ *   <li><b>Check</b> the answer: one that states an order's status with no order looked up is
+ *       replaced ({@link OrderClaimGuard}).
  *   <li><b>Report</b> what the answer was based on: the passages, the products the tools returned,
  *       the orders looked at, and any cart addition waiting for confirmation.
  * </ol>
@@ -174,6 +176,12 @@ public class AssistantService {
                     "The assistant could not produce an answer. Try again.", RETRY_AFTER, null);
         }
         recordTokens(response);
+        if (OrderClaimGuard.unsupported(answer, !turn.orders().isEmpty())) {
+            log.warn("Replaced an answer that stated an order status no lookup backed");
+            replaceLastAnswer(memoryKey, OrderClaimGuard.REPLACEMENT);
+            stop(sample, "ungrounded");
+            return reply(conversationId, OrderClaimGuard.REPLACEMENT, passages, turn);
+        }
         stop(sample, "answered");
         return reply(conversationId, answer.strip(), passages, turn);
     }

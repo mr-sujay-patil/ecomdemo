@@ -3646,8 +3646,8 @@ case "$ASSISTANT_STATUS" in
             "$(jget "any(s['type'] == 'order' and s['id'] == '$OWNED_ORDER_ID' for s in d['sources'])")"
 
         # --- Store topics only ---
-        check "an off-topic request is declined with the store-only sentence" "200" \
-            "$(ask_until "'only help with shopping' in d['answer']" "Write me a short poem about the sea.")"
+        check "an off-topic request is declined: it says it helps with shopping, and writes no poem" "200" \
+            "$(ask_until "'shopping' in d['answer'].lower() and any(w in d['answer'].lower() for w in ('only help', \"can't\", 'cannot', 'unable', 'not able')) and len(d['answer']) < 400" "Write me a short poem about the sea.")"
         printf '        -> %s\n' "$(jget "d['answer'][:200]")"
 
         # --- Memory ---

@@ -70,7 +70,7 @@ class ShoppingToolsTest {
                 .flatMap(properties -> properties.propertyNames().stream())
                 .map(name -> name.toLowerCase(Locale.ROOT))
                 .toList();
-        assertThat(parameters).containsExactlyInAnyOrder("query", "category", "maxprice", "orderid", "productid", "quantity");
+        assertThat(parameters).containsExactlyInAnyOrder("query", "category", "maxprice", "orderid", "productname", "quantity");
         assertThat(parameters).noneMatch(name -> name.contains("user") || name.contains("customer")
                 || name.contains("account") || name.contains("token"));
     }
@@ -96,7 +96,7 @@ class ShoppingToolsTest {
                 .thenThrow(new StoreUnavailableException("Product search is unavailable right now.", null));
 
         assertThat(tools.searchProducts("headphones", null, null))
-                .isEqualTo(new ShoppingTools.Note("Product search is unavailable right now."));
+                .isEqualTo("Product search is unavailable right now.");
     }
 
     @Test
@@ -105,38 +105,60 @@ class ShoppingToolsTest {
         when(store.orderStatus(TOKEN, 7L)).thenReturn(Optional.empty());
 
         assertThat(tools.getOrderStatus(7L))
-                .isEqualTo(new ShoppingTools.Note("There is no order 7 on this customer's account."));
+                .isEqualTo("Order 7 is not an order on your account.");
         assertThat(turn.orders()).isEmpty();
     }
 
     @Test
-    @DisplayName("addToCart only proposes; it never touches the cart")
+    @DisplayName("addToCart finds the product by name and only proposes; it never touches the cart")
     void addToCartProposes() {
-        when(store.product(TOKEN, 4L)).thenReturn(Optional.of(HEADPHONES));
+        when(store.searchProducts(TOKEN, "noise-cancelling headphones", null, null, 5)).thenReturn(List.of(HEADPHONES));
         PendingCartAddition proposal = new PendingCartAddition("a1", 4L, HEADPHONES.name(), 2, HEADPHONES.price());
         when(actions.propose(11L, 4L, HEADPHONES.name(), 2, HEADPHONES.price())).thenReturn(proposal);
 
-        Object result = tools.addToCart(4L, 2);
+        Object result = tools.addToCart("noise-cancelling headphones", 2);
 
-        assertThat(result.toString()).contains("Nothing is in the cart yet");
+        assertThat(result.toString()).contains("Confirm button").contains("not in the cart");
         assertThat(turn.pendingAction()).isEqualTo(proposal);
         verify(store, never()).addToCart(anyString(), anyLong(), anyInt());
     }
 
     @Test
-    @DisplayName("addToCart: a quantity outside 1-10, an unknown product, or a second proposal is refused")
+    @DisplayName("a name matching several products, or none, proposes nothing and says which exist")
+    void addToCartNeedsOneProduct() {
+        ProductView sleeve = new ProductView(10L, "Laptop Sleeve 16\"", "Padded sleeve", new BigDecimal("1799.00"), 5, "ACCESSORIES");
+        ProductView stand = new ProductView(6L, "Laptop Stand", "Aluminium stand", new BigDecimal("2199.00"), 5, "ACCESSORIES");
+        when(store.searchProducts(TOKEN, "laptop", null, null, 5)).thenReturn(List.of(sleeve, stand));
+        when(store.searchProducts(TOKEN, "gaming laptop", null, null, 5)).thenReturn(List.of());
+
+        assertThat(tools.addToCart("laptop", 1).toString())
+                .contains("Ask the customer which one").contains("Laptop Stand").contains("Laptop Sleeve");
+        assertThat(tools.addToCart("gaming laptop", 1).toString()).contains("No product in this store is called");
+        assertThat(turn.pendingAction()).isNull();
+        verify(actions, never()).propose(anyLong(), anyLong(), anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("an exact name wins over names that merely contain it")
+    void exactNameWins() {
+        ProductView mat = new ProductView(8L, "Desk Mat", "Felt mat", new BigDecimal("1299.00"), 5, "ACCESSORIES");
+        ProductView bigMat = new ProductView(11L, "Desk Mat XL", "Bigger", new BigDecimal("1999.00"), 5, "ACCESSORIES");
+
+        assertThat(ShoppingTools.matching("desk mat", List.of(bigMat, mat))).containsExactly(mat);
+        assertThat(ShoppingTools.matching("mat", List.of(bigMat, mat))).containsExactly(bigMat, mat);
+    }
+
+    @Test
+    @DisplayName("addToCart: a quantity outside 1-10, or a second proposal in one answer, is refused")
     void addToCartRefusals() {
-        assertThat(tools.addToCart(4L, 0).toString()).contains("quantity from 1 to 10");
-        assertThat(tools.addToCart(4L, 11).toString()).contains("quantity from 1 to 10");
+        assertThat(tools.addToCart("Desk Mat", 0).toString()).contains("quantity from 1 to 10");
+        assertThat(tools.addToCart("Desk Mat", 11).toString()).contains("quantity from 1 to 10");
 
-        when(store.product(TOKEN, 99L)).thenReturn(Optional.empty());
-        assertThat(tools.addToCart(99L, 1).toString()).contains("no product with id 99");
-
-        when(store.product(TOKEN, 4L)).thenReturn(Optional.of(HEADPHONES));
+        when(store.searchProducts(TOKEN, "Noise-Cancelling Headphones", null, null, 5)).thenReturn(List.of(HEADPHONES));
         when(actions.propose(eq(11L), eq(4L), anyString(), anyInt(), any()))
                 .thenReturn(new PendingCartAddition("a1", 4L, HEADPHONES.name(), 1, HEADPHONES.price()));
-        tools.addToCart(4L, null);
-        assertThat(tools.addToCart(4L, 1).toString()).contains("Only one addition");
+        tools.addToCart("Noise-Cancelling Headphones", null);
+        assertThat(tools.addToCart("Noise-Cancelling Headphones", 1).toString()).contains("Only one addition");
         verify(store, never()).addToCart(anyString(), anyLong(), anyInt());
     }
 }
