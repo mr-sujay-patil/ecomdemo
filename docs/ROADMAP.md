@@ -94,7 +94,7 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 22 | [Resilience](phases/phase-22-resilience.md) | Resilience4j | `feature/phase-22-resilience` | ✅ |
 | 23 | [Distributed Tracing](phases/phase-23-tracing.md) | OpenTelemetry + Tempo | `feature/phase-23-tracing` | ✅ |
 | 24 | [Distributed Transactions](phases/phase-24-saga.md) | Saga pattern | `feature/phase-24-saga` | ✅ |
-| 25 | [Container Orchestration](phases/phase-25-kubernetes.md) | Kubernetes (kind/minikube) | `feature/phase-25-kubernetes` | 🟡 |
+| 25 | [Container Orchestration](phases/phase-25-kubernetes.md) | Kubernetes (kind/minikube) | `feature/phase-25-kubernetes` | 🔵 |
 | 26 | [Cloud Deployment (Optional)](phases/phase-26-aks.md) | Azure AKS + ACR | `feature/phase-26-aks` | ⬜ |
 | 27 | [LLM Integration](phases/phase-27-spring-ai.md) | Spring AI | `feature/phase-27-spring-ai` | ⬜ |
 | 28 | [Semantic Search](phases/phase-28-semantic-search.md) | pgvector | `feature/phase-28-semantic-search` | ⬜ |

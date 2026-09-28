@@ -5,11 +5,11 @@
 - **Updated:** 2026-09-28
 - **Phase:** 25 — Container Orchestration (Kubernetes, kind)
 - **Branch:** feature/phase-25-kubernetes (cut from `main` at `8047753`)
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** only for `helm` (needed to install Traefik and metrics-server). kind
-  v0.34.0-alpha and kubectl v1.36.1 are installed; Docker has 24 CPUs / ~31 GB.
+- **Waiting for user:** YES - review of the Phase 25 PR (tools: kind v0.34.0-alpha, kubectl v1.36.1,
+  helm v3.22.0).
 
 ## Merge verification before this phase — all PASSED
 - Phase 24: PR #40 merge commit `67f6889`; 0 missing, 0 diffs; CI green; `verify` 524; cold smoke
@@ -20,14 +20,14 @@
   (`ac4d08b`).
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] Deployment, Service, ConfigMap and Secret per service
-- [ ] Probes and resource limits
-- [ ] An Ingress in front of the gateway
-- [ ] Infrastructure through Helm charts or manifests
-- [ ] An HPA
-- [ ] Rolling update and self-healing demos
-- [ ] Smoke test runs against the Ingress URL; deleting a pod keeps the flow working
-- [ ] README, decisions, test report, RECENT rotation, tracker 🔵
+- [x] Deployment, Service, ConfigMap and Secret per service (k8s/services/, secrets by k8s-up.sh)
+- [x] Probes and resource limits (startup/liveness/readiness, CPU request, memory limit)
+- [x] An Ingress in front of the gateway (Traefik, localhost:18080)
+- [x] Infrastructure through manifests (6 PostgreSQL + Kafka StatefulSets, Redis Deployment)
+- [x] An HPA (catalog-service 2-4 @ 60 % CPU; demo 2 → 4)
+- [x] Rolling update and self-healing demos (scripts/k8s-demo.sh; rollout 744/0, selfheal 156/0)
+- [x] Smoke through the Ingress + Kubernetes section: 338/0/4 on 3 new clusters; compose 361/0/0
+- [x] README, decisions (12), test report, RECENT rotation (Phase 23 archived), tracker 🔵
 
 ## Planning decisions (user chose all three recommended options, 2026-09-28)
 - **Traefik** as the Ingress controller (ingress-nginx is retired, March 2026), installed with Helm.
@@ -38,8 +38,10 @@
   observability checks SKIPPED, never passed).
 
 ## Next action
-When the user says `done` (kind installed): verify `kind version`, then plan the manifests and
-implement the checklist.
+STOPPED at the Phase 25 PR, waiting for the user. Do NOT merge unless the user says `approved, merge
+it` (`gh pr merge <n> --merge`). On `merged, continue`: merge verification (git checks, `verify`, cold
+compose smoke on a COPY of the script, CI green), tag `phase-25-complete`. The kind cluster and the
+compose stack may be left running; `scripts/k8s-down.sh` removes the cluster.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

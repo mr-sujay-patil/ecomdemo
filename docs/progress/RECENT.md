@@ -12,6 +12,31 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 25: Container Orchestration (tag: phase-25-complete, PR #__PR__)
+**What exists now:** the whole system also runs on a local **kind** cluster (one node, k8s v1.37):
+`scripts/k8s-up.sh` → Traefik Ingress on **localhost:18080** → gateway (2 replicas) → services. 7
+Deployments (ConfigMap + Secret + Service each, startup/liveness/readiness probes, CPU request, memory
+limit, maxSurge 1 / maxUnavailable 0, preStop 5 s, init container waiting for dependencies), 6 PostgreSQL
++ Kafka as StatefulSets, Redis Deployment, HPA on catalog-service (2–4 @ 60 % CPU). Observability stays
+in compose. Smoke **338 / 0 / 4** (4 = observability skips) on three new clusters; compose 361/0/0.
+**Key code:** `k8s/` (Kustomize: `kustomization.yaml`, `data/`, `services/`, `ingress.yaml`, `hpa.yaml`,
+`kind-cluster.yaml`, `platform/*-values.yaml`); `scripts/k8s-up.sh|down|smoke|demo.sh`; smoke-test.sh
+`ctr_exec`/`ctr_stop`/`ctr_start` (docker or kubectl) + section "Kubernetes" (SMOKE_PLATFORM=k8s).
+**Config & infrastructure:** needs kind, kubectl, helm. Charts pinned: Traefik 41.6.0, metrics-server
+3.14.0 (`--kubelet-insecure-tls`). Secrets `<svc>-secrets` created by the script (JWT from .env,
+DB passwords generated once and kept). Images `docker save --platform` → `kind load image-archive`.
+Port-forwards for the smoke test: 18084 (app), 18086 (payment).
+**Tests:** no Java changes (524 green). Demos measured: rollout 744 req / 0 failed, selfheal 156 / 0,
+HPA 2 → 4 under load.
+**Gotchas:** Traefik chart: `service.spec.type`, not `service.type` (else a LoadBalancer that never gets
+an IP). A CLI Kafka readiness probe starts a 2nd JVM and never answers → use TCP. A StatefulSet will not
+replace a never-Ready pod: delete it. A Service routes only to Ready pods, so init containers waiting on
+it wait too. A deleted pod lingers as Terminating (preStop + graceful). `rollout undo` does not change
+the YAML (next `apply` reverts it). The app must stay at 1 replica (scheduled jobs).
+**Follow-ups (not done):** leader election (ShedLock / Lease) so the app can scale; observability in the
+cluster; PodDisruptionBudgets; NetworkPolicies; real secret management (Sealed/External Secrets); a DB
+operator; kind stable release instead of the alpha.
+
 ## Phase 24: Distributed Transactions (tag: phase-24-complete, PR #40)
 **What exists now:** checkout is a CHOREOGRAPHED SAGA over Kafka. `POST /api/orders` = stock pre-check
 (read, instant 409) + order PENDING + `OrderCreatedEvent` in the outbox -> 201 PENDING. inventory
@@ -40,29 +65,4 @@ published on CONFIRMATION, so notification tests wait for the whole saga.
 **Follow-ups (not done):** a saga timeout (PENDING after a dead-lettered event is forever) and
 reservation reconciliation; restore the cart on cancel; notification-service onto `ProcessedEvents`;
 prune `processed_event`; remove the now-unused inventory reserve/release HTTP API.
-
-## Phase 23: Distributed Tracing (tag: phase-23-complete, PR #37)
-**What exists now:** all six services trace with OpenTelemetry and export OTLP to **Tempo 3.0.3**
-(18 containers). One checkout = ONE trace: gateway -> app -> inventory (HTTP), inventory -> catalog
-and app -> outbox relay -> Kafka -> notification (async). ECS logs carry `traceId`; Grafana links
-Loki <-> Tempo both ways. Smoke **327 / 0 / 0** cold on the WSL2 workstation.
-**Key code:** `common/.../tracing/TracingConfig` (servlet: no `/actuator` observations) and
-`gateway/TracingConfig` (reactive twin); `ecomdemo-app/.../messaging/internal/OutboxTracing` (stores
-and restores the `traceparent` through `outbox_event.trace_parent`, V17) and
-`OutboxObservationConfig` (drops ONLY the relay's `@Scheduled` tick).
-**Config & infrastructure:** `common/src/main/resources/ecomdemo-observability.properties`, imported by
-every service (sampling, Kafka observations, ECS fields, `spring.security` observations off).
-Compose sets `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://tempo:4318/v1/traces` and
-`TRACING_SAMPLING_PROBABILITY=1.0` (code default 0.1, parent-based). Tempo API on host **3200**.
-**Prometheus is on host port 19090** (user's decision; Windows reserves 9014-9113).
-The gateway has `spring.reactor.context-propagation: auto`.
-**Tests:** OutboxTracingTest (real OTel SDK), OutboxObservationConfigTest; smoke section "Distributed
-tracing" (14 checks: own `traceparent` -> Tempo trace with >=4 services, gateway continues the caller's
-span, relay + consumer spans, unsampled leaves no trace, Loki finds the trace id, Grafana datasources).
-**Gotchas:** no endpoint set = no exporter (tests trace nothing). Kafka observations are OFF by default
-in Spring Kafka. Each service flushes spans on its own 5 s timer - poll for every hop you assert.
-`management.observations.enable.<prefix>` matches NAMES only (all `@Scheduled` share one). OTel sets
-traceparent flags `03`, not `01` - read the sampled bit. `ModularityTest` regenerates `docs/modules/*`.
-**Follow-ups (not done):** Tempo metrics-generator (RED metrics, service graph); retention/object
-storage; the gateway writes no request log; a smoke check for the gateway's `traceId` (verified by hand).
 

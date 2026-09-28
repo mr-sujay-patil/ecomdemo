@@ -8,6 +8,16 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 25: Container Orchestration — the whole system also runs on a local Kubernetes cluster,
+behind an Ingress.** `scripts/k8s-up.sh` builds a kind cluster with Traefik on **localhost:18080**
+in front of the gateway. Every service has a Deployment, Service, ConfigMap and Secret, three
+health probes and resource limits; the databases and Kafka are StatefulSets with their own volumes,
+and catalog-service scales 2–4 pods on CPU. Delete a pod and the flow keeps working while it is
+replaced; roll out a new version and no request fails. See
+[Running on Kubernetes](#running-on-kubernetes) and
+[`docs/test-reports/phase-25.md`](docs/test-reports/phase-25.md). Compose stays the everyday way to
+run everything, observability included.
+
 **Phase 24: Distributed Transactions — checkout is a saga across three services, and both of
 its endings are consistent.**
 
@@ -61,7 +71,8 @@ Still true from Phase 20, and worth knowing:
 - Tokens are **HS256 with a shared key**: only customer-service issues them by convention, not by
   constraint. Asymmetric keys and a JWKS endpoint are the honest fix.
 
-See [`docs/test-reports/phase-24.md`](docs/test-reports/phase-24.md).
+See [`docs/test-reports/phase-24.md`](docs/test-reports/phase-24.md) and, for Phase 25,
+[`docs/test-reports/phase-25.md`](docs/test-reports/phase-25.md).
 
 <details>
 <summary>Phase 14: Batch Processing</summary>
