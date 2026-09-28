@@ -19,14 +19,17 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 - [x] Tracing in all six services: `spring-boot-starter-opentelemetry`, shared settings in
       `common/src/main/resources/ecomdemo-observability.properties` (imported by each service)
 - [x] Propagation over HTTP — verified live: gateway → catalog → inventory in ONE trace
-- [~] Propagation over Kafka: code done (V17 `trace_parent`, `OutboxTracing`, relay template and
-      catalog factory observed; `OutboxTracingTest` 6/6 green) — NOT yet verified live
+- [x] Propagation over Kafka: V17 `trace_parent`, `OutboxTracing`; verified live (smoke: relay
+      span + notification consumer span in the checkout's trace)
 - [x] Tempo 3.0.3 in compose (`docker/tempo/tempo.yaml`) + Grafana Tempo datasource
-- [~] Trace IDs in logs: ECS in all six (field `traceId`), Alloy `trace_id` metadata, Loki↔Tempo
-      links — not yet verified live; gateway MDC may need `spring.reactor.context-propagation=auto`
+- [~] Trace IDs in logs: verified live that Loki finds a checkout's trace id on >=3 services, and Loki's
+      trace_id field links to Tempo (Tempo->Loki link not smoke-checked). STILL OPEN: confirm the GATEWAY's lines carry `traceId` (MDC on
+      WebFlux may need `spring.reactor.context-propagation=auto`)
 - [x] Sampling: parent-based, `TRACING_SAMPLING_PROBABILITY` (0.1 default, 1.0 in compose)
-- [~] Smoke section "Distributed tracing" written, NEVER RUN yet
-- [ ] Full `verify`, cold smoke ×3, test report, README, decisions, RECENT rotation, tracker 🔵
+- [x] Smoke section "Distributed tracing" green; poll now waits for gateway AND notification spans
+      (one run failed the gateway check because notification's batch reached Tempo first)
+- [~] DONE 2026-09-28: `verify` green, cold smoke ×3 = 327/0/0 (this machine, PROMETHEUS_PORT=19090).
+      LEFT: test report, README, decisions, RECENT rotation, tracker 🔵
 
 ## Planning decisions
 - Tempo **3.0.3** single binary (`-target=all`), local storage; no metrics-generator (a suggestion).
@@ -39,12 +42,11 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 - OTel sets traceparent flags `03` (sampled + W3C L2 "random"), not `01` — tests read the bit.
 
 ## Next action
-`verify` GREEN on 2026-09-28 (stale Flyway V17 + LOG_FORMAT-location tests fixed). `ModularityTest` regenerates
-`docs/modules/*` (new `tracing` module) - uncommitted, review and commit with the phase.
-Docker works again (29.8.0). Next: `docker compose up --build --wait -d`, run `scripts/smoke-test.sh`,
-fix the new "Distributed tracing" section until green (expected services in a checkout trace:
-gateway-service, ecomdemo, inventory-service, notification-service, probably catalog-service). Then
-check the gateway's log lines carry `traceId`; then the full testing protocol.
+Check the gateway's log lines carry `traceId` (Loki: `{service="gateway-service"}` for a smoke
+trace id); fix if not. Then: test report, README, decisions, RECENT rotation, tracker 🔵; commit the
+regenerated `docs/modules/*` (new `tracing` module, from `ModularityTest`); push; raise the PR; STOP.
+Port 9090 is inside a Windows-reserved range today (9014-9113): run compose AND the smoke test with
+`PROMETHEUS_PORT=19090` exported.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

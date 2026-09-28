@@ -845,8 +845,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V16, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V17, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -946,7 +946,7 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V16, all successful" \
+    skip "flyway_schema_history shows V1-V17, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
@@ -2832,12 +2832,15 @@ if curl -fsS "$TEMPO_URL/ready" >/dev/null 2>&1; then
     TRACE_ORDER_ID="$(jget "d['id']")"
 
     # Spans are exported in batches (every 5 s by default), and the Kafka half starts only when the
-    # relay publishes - up to a second later - and notification-service consumes. So poll until the
-    # LAST hop has arrived, rather than sleeping for a guess.
+    # relay publishes - up to a second later - and notification-service consumes. So poll rather
+    # than sleep for a guess - and poll for BOTH ends. Each service flushes on its own timer, so
+    # the last hop arriving does not mean the first has: notification-service's batch has been
+    # seen in Tempo before the gateway's, which failed the gateway check below on a trace that
+    # was complete a few seconds later.
     TRACE_SERVICES="none"
     for _ in $(seq 1 45); do
         TRACE_SERVICES="$(tempo_trace "$TRACE_ID" "','.join(sorted({s['service'] for s in spans}))")"
-        case "$TRACE_SERVICES" in *notification-service*) break ;; esac
+        case "$TRACE_SERVICES" in *gateway-service*notification-service*) break ;; esac
         sleep 1
     done
     check "Tempo has the checkout's trace, under the id the client chose" "True" \
