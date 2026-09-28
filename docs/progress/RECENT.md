@@ -12,6 +12,35 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 24: Distributed Transactions (tag: phase-24-complete, PR #__PR__)
+**What exists now:** checkout is a CHOREOGRAPHED SAGA over Kafka. `POST /api/orders` = stock pre-check
+(read, instant 409) + order PENDING + `OrderCreatedEvent` in the outbox -> 201 PENDING. inventory
+reserves all lines or none (`inventory.stock-reserved` / `-rejected`), the MOCK payment-service
+(8086, payment-db 5437) charges or declines above `PAYMENT_DECLINE_ABOVE`=10000.00
+(`payments.completed` / `-failed`), the app moves PENDING -> CONFIRMED / CANCELLED; on a decline
+inventory RELEASES the stock (compensation). `GET /api/orders/{id}/status`. 20 containers.
+Smoke __SMOKE__ on the WSL2 workstation.
+**Key code:** new reactor module `outbox` (`Outbox`, `OutboxRoutes`, `ProcessedEvents`,
+`SagaListenerErrors`, `@EnableOutbox`); app `order/internal/saga/OrderSagaHandler` +
+`OrderRepository.transition` (conditional UPDATE = semantic lock); inventory `saga/InventorySagaHandler`
++ `InventoryService.reserveForOrder/releaseForOrder` + `stock_reservation`; `payment-service` module.
+**Config & infrastructure:** app V18 (`processed_event`), V19 (PENDING/CONFIRMED/CANCELLED, PLACED rows
+-> CONFIRMED); inventory V3; payment V1. Each publisher declares its topics (3 partitions) + `-dlt` (1).
+Consumer groups `order-service`, `inventory-service`, `payment-service`. Design + orchestration
+alternative: `docs/architecture/saga.md`.
+**Tests:** outbox module 39 unit; InventorySagaTest (9, Postgres), PaymentServiceTest (5, Postgres),
+OrderSagaHandlerTest (5); app ITs answered by `FakeSagaParticipants` over the real Kafka container
+(OrderApiIT decline path). Smoke §Saga (25 checks): CONFIRMED, CANCELLED + RELEASED + stock
+restored + no notification, two buyers one unit. `./mvnw clean verify` 524 tests.
+**Gotchas:** never edit `scripts/smoke-test.sh` while it runs (bash reads it as it goes; run a copy).
+A spy of a `@Transactional(MANDATORY)` bean must be stubbed on `AopTestUtils.getUltimateTargetObject`.
+`@AutoConfigurationPackage` for a package the app already covers duplicates every repository.
+Spring Batch runs the sales report once per date - one IT per day. OrderPlaced (the thank-you) is now
+published on CONFIRMATION, so notification tests wait for the whole saga.
+**Follow-ups (not done):** a saga timeout (PENDING after a dead-lettered event is forever) and
+reservation reconciliation; restore the cart on cancel; notification-service onto `ProcessedEvents`;
+prune `processed_event`; remove the now-unused inventory reserve/release HTTP API.
+
 ## Phase 23: Distributed Tracing (tag: phase-23-complete, PR #37)
 **What exists now:** all six services trace with OpenTelemetry and export OTLP to **Tempo 3.0.3**
 (18 containers). One checkout = ONE trace: gateway -> app -> inventory (HTTP), inventory -> catalog
@@ -37,27 +66,3 @@ traceparent flags `03`, not `01` - read the sampled bit. `ModularityTest` regene
 **Follow-ups (not done):** Tempo metrics-generator (RED metrics, service graph); retention/object
 storage; the gateway writes no request log; a smoke check for the gateway's `traceId` (verified by hand).
 
-## Phase 22: Resilience (tag: phase-22-complete, PR #35)
-**What exists now:** every `ecomdemo-app` → catalog-service call goes through
-Retry(CircuitBreaker(Bulkhead(HTTP call with a timeout))). catalog-service down: add-to-cart is a 503
-+ Retry-After in ~0.6 s, the breaker opens after 5 failed calls (refusals ~20 ms), CHECKOUT STILL
-SUCCEEDS (cart snapshot), and it recovers on its own ~10 s after a restart. Grafana dashboard
-"EcomDemo Resilience". Smoke **313 / 0** cold on the WSL2 workstation.
-**Key code:** `ecomdemo-app/.../resilience/` (`ResilientCatalog`, `CatalogResilienceConfig` - a static
-BeanPostProcessor wrapping the HTTP `CatalogClient` IN PLACE, so the ITs' @Primary fake is untouched);
-`common/.../clients/catalog/CatalogProperties` (connect/read/bulk-read timeouts, two RestClients);
-`common/.../shared/ServiceUnavailableException` → 503 in `GlobalExceptionHandler`.
-**Config & infrastructure:** `resilience4j.*.instances.catalog.*` and `ecomdemo.catalog.*-timeout` in the
-app's application.properties (250 ms connect, 500 ms read, 30 s bulk; 2 attempts; window 10 / min 5 /
-50 %; open 10 s; bulkhead 20). `resilience4j.version` 2.4.0 in the parent. `scripts/failure-demo.sh`.
-**Tests:** ResilientCatalogTest (loads the SHIPPED resilience4j.* properties into R4j's own
-auto-config; includes the worst-case budget sum), CatalogClientTimeoutTest (real slow HttpServer),
-DashboardMetricsTest (+ resilience series from the real binders); smoke §Resilience (18 checks).
-**Gotchas:** a STOPPED container is not refused - cached IP → SYN unanswered (connect timeout); expired
-cache → name resolution hangs ~12 s (the connect timeout does NOT cover DNS; the read timeout bounds it).
-Timeouts compose: attempts × read timeout + backoff must fit the budget. `resilience4j-micrometer` must
-not be test-scoped. Windows reserved 9022-9121 (WinNAT) → Prometheus 9090 failed; use PROMETHEUS_PORT.
-A VM pause made one `verify` take 86 min.
-**Follow-ups (not done):** cold-start poison-message partition stall (seen once in 3 cold runs); the
-gateway has no breaker on its own `/api/products` route; notification-service at 97 % of its 320M cap;
-resilience for the inventory calls (checkout's real dependency); Phase 21 recorded no decisions.

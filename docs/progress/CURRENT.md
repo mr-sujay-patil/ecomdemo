@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-28
 - **Phase:** 24 — Distributed Transactions (Saga pattern, choreography over Kafka)
 - **Branch:** feature/phase-24-saga (cut from `main` at `a2d5b8c`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -30,8 +30,10 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
       PENDING + OrderCreated (no HTTP reserve/release), `OrderSagaHandler` (conditional UPDATE =
       semantic lock), CONFIRMED publishes OrderPlaced, `GET /api/orders/{id}/status`, sales report
       counts CONFIRMED only. ITs use `FakeSagaParticipants` over real Kafka. verify: 524 tests
-- [ ] 5. Tests per service + smoke "Saga": normal → CONFIRMED; forced decline → CANCELLED, stock restored
-- [ ] 6. Orchestration alternative documented; README, decisions, test report, RECENT, tracker 🔵
+- [x] 5. Tests per service + smoke "Saga": normal → CONFIRMED; forced decline → CANCELLED, stock
+      restored, RELEASED, no notification; two buyers one unit. Warm smoke 361/0/0
+- [ ] 6. Orchestration alternative documented (docs/architecture/saga.md ✓); README ✓, decisions ✓,
+      RECENT ✓ (Phase 22 archived); test report DRAFT (placeholders); tracker 🔵 at PR time
 
 ## Planning decisions (user chose all three recommended options, 2026-09-28)
 - **Checkout = hybrid.** Read-only `requireAvailable` pre-check stays (instant 409), then the order is
@@ -51,11 +53,10 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Step 5 in progress: smoke-test.sh edited (helpers wait_for_order_status / wait_for_stock /
-inventory_ & payment_psql_query; happy path, race, caching, messaging, outbox outage, tracing,
-degraded checkout adapted; new section "Saga (distributed transactions)"). NOT YET RUN. Next: cold
-run - `docker compose down`, `docker compose up --build --wait`, `scripts/smoke-test.sh`; fix until
-green; then commit `test(smoke): ...`.
+Three cold runs (down → up --build --wait → a COPY of smoke-test.sh; never run the repo file while
+editing it) are in progress. Then: fill the placeholders in docs/test-reports/phase-24.md
+(__RESULT__, __SAGA_BLOCK__, __RUNS__, __MEMORY__) and RECENT.md (__SMOKE__, __PR__), final
+`./mvnw clean verify`, commit, push, tracker 🔵, `gh pr create`, Phase Review Report, STOP.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
