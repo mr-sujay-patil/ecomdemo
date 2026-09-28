@@ -39,10 +39,7 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 - OTel sets traceparent flags `03` (sampled + W3C L2 "random"), not `01` — tests read the bit.
 
 ## Next action
-KNOWN RED in `verify` (pre-existing in this phase, confirmed with the fix stashed):
-`FlywayMigrationTest` x2 (expects V1..V16, V17 now exists) and
-`LoggingStackConfigTest.thePropertyReadsTheEnvironmentVariable` (property moved to
-`common/.../ecomdemo-observability.properties`). `ModularityTest` also regenerates
+`verify` GREEN on 2026-09-28 (stale Flyway V17 + LOG_FORMAT-location tests fixed). `ModularityTest` regenerates
 `docs/modules/*` (new `tracing` module) - uncommitted, review and commit with the phase.
 Once `docker info` works again: `docker compose up --build --wait -d`, run `scripts/smoke-test.sh`,
 fix the new "Distributed tracing" section until green (expected services in a checkout trace:
