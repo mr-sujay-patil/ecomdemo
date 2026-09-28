@@ -8,6 +8,16 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 27: LLM Integration — catalog-service can write product copy with a language model.**
+`POST /api/products/{id}/generate-description` (ADMIN) asks the configured chat model for a
+description, tags and an SEO title as **structured output**, validates the answer, saves the
+description to the product and keeps every generation with its model and token counts. The model is
+a choice, not a requirement: `AI_CHAT_PROVIDER=openai` (with `OPENAI_API_KEY`), `ollama` (free,
+local), or `none` — the default, with which everything else works and this one endpoint answers 503.
+See [LLM integration](#llm-integration) and
+[`docs/test-reports/phase-27.md`](docs/test-reports/phase-27.md). *(Phase 26, the optional AKS
+deployment, was skipped.)*
+
 **Phase 25: Container Orchestration — the whole system also runs on a local Kubernetes cluster,
 behind an Ingress.** `scripts/k8s-up.sh` builds a kind cluster with Traefik on **localhost:18080**
 in front of the gateway. Every service has a Deployment, Service, ConfigMap and Secret, three
@@ -611,6 +621,7 @@ is the trade, and the retry budget is what makes it honest.
 | `POST` | `/api/products` | **ADMIN** | Create a product (201 + `Location`) |
 | `PUT` | `/api/products/{id}` | **ADMIN** | Replace a product |
 | `DELETE` | `/api/products/{id}` | **ADMIN** | Delete a product (204) |
+| `POST` | `/api/products/{id}/generate-description` | **ADMIN** | Write the description, tags and SEO title with the configured LLM (Phase 27); 503 if none |
 | `GET` | `/api/cart` | **CUSTOMER** | Your cart with its server-calculated total |
 | `POST` | `/api/cart/items` | **CUSTOMER** | Add a product, or increase an existing line |
 | `PUT` | `/api/cart/items/{productId}` | **CUSTOMER** | Set the quantity of a line |
@@ -2648,6 +2659,112 @@ another pod is simply more capacity. The smoke test's own traffic was enough to 
 **The app stays at one replica.** It runs scheduled work (the outbox relay, the nightly report),
 and every replica would run it too. Scaling it needs leader election for those jobs first. The
 gateway runs two replicas, which is why deleting one pod goes unnoticed.
+
+## LLM integration
+
+Phase 27 gives catalog-service one generative feature, built the way the rest of the system is:
+configurable, measured, tested, and harmless when it fails.
+
+```bash
+# as an ADMIN, through the gateway
+curl -s -X POST localhost:8080/api/products/1/generate-description -H "Authorization: Bearer $TOKEN"
+```
+
+```json
+{"productId":1,
+ "description":"Experience the ultimate typing experience with our hot-swappable 75% keyboard featuring tactile switches, perfect for gamers and typists alike.",
+ "tags":["mechanical keyboard","tactile switches","hot-swappable keyboard"],
+ "seoTitle":"Hot-Swappable 75% Mechanical Keyboard with Tactile Switches",
+ "model":"llama3.2","promptTokens":493,"completionTokens":84,
+ "generatedAt":"2026-09-28T15:46:12.305Z"}
+```
+
+That is a real answer from `llama3.2` running locally (8 s on this machine's CPU). The description
+is now the product's; the whole answer is also a row in `product_description_generation`.
+
+### Choosing a model
+
+Spring AI 2.0.1 with **two** starters on the classpath, OpenAI and Ollama. Only one is ever switched
+on, by `AI_CHAT_PROVIDER` (in `.env`):
+
+| `AI_CHAT_PROVIDER` | Needs | Model (override with) |
+|---|---|---|
+| `none` (default) | nothing — the endpoint answers **503** "not configured", everything else works | — |
+| `openai` | `OPENAI_API_KEY` in `.env` or your shell. Every call costs money | `gpt-4.1-mini` (`OPENAI_MODEL`) |
+| `ollama` | [Ollama](https://ollama.com) on the host, then `ollama pull llama3.2` (~2 GB) | `llama3.2` (`OLLAMA_MODEL`) |
+
+Then `docker compose up -d catalog-service` to apply it. Compose reaches Ollama on the host through
+`host.docker.internal`. `AI_TIMEOUT` (default 30s) is the deadline per attempt, and
+`AI_TEMPERATURE` (default 0.4) sets the temperature. In Kubernetes the ConfigMap sets `none`.
+
+Why every key is set: each Spring AI model auto-configuration (chat, embedding, image, audio,
+moderation, for both providers) switches itself **on** when its `spring.ai.model.*` key is missing.
+`application.properties` sets all of them, so exactly one chat model, the chosen one, is created
+and nothing else. With `none`, no model exists at all: the service starts, and the endpoint says
+what to configure. A missing or wrong `OPENAI_API_KEY` does not stop the service from starting.
+It shows up on the first generation, as a 503.
+
+### How it works
+
+`ProductCopyGenerator` is the only class that talks to the model:
+
+1. **Prompt templates as files.** `prompts/product-description-system.st` holds the rules and
+   `product-description-user.st` the product (`{name}`, `{category}`, `{price}`, `{description}`),
+   so the wording can change without touching Java.
+2. **Structured output.** `BeanOutputConverter` turns the `ProductCopy` record into a JSON schema
+   and appends it to the prompt as `{format}`, then parses the reply back into the record.
+3. **Validation.** A reply that parses is not yet a reply that fits. `ProductCopy`'s constraints
+   (description ≤ 1000, SEO title ≤ 70, 1–8 tags) are checked before anything is saved.
+4. **Saving without holding a connection.** `ProductDescriptionService` reads the product, calls
+   the model with **no transaction open** (it can take seconds), then saves in a second short one.
+
+### When it fails
+
+Every failure is a **503 with `Retry-After`**, and the product is left exactly as it was. None of
+them is a 500, because none is a bug in this service:
+
+| What happened | Message | Metric outcome |
+|---|---|---|
+| no provider configured | "not configured. Set AI_CHAT_PROVIDER…" (Retry-After 300) | `not_configured` |
+| provider down, timed out, rate-limited, bad key | "did not answer" (Retry-After 30) | `failed` |
+| reply not JSON, or breaking the limits | "returned an unusable answer" | `invalid` |
+
+Retries are limited: at most **two attempts**, each with an `AI_TIMEOUT` deadline. Spring AI's
+defaults (10 attempts, backoff growing ×5 from 2 s) are made for batch jobs, not for a button.
+Stopping Ollama mid-run gave a 503 in 18 s.
+
+### Concepts
+
+- **Chat models and message roles.** A request is a list of messages. The **system** message
+  sets the rules ("only facts from the product details"); the **user** message is the task. The
+  model's reply is the **assistant** message. Here they are the two template files.
+- **Temperature** controls how far the model strays from its most likely next word. 0 is
+  repetitive; above 1 it starts inventing. Product copy wants some variety and no invention: 0.4.
+- **Structured output.** Asking for "a description, some tags and a title" gets prose back. Asking
+  for JSON that matches a schema gets something a program can use, most of the time. "Most of
+  the time" is why the reply is validated and a bad one is a counted `invalid` outcome.
+- **Cost, latency and rate limits.** A hosted model bills per **token**: this prompt is about 500
+  tokens in and 100 out. `ecomdemo_ai_tokens_total{type="prompt|completion"}` counts them, and
+  `ecomdemo_ai_generations_seconds{outcome=…}` times every attempt. Spring AI also publishes
+  `gen_ai_client_token_usage_total` per model. A generation takes seconds, not milliseconds: that
+  is why it runs with no transaction open, and why it is a POST that nobody prefetches or caches.
+- **Prompt injection.** The product's own text goes into the prompt, and a product description
+  can contain "ignore the rules above". The system prompt says the text between `<product>` tags is
+  data, not instructions, and the reply can only ever be the three validated fields, saved as plain
+  text. That lowers the risk without removing it, because no prompt makes a model obey. The other
+  mitigations are the ones this code already has: only an ADMIN can trigger a generation, and the
+  output has a fixed shape.
+
+### Tests
+
+No test calls a real model: a real one costs money, needs a key, and never answers the same way
+twice. `ScriptedChatModel` answers whatever the test tells it to (including prose, broken limits
+and exceptions), and records every prompt it receives. `ProductCopyGeneratorTest` (8) checks the
+prompt, the parsing and every failure. `ProductDescriptionApiIT` (6) runs the endpoint end to end
+on PostgreSQL and Redis: the saved description, the evicted cache, the history row, the ON DELETE
+CASCADE and the Prometheus series. `DescriptionGenerationNotConfiguredIT` proves the default
+starts and answers 503. The smoke test's **LLM integration** section checks the real model when
+one is configured, and reports that one check as **SKIP**, with setup steps, when none is.
 
 ## Code quality
 

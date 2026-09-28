@@ -99,6 +99,12 @@
 			retry and no bulkhead of its own; this phase needs all three.
 		-->
 		<resilience4j.version>2.4.0</resilience4j.version>
+		<!--
+			Spring AI, for Phase 27 (catalog-service only). Not managed by Spring Boot, so pinned
+			here. 2.0.1 is the newest GA and is built against Boot 4.1.1 exactly - the 1.x line is
+			the Boot 3 one.
+		-->
+		<spring-ai.version>2.0.1</spring-ai.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
 		<!--

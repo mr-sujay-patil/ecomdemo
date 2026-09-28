@@ -25,11 +25,44 @@
 		to verify a token - and its container will idle at a fraction of what one JVM carrying all
 		of it does, which is the difference between five services fitting on this machine and not.
 	-->
+	<dependencyManagement>
+		<dependencies>
+			<!--
+				Here and not in the parent, as the gateway does with Spring Cloud: one module uses
+				Spring AI, and the other six have no reason to consult its BOM.
+			-->
+			<dependency>
+				<groupId>org.springframework.ai</groupId>
+				<artifactId>spring-ai-bom</artifactId>
+				<version>${spring-ai.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
+
 	<dependencies>
 		<dependency>
 			<groupId>com.ecomdemo</groupId>
 			<artifactId>ecomdemo-common</artifactId>
 			<version>${project.version}</version>
+		</dependency>
+
+		<!--
+			Phase 27: TWO chat-model starters, and only one is ever switched on. Each starter's
+			auto-configuration is conditional on `spring.ai.model.chat` naming it, so
+			AI_CHAT_PROVIDER picks OpenAI (hosted, needs OPENAI_API_KEY) or Ollama (local, free),
+			and `none` - the default - creates no ChatModel at all. That default is what lets this
+			service start on a machine with neither, and the description endpoint then answers 503
+			instead of the whole service failing to boot over a missing key.
+		-->
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-openai</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.ai</groupId>
+			<artifactId>spring-ai-starter-model-ollama</artifactId>
 		</dependency>
 
 		<dependency>

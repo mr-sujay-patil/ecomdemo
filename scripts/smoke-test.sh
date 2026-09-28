@@ -3279,6 +3279,112 @@ as_customer
 pass "the saga probe products are cleaned up"
 
 # --------------------------------------------------------------------------------------------
+# LLM integration (Phase 27)
+# --------------------------------------------------------------------------------------------
+# POST /api/products/{id}/generate-description asks catalog-service's configured chat model for a
+# description, tags and an SEO title. Whether a model is configured is the operator's choice
+# (AI_CHAT_PROVIDER), so this section checks what must hold EITHER way - who may call it, a 404
+# before any model is asked, a 503 that leaves the product alone - and the generation itself only
+# when a model answers. Without one, that check is a SKIP with the setup steps. It is never a pass:
+# a green line for a model nobody called would be exactly the fake result the phase forbids.
+section "LLM integration"
+
+CATALOG_URL="${CATALOG_URL:-http://localhost:8081}"
+
+# catalog_scrape -> every catalog-service instance's /actuator/prometheus, concatenated.
+# EVERY instance, because a counter lives in one JVM: in the cluster catalog-service runs two to four
+# pods behind the Ingress, and the generation lands on whichever the Ingress picked. METRIC_PY sums
+# matching series, so the concatenation reads as the service's total - the same answer Prometheus
+# would give with sum().
+catalog_scrape() {
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        for pod in $(kube get pods -l app.kubernetes.io/name=catalog-service -o name 2>/dev/null); do
+            kube exec "$pod" -- wget -qO- http://localhost:8081/actuator/prometheus 2>/dev/null
+        done
+    else
+        curl -sS "$CATALOG_URL/actuator/prometheus" 2>/dev/null
+    fi
+}
+
+LLM_ORIGINAL="Phase 27 smoke probe, written by a person."
+as_admin
+request POST /api/products \
+    "{\"name\":\"LLM Probe Keyboard\",\"description\":\"$LLM_ORIGINAL\",\"price\":4999.00,\"stockQuantity\":3,\"category\":\"PERIPHERALS\"}" \
+    >/dev/null
+LLM_PRODUCT="$(jget "d['id']")"
+
+as_anonymous
+check "generating a description needs a token (401)" "401" \
+    "$(request POST "/api/products/$LLM_PRODUCT/generate-description")"
+as_customer
+check "and an ADMIN one: a customer gets 403" "403" \
+    "$(request POST "/api/products/$LLM_PRODUCT/generate-description")"
+as_admin
+check "an unknown product is a 404, before any model is asked" "404" \
+    "$(request POST /api/products/999999/generate-description)"
+
+LLM_METRIC_BEFORE="$(catalog_scrape \
+    | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
+[ "$LLM_METRIC_BEFORE" = "MISSING" ] && LLM_METRIC_BEFORE=0
+
+as_admin
+LLM_STATUS="$(request POST "/api/products/$LLM_PRODUCT/generate-description")"
+cp "$BODY" "$BODY.llm"
+
+case "$LLM_STATUS" in
+    200)
+        check "the generator answers with the structured copy: description, tags, SEO title" "True" \
+            "$(jget "bool(d['description'].strip()) and len(d['tags']) > 0 and bool(d['seoTitle'].strip()) and len(d['seoTitle']) <= 70 and len(d['description']) <= 1000")"
+        LLM_DESCRIPTION="$(jget "d['description']")"
+        printf '        model: %s, tokens: %s in / %s out\n' \
+            "$(jget "d['model']")" "$(jget "d['promptTokens']")" "$(jget "d['completionTokens']")"
+        printf '        seoTitle: %s\n' "$(jget "d['seoTitle']")"
+        request GET "/api/products/$LLM_PRODUCT" >/dev/null
+        check "the description is saved to the product" "True" \
+            "$(python3 -c "import json,sys; print(json.load(open('$BODY'))['description'] == sys.argv[1])" "$LLM_DESCRIPTION")"
+        LLM_ROWS="$(ctr_exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+            psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
+            -c "SELECT count(*) FROM product_description_generation WHERE product_id = $LLM_PRODUCT;" \
+            2>/dev/null | tr -d '\r ')"
+        check "and kept in the generation history" "1" "$LLM_ROWS"
+        LLM_TOKENS="$(catalog_scrape \
+            | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_tokens_total type=prompt)"
+        check "the tokens it cost are counted in catalog-service's metrics" "True" \
+            "$(python3 -c "print('$LLM_TOKENS' != 'MISSING' and float('$LLM_TOKENS') > 0)")"
+        ;;
+    503)
+        if jget "d['message']" | grep -q "not configured"; then
+            skip "the generator answers with the structured copy: description, tags, SEO title" \
+                "no language model configured. To run it: set AI_CHAT_PROVIDER=openai and OPENAI_API_KEY in .env, or install Ollama on the host, run 'ollama pull llama3.2' and set AI_CHAT_PROVIDER=ollama; then 'docker compose up -d catalog-service' and run this script again"
+        else
+            fail "the generator answers with the structured copy: description, tags, SEO title" \
+                "200" "503: $(jget "d['message']") (a model is configured but did not answer usably)"
+        fi
+        check "a refusal says when to retry (Retry-After)" "True" \
+            "$(curl -sS -o /dev/null -D - -X POST "$BASE_URL/api/products/$LLM_PRODUCT/generate-description" \
+                -H "Authorization: Bearer $AUTH" | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+        request GET "/api/products/$LLM_PRODUCT" >/dev/null
+        check "and the product is left exactly as it was" "$LLM_ORIGINAL" "$(jget "d['description']")"
+        ;;
+    *)
+        fail "the generator answers 200, or 503 when it cannot" "200 or 503" \
+            "$LLM_STATUS: $(python3 -c "print(open('$BODY.llm').read()[:200])" 2>/dev/null)"
+        ;;
+esac
+rm -f "$BODY.llm"
+
+LLM_METRIC_AFTER="$(catalog_scrape \
+    | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
+check "every generation attempt is counted, whatever its outcome" "True" \
+    "$(python3 -c "print('$LLM_METRIC_AFTER' != 'MISSING' and float('$LLM_METRIC_AFTER') > float('$LLM_METRIC_BEFORE'))")"
+
+as_admin
+request DELETE "/api/products/$LLM_PRODUCT" >/dev/null
+check "the probe product is deleted, generation history and all" "404" \
+    "$(request GET "/api/products/$LLM_PRODUCT")"
+as_customer
+
+# --------------------------------------------------------------------------------------------
 # Kubernetes (Phase 25) - only when SMOKE_PLATFORM=k8s
 # --------------------------------------------------------------------------------------------
 # Everything above ran through the Ingress (BASE_URL is Traefik on localhost:18080). This section

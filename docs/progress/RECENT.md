@@ -12,6 +12,33 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 27: LLM Integration (tag: phase-27-complete, PR #43) — Phase 26 (AKS) was SKIPPED
+**What exists now:** catalog-service `POST /api/products/{id}/generate-description` (ADMIN at the
+gateway): Spring AI 2.0.1 → `ProductCopy` record (description, tags, seoTitle), validated, description
+saved to the product (cache evicted), full answer + model + tokens in `product_description_generation`
+(V3, ON DELETE CASCADE). Provider by `AI_CHAT_PROVIDER` = openai | ollama | **none (default)**; none or
+any failure → 503 + Retry-After, product unchanged.
+**Key code:** `com.ecomdemo.catalog.ai`: `ProductCopyGenerator` (the only model caller; converter by
+hand; metrics), `ProductDescriptionService` (no tx around the call; TransactionTemplate for the save),
+`OllamaClientConfig` (own OllamaApi with a deadline), `ProductDescriptionController`;
+`ProductService.replaceDescription`. Prompts: `resources/prompts/product-description-{system,user}.st`.
+**Config & infrastructure:** env `AI_CHAT_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL` (gpt-4.1-mini),
+`OLLAMA_MODEL` (llama3.2), `OLLAMA_BASE_URL` (host.docker.internal:11434 via extra_hosts),
+`AI_TIMEOUT` (30s/attempt, 2 attempts), `AI_TEMPERATURE` (0.4). All `spring.ai.model.*` keys set. k8s
+ConfigMap `AI_CHAT_PROVIDER: none`. Metrics `ecomdemo_ai_tokens_total{type}`,
+`ecomdemo_ai_generations_seconds{outcome=success|failed|invalid|not_configured}`.
+**Tests:** 539 (+15): `ProductCopyGeneratorTest` 8, `ProductDescriptionApiIT` 6,
+`DescriptionGenerationNotConfiguredIT` 1, all on `ScriptedChatModel` (test support). Smoke section "LLM
+integration": compose 367/0/1 (the 1 = model check SKIP without a provider), with real Ollama 370/0/0,
+k8s 346/0/5.
+**Gotchas:** Spring AI REGISTERS `ChatClient.Builder` even with no ChatModel and resolving it fails → ask
+`ObjectProvider<ChatModel>` first. A Spring placeholder default does not apply to an EMPTY env var (hence
+one model var per provider). `spring.http.clients.*` would change the inventory client too. Windows
+reserves host port 11434 here (ran Ollama on the compose network). Per-pod counters in k8s: sum all pods.
+**Follow-ups (not done):** Anthropic/Azure providers; a key in k8s (Secret); approving a draft before it
+replaces the description; tags/SEO title on the product API; per-admin rate limit or budget for
+generations; streaming; the Hibernate Validator `@Valid List` deprecation warning in ProductController.
+
 ## Phase 25: Container Orchestration (tag: phase-25-complete, PR #42)
 **What exists now:** the whole system also runs on a local **kind** cluster (one node, k8s v1.37):
 `scripts/k8s-up.sh` → Traefik Ingress on **localhost:18080** → gateway (2 replicas) → services. 7
@@ -36,33 +63,3 @@ the YAML (next `apply` reverts it). The app must stay at 1 replica (scheduled jo
 **Follow-ups (not done):** leader election (ShedLock / Lease) so the app can scale; observability in the
 cluster; PodDisruptionBudgets; NetworkPolicies; real secret management (Sealed/External Secrets); a DB
 operator; kind stable release instead of the alpha.
-
-## Phase 24: Distributed Transactions (tag: phase-24-complete, PR #40)
-**What exists now:** checkout is a CHOREOGRAPHED SAGA over Kafka. `POST /api/orders` = stock pre-check
-(read, instant 409) + order PENDING + `OrderCreatedEvent` in the outbox -> 201 PENDING. inventory
-reserves all lines or none (`inventory.stock-reserved` / `-rejected`), the MOCK payment-service
-(8086, payment-db 5437) charges or declines above `PAYMENT_DECLINE_ABOVE`=10000.00
-(`payments.completed` / `-failed`), the app moves PENDING -> CONFIRMED / CANCELLED; on a decline
-inventory RELEASES the stock (compensation). `GET /api/orders/{id}/status`. 20 containers.
-Smoke **361 / 0 / 0** on three cold runs of the final code, WSL2 workstation.
-**Key code:** new reactor module `outbox` (`Outbox`, `OutboxRoutes`, `ProcessedEvents`,
-`SagaListenerErrors`, `@EnableOutbox`); app `order/internal/saga/OrderSagaHandler` +
-`OrderRepository.transition` (conditional UPDATE = semantic lock); inventory `saga/InventorySagaHandler`
-+ `InventoryService.reserveForOrder/releaseForOrder` + `stock_reservation`; `payment-service` module.
-**Config & infrastructure:** app V18 (`processed_event`), V19 (PENDING/CONFIRMED/CANCELLED, PLACED rows
--> CONFIRMED); inventory V3; payment V1. Each publisher declares its topics (3 partitions) + `-dlt` (1).
-Consumer groups `order-service`, `inventory-service`, `payment-service`. Design + orchestration
-alternative: `docs/architecture/saga.md`.
-**Tests:** outbox module 39 unit; InventorySagaTest (9, Postgres), PaymentServiceTest (5, Postgres),
-OrderSagaHandlerTest (5); app ITs answered by `FakeSagaParticipants` over the real Kafka container
-(OrderApiIT decline path). Smoke §Saga (25 checks): CONFIRMED, CANCELLED + RELEASED + stock
-restored + no notification, two buyers one unit. `./mvnw clean verify` 524 tests.
-**Gotchas:** never edit `scripts/smoke-test.sh` while it runs (bash reads it as it goes; run a copy).
-A spy of a `@Transactional(MANDATORY)` bean must be stubbed on `AopTestUtils.getUltimateTargetObject`.
-`@AutoConfigurationPackage` for a package the app already covers duplicates every repository.
-Spring Batch runs the sales report once per date - one IT per day. OrderPlaced (the thank-you) is now
-published on CONFIRMATION, so notification tests wait for the whole saga.
-**Follow-ups (not done):** a saga timeout (PENDING after a dead-lettered event is forever) and
-reservation reconciliation; restore the cart on cancel; notification-service onto `ProcessedEvents`;
-prune `processed_event`; remove the now-unused inventory reserve/release HTTP API.
-
