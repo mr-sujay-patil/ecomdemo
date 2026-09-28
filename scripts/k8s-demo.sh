@@ -41,6 +41,9 @@ rollback)
     k rollout status deployment/catalog-service
     echo "Now at revision $(k get deploy catalog-service -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')"
     echo "(undo makes the OLD pod template current again - it is recorded as a NEW revision number)"
+    echo "kubectl warns that the object was created with 'kubectl apply': undo changed the LIVE"
+    echo "Deployment, not k8s/services/catalog-service.yaml, so the next 'kubectl apply -k k8s/' puts"
+    echo "the file's version back. In a GitOps setup a rollback is a revert of the file, for that reason."
     ;;
 selfheal)
     victim="$(k get pods -l app.kubernetes.io/name=gateway-service -o jsonpath='{.items[0].metadata.name}')"
@@ -51,14 +54,23 @@ selfheal)
     echo "A new pod replaced it: the ReplicaSet wants 2 and sees 1, so it makes one. Nobody asked."
     ;;
 hpa)
+    start="$(k get deploy catalog-service -o jsonpath='{.spec.replicas}')"
+    echo "catalog-service runs $start pod(s) now (min 2, max 4)."
+    [ "$start" -gt 2 ] && echo "(Already above 2: recent load scaled it up, and scale-down waits 5 minutes.)"
     echo "Load: 8 loops inside the cluster calling catalog-service for 3 minutes"
+    k delete pod catalog-load --ignore-not-found >/dev/null
     k run catalog-load --image=ecomdemo-catalog:latest --image-pull-policy=Never --restart=Never \
-        --command -- sh -c 'for i in 1 2 3 4 5 6 7 8; do (end=$(( $(date +%s) + 180 )); while [ $(date +%s) -lt $end ]; do wget -q -O /dev/null http://catalog-service:8081/api/products; done) & done; wait'
+        --command -- sh -c 'for i in 1 2 3 4 5 6 7 8; do (end=$(( $(date +%s) + 180 )); while [ $(date +%s) -lt $end ]; do wget -q -O /dev/null http://catalog-service:8081/api/products; done) & done; wait' >/dev/null
+    most="$start"
     for _ in $(seq 1 24); do
-        k get hpa catalog-service --no-headers
+        line="$(k get hpa catalog-service --no-headers)"
+        echo "$line"
+        now="$(k get deploy catalog-service -o jsonpath='{.spec.replicas}')"
+        [ "$now" -gt "$most" ] && most="$now"
         sleep 10
     done
-    k delete pod catalog-load --wait=false
+    k delete pod catalog-load --wait=false >/dev/null
+    echo "Started at $start pod(s); the HPA went up to $most."
     echo "Scale-DOWN waits 5 minutes (stabilizationWindowSeconds in k8s/hpa.yaml) so a lull does not flap."
     ;;
 *)

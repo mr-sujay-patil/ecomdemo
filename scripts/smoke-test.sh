@@ -2402,7 +2402,10 @@ if command -v docker >/dev/null 2>&1 \
 
     OUTBOX_PUBLISHED=0
     for _ in $(seq 1 30); do
-        OUTBOX_PUBLISHED="$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID' AND published_at IS NOT NULL;" | tr -d ' ')"
+        # The checkout's OrderCreated row only. Since Phase 24 the order gets a second row,
+        # OrderPlaced, once the saga confirms it - and on a warm stack that can be published before
+        # this looks, which made a count over "every published row" read 2.
+        OUTBOX_PUBLISHED="$(psql_query "SELECT count(*) FROM outbox_event WHERE aggregate_id = '$OUTBOX_ORDER_ID' AND event_type = 'OrderCreatedEvent' AND published_at IS NOT NULL;" | tr -d ' ')"
         [ "${OUTBOX_PUBLISHED:-0}" -ge 1 ] && break
         sleep 1
     done
@@ -3362,7 +3365,10 @@ for _ in $(seq 1 90); do
 done
 check "the deleted pods were REPLACED: gateway $(k8s_ready gateway-service), catalog $(k8s_ready catalog-service) ready" \
     "true" "$HEALED"
-check "by new pods, not the deleted ones" "0" \
+# A deleted pod is listed as Terminating until it has finished stopping - the 5 s preStop pause, then
+# Spring's graceful shutdown - so wait for it to be GONE rather than counting it while it drains.
+kube wait --for=delete "pod/$GATEWAY_VICTIM" "pod/$CATALOG_VICTIM" --timeout=120s >/dev/null 2>&1
+check "by new pods: the deleted ones are gone" "0" \
     "$(kube get pods -o name | grep -c -e "$GATEWAY_VICTIM" -e "$CATALOG_VICTIM")"
 
 # --- A rolling update no caller notices -----------------------------------------------------------
