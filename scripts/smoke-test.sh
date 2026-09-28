@@ -3671,7 +3671,7 @@ case "$ASSISTANT_STATUS" in
     503)
         if jget "d['message']" | grep -q "not configured"; then
             skip "the assistant answers a product question and refuses another customer's order" \
-                "no models configured. It needs a chat model AND an embedding model: set AI_CHAT_PROVIDER=ollama and AI_EMBEDDING_PROVIDER=ollama in .env (after 'ollama pull llama3.2' and 'ollama pull nomic-embed-text' on the host), or both to openai with OPENAI_API_KEY; then 'docker compose up -d assistant-service' and run this script again"
+                "no models configured. It needs a chat model AND an embedding model: set AI_CHAT_PROVIDER=ollama and AI_EMBEDDING_PROVIDER=ollama in .env (after 'ollama pull qwen2.5:7b' and 'ollama pull nomic-embed-text' on the host), or both to openai with OPENAI_API_KEY; then 'docker compose up -d assistant-service' and run this script again"
         else
             fail "the assistant answers" "200" "503: $(jget "d['message']")"
         fi
