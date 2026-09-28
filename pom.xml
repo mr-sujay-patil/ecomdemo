@@ -67,7 +67,7 @@
 			dependency block below for why that is survivable: these jars are test-scoped and the
 			application context is never built from them.
 		-->
-		<spring-modulith.version>1.4.1</spring-modulith.version>
+		<spring-modulith.version>2.1.1</spring-modulith.version>
 
 		<!--
 			ArchUnit, pinned because Phase 20b needs it in a module that does NOT depend on Spring

@@ -3,63 +3,28 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-28
-- **Phase:** 24 — Distributed Transactions (Saga pattern, choreography over Kafka)
-- **Branch:** feature/phase-24-saga (cut from `main` at `a2d5b8c`)
+- **Phase:** between 24 and 25 — `fix/spring-modulith-2` (agreed with the user; not a phase)
+- **Branch:** fix/spring-modulith-2 (cut from `main` at `67f6889`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #40 https://github.com/mr-sujay-patil/ecomdemo/pull/40
-- **Waiting for user:** YES - review of PR #40
+- **PR:** see `gh pr list --head fix/spring-modulith-2`
+- **Waiting for user:** YES — review of the fix PR; also Dependabot #39 (ArchUnit, CI green) to merge
 
-## Phase 23 merge verification — PASSED, `phase-23-complete` TAGGED at `a2d5b8c`
-PR #37 merged as a merge commit (2 parents); 0 missing commits, 0 diffs, branch alive; CI on `main`
-green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down); cold smoke
-**327/0/0** (this machine).
+## Phase 24 merge verification — PASSED, `phase-24-complete` TAGGED at `67f6889`
+PR #40 merged as a merge commit (2 parents); 0 missing commits, 0 diffs, branch alive; CI on `main`
+green; `verify` on `main` 524 tests (stack down); cold smoke **361/0/0**.
 
-## Checklist (from the phase file's "What you'll implement", split into steps)
-- [x] 1. `outbox` Maven module (`com.ecomdemo.outbox`): the app's outbox moved + generalised
-      (`OutboxRoutes` bean per service, NOT a topic column - keeps Phase 18's decision),
-      `ProcessedEvents` claim, `SagaListenerErrors` (blocking retries → `-dlt`), `@EnableOutbox`.
-      App on it with V18 (`processed_event`); verify green, 492 tests
-- [x] 2. inventory-service: outbox + processed_event + `stock_reservation` (V3); consumes
-      `orders.created` → StockReserved/StockRejected (all-or-nothing, rows locked FOR UPDATE by id);
-      consumes `payments.failed` → `releaseForOrder` (compensation). InventorySagaTest 9/9 (Postgres)
-- [x] 3. New mock `payment-service` (+ payment-db, host ports 8086 / 5437): consumes
-      `inventory.stock-reserved` → PaymentCompleted/PaymentFailed (declines amount > limit);
-      Dockerfile, compose, Prometheus, Alloy wired (CI builds the reactor, nothing to add). 9 tests
-- [x] 4. App: PENDING/CONFIRMED/CANCELLED (V19, PLACED rows → CONFIRMED), checkout = pre-check +
-      PENDING + OrderCreated (no HTTP reserve/release), `OrderSagaHandler` (conditional UPDATE =
-      semantic lock), CONFIRMED publishes OrderPlaced, `GET /api/orders/{id}/status`, sales report
-      counts CONFIRMED only. ITs use `FakeSagaParticipants` over real Kafka. verify: 524 tests
-- [x] 5. Tests per service + smoke "Saga": normal → CONFIRMED; forced decline → CANCELLED, stock
-      restored, RELEASED, no notification; two buyers one unit. Warm smoke 361/0/0
-- [x] 6. Orchestration alternative documented (docs/architecture/saga.md); README, decisions (15),
-      RECENT (Phase 22 archived), test report, tracker 🔵
-- [x] DONE 2026-09-28: `verify` 524 tests green; cold smoke ×3 on the final code = 361/0/0 (runs 9-11;
-      two earlier cold runs failed on test-side defects, fixed, in the report §4)
-
-## Planning decisions (user chose all three recommended options, 2026-09-28)
-- **Checkout = hybrid.** Read-only `requireAvailable` pre-check stays (instant 409), then the order is
-  saved PENDING + `OrderCreatedEvent` in the outbox → 201 with status PENDING. No HTTP reserve/release.
-- **Shared `outbox` module** (new reactor module, artifact `ecomdemo-outbox`), used by app, inventory,
-  payment. Each service has its own `outbox_event` + `processed_event` tables (Flyway per service).
-  Each service's app class adds the package to component, entity and repository scanning.
-- **Payment declines above a limit**: `PAYMENT_DECLINE_ABOVE` (default 10000.00). Smoke buys enough
-  units to exceed it.
-- Topics (publisher declares topic + `-dlt`; 3 partitions; key = order id): `orders.created` (app),
-  `inventory.stock-reserved`, `inventory.stock-rejected` (inventory), `payments.completed`,
-  `payments.failed` (payment). `orders.placed` now published on CONFIRMED.
-- Saga listeners: blocking retries (DefaultErrorHandler, FixedBackOff) → `<topic>-dlt` with partition
-  chosen by Kafka (DLT has 1 partition). Keeps per-order ordering; no retry topics.
-- Semantic lock = order PENDING (only PENDING → CONFIRMED/CANCELLED; late/duplicate events ignored)
-  and inventory's `stock_reservation` rows (RESERVED/RELEASED) which say what to give back.
-- Events carry what the next step needs (choreography): StockReserved carries amount + username.
+## This branch
+- [x] `spring-modulith.version` 2.1.1 (supersedes Dependabot #38, which failed to compile)
+- [x] `ModularityTest`: `new Documenter(MODULES, Documenter.Options.defaults().withOutputFolder(...))`
+- [x] docs/modules regenerated: style only, all 14 diagrams keep identical `Rel(...)` lines
+- Verified: `verify` 524/0/0; cold smoke 361/0/0.
 
 ## Next action
-STOPPED at PR #40, waiting for the user. Do NOT merge unless the user says `approved, merge it`
-(then `gh pr merge 40 --merge`, never squash/rebase/--delete-branch). On `merged, continue`: merge
-verification per `docs/process/git-workflow.md` step 5 + checklist, `./mvnw clean verify` and a cold
-smoke on `main` (run a COPY of the script), CI green, then tag `phase-24-complete`. On
-`changes: ...`: back to IMPLEMENTING on this branch. The stack is left running.
+Waiting for review of the fix PR. On `approved, merge it`: merge with `--merge`, verify it (ancestor,
+no diffs, `verify`, cold smoke on a COPY of the script), then START PHASE 25 per
+`execution-protocol.md` §3 (its first commit marks Phase 24 ✅ in the ROADMAP tracker). Dependabot
+#38 closes itself once `main` has 2.1.1; #39 is the user's to merge.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
