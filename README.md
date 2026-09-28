@@ -2555,6 +2555,89 @@ In Grafana's Tempo view the same checkout is one trace across the gateway, the o
 inventory-service, payment-service and back. The smoke test's **Saga** section runs both endings
 and a two-buyers-one-unit race, and checks the rows in all three databases.
 
+## Running on Kubernetes
+
+Phase 25 runs the same system on a local Kubernetes cluster, the way production would, next to
+the compose stack rather than instead of it. The cluster is **kind**: Kubernetes nodes as Docker
+containers, here a single node.
+
+```bash
+scripts/k8s-up.sh        # cluster, Traefik, metrics-server, images, secrets, manifests (~5 min first time)
+curl -s localhost:18080/api/products | head -c 200    # through the Ingress
+scripts/k8s-smoke.sh     # the smoke test, through the Ingress, plus a Kubernetes section
+scripts/k8s-demo.sh rollout|rollback|selfheal|hpa
+scripts/k8s-down.sh      # delete the cluster
+```
+
+Needs `kind`, `kubectl` and `helm`. The manifests are in `k8s/`: plain YAML, applied with
+`kubectl apply -k k8s/` (Kustomize, built into kubectl).
+
+### What runs where
+
+| In the cluster (namespace `ecomdemo`) | Kind of object | Why |
+|---|---|---|
+| the 7 services | Deployment + Service + ConfigMap + Secret | stateless pods, replaced freely |
+| 6 PostgreSQL, Kafka | StatefulSet + Service + a volume each | a stable name (`db-0`) and a disk that outlives the pod |
+| Redis | Deployment | holds nothing that cannot be rebuilt |
+| Traefik (namespace `traefik`) | Helm chart | the Ingress controller: `localhost:18080` → gateway |
+| metrics-server | Helm chart | CPU numbers for the HPA and `kubectl top` |
+
+Prometheus, Grafana, Loki and Tempo stay in compose (a Phase 25 decision). The Kubernetes smoke run
+**skips** those checks and says so; it never passes them.
+
+### Pods, ReplicaSets, Deployments, Services
+
+A **pod** is one or more containers scheduled together, and it is disposable: it gets a new name
+and a new IP every time it is recreated. A **Deployment** says "N pods from this template". It
+does that through a **ReplicaSet**, whose only job is to make the count of running pods match N.
+That is all self-healing is. Delete a pod and the ReplicaSet sees N−1 and creates one; nobody asks
+it to. A **Service** gives those changing pods one stable name and virtual IP (`catalog-service:8081`,
+the same names compose used, so no configuration changed). It sends traffic only to pods whose
+readiness probe passes.
+
+### ConfigMaps vs Secrets
+
+Each service's non-secret settings (database host, URLs, `PAYMENT_DECLINE_ABOVE`) are a
+**ConfigMap**, injected as environment variables with `envFrom`. The JWT key and the database
+passwords are a **Secret** per service. `scripts/k8s-up.sh` creates them from `.env` and from
+generated passwords, and they are **never in Git**. A Secret is only base64-*encoded*, not encrypted.
+What makes it safer than a ConfigMap is that access to it can be restricted separately (RBAC) and
+that it stays out of the repository. A database password is generated once and then kept, because
+the database stores it on its volume the first time it starts.
+
+### Probes
+
+Every service has three, each answering a different question from Phase 15's actuator endpoints:
+
+| Probe | Asks | If it fails |
+|---|---|---|
+| startup (`/actuator/health/liveness`, up to 5 min) | finished starting? | keeps waiting; the other two wait too |
+| liveness (`/actuator/health/liveness`) | stuck? | the container is **restarted** |
+| readiness (`/actuator/health/readiness`) | should it get traffic? | the pod is taken **out of the Service**, not restarted |
+
+Kubernetes has no `depends_on`. So each service has an **init container** that waits until its
+database, Redis or Kafka accepts a connection before the application starts. Without it, a service
+would crash on start-up until its database happened to be up.
+
+### Rollouts and rollbacks
+
+Every Deployment rolls out with `maxSurge: 1, maxUnavailable: 0`: start one new pod, wait for its
+readiness probe, and only then stop an old one. A `preStop` pause of 5 s lets the Service stop
+routing to a pod before it receives SIGTERM, and Spring's graceful shutdown finishes the requests in
+flight. Measured: `scripts/k8s-demo.sh rollout` restarted all catalog-service pods while calling the
+API through the Ingress, **744 requests, 0 failed**. `kubectl rollout undo` goes back a revision.
+It changes the live object and not the YAML file, which is why, in a GitOps setup, a rollback means
+reverting the file.
+
+### Stateless scaling, and the one service that can't yet
+
+`k8s/hpa.yaml` scales **catalog-service** between 2 and 4 pods, aiming for 60 % of the CPU they
+request. It is stateless (everything it answers comes from its database or the shared Redis), so
+another pod is simply more capacity. The smoke test's own traffic was enough to take it to 4.
+**The app stays at one replica.** It runs scheduled work (the outbox relay, the nightly report),
+and every replica would run it too. Scaling it needs leader election for those jobs first. The
+gateway runs two replicas, which is why deleting one pod goes unnoticed.
+
 ## Code quality
 
 Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually
