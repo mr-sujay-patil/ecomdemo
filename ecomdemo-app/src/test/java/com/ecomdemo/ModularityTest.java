@@ -100,7 +100,10 @@ class ModularityTest {
         Path output = ProjectRoot.resolve("docs/modules");
         Files.createDirectories(output);
 
-        new Documenter(MODULES, output.toString())
+        // Spring Modulith 2.x takes the folder through Options rather than a String, and by default
+        // CLEANS it first. Everything in docs/modules is generated here, so a clean is what we want:
+        // a module that is deleted can no longer leave its old diagram behind.
+        new Documenter(MODULES, Documenter.Options.defaults().withOutputFolder(output.toString()))
                 .writeModulesAsPlantUml()
                 .writeIndividualModulesAsPlantUml()
                 .writeModuleCanvases();

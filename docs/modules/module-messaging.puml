@@ -1,19 +1,30 @@
 @startuml
-set separator none
-title Messaging
+title <size:24>Messaging</size>
 
+set separator none
 top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
 
 !include <C4/C4>
 !include <C4/C4_Context>
 !include <C4/C4_Component>
 
-Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
-  Component(EcomdemoApplication.EcomdemoApplication.Outbox, "Outbox", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
+System_Boundary("EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+    Component(EcomdemoApplication.EcomdemoApplication.Outbox, "Outbox", $techn="Module", $descr="", $tags="", $link="")
+    Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
+  }
+
 }
 
 Rel(EcomdemoApplication.EcomdemoApplication.Messaging, EcomdemoApplication.EcomdemoApplication.Outbox, "uses", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
+hide stereotypes
 @enduml
