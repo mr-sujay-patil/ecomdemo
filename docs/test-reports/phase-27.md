@@ -155,10 +155,41 @@ evaluates `rate(orders_placed_total[5m])`, which needs two scrapes of the counte
 stack it can run before the second one. The same query returned data a minute later, and runs 2 and
 3 passed. This phase changes neither Prometheus nor the order flow, and the check runs well before
 the LLM section. This exact failure is already recorded in `docs/test-reports/phase-22.md` (run 5).
-**Carried, not fixed** (out of scope).
+**Carried, not fixed** (out of scope). *Superseded by §9: it failed merge verification twice, and is now fixed.*
 
 ## 8. Clean-up
 
 The throwaway Ollama container and its 2 GB volume were removed. catalog-service is back to
 `AI_CHAT_PROVIDER=none`. The compose stack and the new kind cluster are left running;
 `docker compose down` and `scripts/k8s-down.sh` remove them.
+
+## 9. Merge verification (after PR #43) and follow-up fix
+
+PR #43 merged as `190f782` (2 parents). The branch is an ancestor of `main`, with 0 missing commits and
+0 diffs, and the branch is still alive. CI on `main`: success (run 36451495358). `./mvnw clean verify` on
+`main`: **539** tests, 0 failed, 0 errors, 0 skipped.
+
+The cold compose smoke **failed twice in a row**, on two new cold stacks: **368 / 1 / 0**, both times
+*"the dashboard's orders-per-minute query returns data"* (§7). (0 skipped: the user's `.env` now sets
+`AI_CHAT_PROVIDER=ollama` with Ollama on the host, so the model check ran against a real llama3.2 and
+passed.) Two failures in two runs is not "occasionally", so no tag was made (execution protocol
+§5.4), and the fix went into a follow-up PR from this branch.
+
+**Cause, measured:** `orders_placed_total` is created by the first order, which the smoke test places
+itself: Prometheus's first sample of it is `1`. `rate()` needs two samples in the window, and the scrape
+interval is 15 s, so the query is correctly empty until the next scrape after that order. The check
+asked it once, sometimes before that scrape. The query returned data when asked again a minute later.
+
+**Fix:** the check re-asks for up to 45 s (three scrape intervals) and stops as soon as it gets data.
+A wrong label still fails: `application="nope"` returns an empty result, so the check fails after 45 s.
+
+| Run | Stack | Result |
+|---|---|---|
+| verification 1 | `main`, cold | 368 / **1** / 0 |
+| verification 2 | `main`, cold | 368 / **1** / 0 |
+| fix 1 | this branch, cold | **369 / 0 / 0** |
+| fix 2 | this branch, cold | **369 / 0 / 0** |
+
+Why 369 and not 367: with no model, the LLM section is 7 passes + 1 skip; with a model that answers, it
+is 9 passes (the refusal's two checks give way to "answered", "saved", "history" and "tokens"). 367 + 2 =
+369 on fresh volumes. Section 4's 370 was on kept volumes (+1 persistence probe).

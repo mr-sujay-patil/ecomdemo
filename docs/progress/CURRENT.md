@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-28
 - **Phase:** 27 — LLM Integration (Spring AI)
 - **Branch:** feature/phase-27-spring-ai (cut from `main` at `615889c`)
-- **Step:** PR_OPEN
+- **Step:** VERIFYING (merge verification FAILED; follow-up fix PR open)
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #43 https://github.com/mr-sujay-patil/ecomdemo/pull/43
-- **Waiting for user:** YES - review of the Phase 27 PR
+- **PR:** #43 merged (`190f782`); follow-up PR for the verification failure: see Next action
+- **Waiting for user:** YES - review of the follow-up PR
 
 ## Merge verification before this phase — all PASSED
 - Phase 25: PR #42 merge commit `615889c` (2 parents); branch is an ancestor of main; 0 missing, 0 diffs,
@@ -30,16 +30,19 @@
   README, decisions (12), RECENT rotation (Phase 24 archived), tracker 🔵
 
 ## Next action
-STOPPED at PR #43, waiting for the user. Do NOT merge unless the user says `approved, merge
-it` (`gh pr merge <n> --merge`). On `merged, continue`: merge verification (git checks, `verify`, cold
-compose smoke on a COPY of the script; with no model expect 367/0/1 on fresh volumes, 368/0/1 with kept
-volumes), CI green, tag `phase-27-complete`, then Phase 28 (semantic search).
-The compose stack and a new kind cluster are left running; `scripts/k8s-down.sh` removes the cluster.
+Merge verification of PR #43: git checks PASS (merge `190f782`, 0 missing, 0 diffs, branch alive), CI
+on main PASS, `verify` 539/0/0/0 PASS, cold compose smoke FAILED twice (368/1/0: "the dashboard's
+orders-per-minute query returns data", a first-order vs. second-scrape race). NOT tagged. Fix on this
+branch: the check polls up to 45s; cold runs 369/0/0 twice (the user's .env now has
+AI_CHAT_PROVIDER=ollama, so the model check runs for real: 369 fresh, 370 kept volumes).
+STOPPED at the follow-up PR. On `approved, merge it`: `gh pr merge <n> --merge`. On `merged,
+continue`: rerun merge verification (git checks, CI, verify, cold smoke on a COPY), tag
+`phase-27-complete`, then Phase 28 (semantic search).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
 - Never edit `scripts/smoke-test.sh` while it runs; run a copy.
-- The persistence probe makes the smoke count path-dependent: +1 check with kept volumes (Phase 27: 367 fresh / 368 kept, no model).
+- The persistence probe makes the smoke count path-dependent: +1 check with kept volumes (Phase 27: 367/368 no model, 369/370 with a model).
 - Repo-local git identity `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
@@ -53,5 +56,4 @@ The compose stack and a new kind cluster are left running; `scripts/k8s-down.sh`
   removed customer proxy.
 - catalog-service is slow on its first requests after a restart (a half-open trial can exceed 500 ms).
 - k8s: the app must stay at 1 replica (no leader election); observability not in the cluster.
-- Intermittent on a cold stack: "the dashboard's orders-per-minute query returns data" (Phase 22 & 27 reports).
 - Phase 27: the OpenAI path is untested against a real key (none here); Ollama path verified for real.

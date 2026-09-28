@@ -1818,12 +1818,22 @@ print(next((r['state'] for grp in g for r in grp['rules']), 'MISSING'))")"
     # The dashboard's own expression, evaluated by Prometheus. This is the check that a panel
     # would actually draw something: the meters can all be present and the query still return
     # nothing because of a label that does not exist.
-    check "the dashboard's orders-per-minute query returns data" "True" \
-        "$(curl -sS --get "$PROMETHEUS_URL/api/v1/query" \
+    #
+    # It polls, because on a cold stack the answer depends on WHEN it is asked. The counter only
+    # exists once this script places its first order, and rate() needs two samples of it; at a
+    # 15s scrape interval the second one can be up to 30s away. Asked sooner, the query is
+    # correctly empty. 45s is three scrape intervals. A wrong label still fails, just 45s later.
+    DASHBOARD_HAS_DATA=False
+    for _ in $(seq 1 45); do
+        DASHBOARD_HAS_DATA="$(curl -sS --get "$PROMETHEUS_URL/api/v1/query" \
             --data-urlencode 'query=sum(rate(orders_placed_total{application="ecomdemo"}[5m]))' \
             | python3 -c "
 import json, sys
-print(len(json.load(sys.stdin)['data']['result']) > 0)")"
+print(len(json.load(sys.stdin)['data']['result']) > 0)" || echo False)"
+        [ "$DASHBOARD_HAS_DATA" = "True" ] && break
+        sleep 1
+    done
+    check "the dashboard's orders-per-minute query returns data" "True" "$DASHBOARD_HAS_DATA"
 else
     skip "Prometheus checks" "no Prometheus at $PROMETHEUS_URL (set PROMETHEUS_URL to override)"
 fi
