@@ -6,7 +6,7 @@
 | **Technology** | Spring AI |
 | **Branch** | `feature/phase-27-spring-ai` |
 | **PR title** | `Phase 27: LLM Integration` |
-| **Requires** | `phase-26-complete` tag exists on `main` |
+| **Requires** | `phase-26-complete` tag exists on `main` (Phase 26 was skipped on 2026-09-28, so `phase-25-complete`) |
 | **Completion tag** | `phase-27-complete` |
 
 > Claude Code: implement **only** this file's scope. Follow `docs/process/execution-protocol.md` for the lifecycle, `docs/process/testing-protocol.md` before raising the PR, and `docs/process/git-workflow.md` for every Git action.
