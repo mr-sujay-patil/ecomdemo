@@ -7,7 +7,7 @@
 - **Branch:** feature/phase-25-kubernetes (cut from `main` at `8047753`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
+- **PR:** #42 https://github.com/mr-sujay-patil/ecomdemo/pull/42
 - **Waiting for user:** YES - review of the Phase 25 PR (tools: kind v0.34.0-alpha, kubectl v1.36.1,
   helm v3.22.0).
 
@@ -38,7 +38,7 @@
   observability checks SKIPPED, never passed).
 
 ## Next action
-STOPPED at the Phase 25 PR, waiting for the user. Do NOT merge unless the user says `approved, merge
+STOPPED at PR #42, waiting for the user. Do NOT merge unless the user says `approved, merge
 it` (`gh pr merge <n> --merge`). On `merged, continue`: merge verification (git checks, `verify`, cold
 compose smoke on a COPY of the script, CI green), tag `phase-25-complete`. The kind cluster and the
 compose stack may be left running; `scripts/k8s-down.sh` removes the cluster.

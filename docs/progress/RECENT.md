@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 25: Container Orchestration (tag: phase-25-complete, PR #__PR__)
+## Phase 25: Container Orchestration (tag: phase-25-complete, PR #42)
 **What exists now:** the whole system also runs on a local **kind** cluster (one node, k8s v1.37):
 `scripts/k8s-up.sh` → Traefik Ingress on **localhost:18080** → gateway (2 replicas) → services. 7
 Deployments (ConfigMap + Secret + Service each, startup/liveness/readiness probes, CPU request, memory
