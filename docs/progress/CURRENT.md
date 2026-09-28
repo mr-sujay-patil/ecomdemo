@@ -67,8 +67,9 @@ smoke on `main` (run a COPY of the script), CI green, then tag `phase-24-complet
 - Repo-local git identity `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
-- A failed compensating release leaks a reservation; nothing reconciles it. → Phase 24
-- The CSV import is a distributed write with no shared transaction (restartable, idempotent). → Phase 24
+- A saga whose event is dead-lettered leaves the order PENDING; no timeout or reconciliation yet
+  (Phase 24 follow-up; the HTTP compensation that leaked is gone).
+- The CSV import is a distributed write with no shared transaction (restartable, idempotent).
 - **HS256 with a shared secret** — every service can mint as well as verify.
 - `ecomdemo-app` is not yet named `order-service`.
 - catalog-service has no springdoc; the gateway does no request logging.
