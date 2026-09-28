@@ -15,6 +15,7 @@ data:
   CATALOG_BASE_URL: "http://catalog-service:8081"
   CUSTOMER_BASE_URL: "http://customer-service:8083"
   INVENTORY_BASE_URL: "http://inventory-service:8082"
+  ASSISTANT_BASE_URL: "http://assistant-service:8087"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
 ---

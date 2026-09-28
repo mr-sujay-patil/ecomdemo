@@ -8,6 +8,18 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 29: AI Shopping Assistant — a chat grounded in the store's own data.**
+`POST /api/assistant/chat` (a new **assistant-service**) answers product questions by calling the
+catalogue's semantic search as a **tool**, answers policy questions from the store's Markdown policies
+by **retrieval (RAG)**, looks up the caller's own orders, and PROPOSES cart additions that the customer
+then confirms. Every call it makes downstream carries the customer's own token, so it can never see
+more than the customer could; conversations are remembered in **Redis**. An 11-question
+**evaluation set** (`scripts/assistant-eval.py`) checks the answers against the store's real data:
+`qwen2.5:7b` passes it, `llama3.2` does not, which is why the assistant's default model differs from
+catalog's. See [Shopping assistant](#shopping-assistant) and
+[`docs/test-reports/phase-29.md`](docs/test-reports/phase-29.md). *(Phase 26, the optional AKS
+deployment, was skipped.)*
+
 **Phase 28: Semantic Search — products can be found by what they are for, not only by their words.**
 `GET /api/products/search?q=I want to listen to music without hearing the plane` returns the
 Noise-Cancelling Headphones first, although no word of the query is in their name or description.
@@ -19,15 +31,6 @@ re-embeds it; a **Spring Batch** job backfills everything else. The embedding mo
 search answers 503 and everything else works. See [Semantic search](#semantic-search) and
 [`docs/test-reports/phase-28.md`](docs/test-reports/phase-28.md).
 
-**Phase 27: LLM Integration — catalog-service can write product copy with a language model.**
-`POST /api/products/{id}/generate-description` (ADMIN) asks the configured chat model for a
-description, tags and an SEO title as **structured output**, validates the answer, saves the
-description to the product and keeps every generation with its model and token counts. The model is
-a choice, not a requirement: `AI_CHAT_PROVIDER=openai` (with `OPENAI_API_KEY`), `ollama` (free,
-local), or `none` — the default, with which everything else works and this one endpoint answers 503.
-See [LLM integration](#llm-integration) and
-[`docs/test-reports/phase-27.md`](docs/test-reports/phase-27.md). *(Phase 26, the optional AKS
-deployment, was skipped.)*
 
 **Phase 25: Container Orchestration — the whole system also runs on a local Kubernetes cluster,
 behind an Ingress.** `scripts/k8s-up.sh` builds a kind cluster with Traefik on **localhost:18080**
@@ -248,6 +251,16 @@ ecomdemo/
 │       ├── catalog/         # Product, ProductService, ProductController, its own SecurityConfig
 │       ├── cache/           # Redis, and the Kafka listener that evicts on a stock change
 │       └── db/migration/    # its OWN Flyway history, starting again at V1
+│
+├── assistant-service/       # A SEPARATE DEPLOYABLE (Phase 29). The shopping assistant; NO database.
+│   └── src/main/java/com/ecomdemo/assistant/
+│       ├── AssistantService # retrieve -> augment -> generate with tools -> check -> report sources
+│       ├── tools/           # searchProducts, getOrderStatus, addToCart: what the model may DO
+│       ├── policy/          # the policies' RAG: Markdown -> passages -> embeddings, in memory
+│       ├── memory/          # conversations in Redis, keyed by user id + conversation id
+│       ├── actions/         # proposed cart additions, confirmed by the customer, never the model
+│       └── store/           # calls to catalog and the app, always with the CALLER's token
+│   └── src/main/resources/  # policies/*.md, prompts/assistant-system.st
 │
 ├── inventory-service/       # A SEPARATE DEPLOYABLE (Phase 20b). Owns stock and nothing else.
 │   └── src/main/java/com/ecomdemo/inventory/
@@ -643,6 +656,8 @@ is the trade, and the retry budget is what makes it honest.
 | `POST` | `/api/orders` | **CUSTOMER** | Check out your cart (201 + `Location`) |
 | `GET` | `/api/orders` | **CUSTOMER** | Your own order history |
 | `GET` | `/api/orders/{id}` | **CUSTOMER** | One of your own orders |
+| `POST` | `/api/assistant/chat` | **CUSTOMER** | Ask the shopping assistant (Phase 29); 503 if no models |
+| `POST` | `/api/assistant/actions/{id}/confirm` | **CUSTOMER** | Make a cart addition the assistant proposed (once, yours only, within 10 min) |
 | `POST` | `/api/admin/batch/product-import` | **ADMIN** | Import a product CSV (`multipart/form-data`, part `file`) |
 | `GET` | `/api/admin/batch/executions/{id}` | **ADMIN** | Look one job run up in the JobRepository |
 | `POST` | `/api/admin/batch/executions/{id}/restart` | **ADMIN** | Restart a failed import from where it stopped |
@@ -2892,6 +2907,141 @@ life cycle on a real pgvector; `EmbeddingSyncIT` runs API → outbox → **Kafka
 nothing called by hand; `SemanticSearchNotConfiguredIT` proves the default starts and answers 503.
 The smoke test's **Semantic search** section checks the outbox every run, and the real model's
 ranking (with the keyword baseline) when one is configured, a **SKIP** with setup steps otherwise.
+
+## Shopping assistant
+
+Phase 29 adds a chat that answers from the store's own data, and cannot see more than the customer
+asking.
+
+```bash
+curl -s -X POST localhost:8080/api/assistant/chat -H "Authorization: Bearer $ASHA" \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"Which headphones would you recommend for long flights, and how much are they?"}'
+```
+
+```json
+{"conversationId":"e6276f3d-…",
+ "answer":"The store recommends the Noise-Cancelling Headphones for long flights. They cost ₹14,999.00.",
+ "sources":[{"type":"product","id":"4","title":"Noise-Cancelling Headphones"}],
+ "toolsUsed":["searchProducts"],
+ "pendingAction":null}
+```
+
+A real answer from `qwen2.5:7b`. Send `conversationId` back to continue the conversation. `sources`
+is what the answer could stand on: the policy passages it was given, the products the tools returned,
+the orders it looked up. Asking it to *add one Desk Mat to my cart* returns a `pendingAction`, and
+nothing changes until the customer confirms it:
+
+```bash
+curl -s -X POST localhost:8080/api/assistant/actions/$ACTION_ID/confirm -H "Authorization: Bearer $ASHA"
+# {"productId":8,"productName":"Desk Mat","quantity":1,"cartTotal":1299.00}
+```
+
+### Setting it up
+
+It uses the same switches as catalog-service and needs **both**: a chat model (answers, calls the
+tools) and an embedding model (finds the policy passages). Either at `none`, the default, and the chat
+answers **503** with these steps; confirming a proposal still works.
+
+| | Ollama (free, local) | OpenAI |
+|---|---|---|
+| Switches | `AI_CHAT_PROVIDER=ollama`, `AI_EMBEDDING_PROVIDER=ollama` | both `openai`, plus `OPENAI_API_KEY` |
+| Chat model | `qwen2.5:7b`: `ollama pull qwen2.5:7b` (4.7 GB) — override with `ASSISTANT_OLLAMA_MODEL` | `gpt-4.1-mini` (`ASSISTANT_OPENAI_MODEL`), **untested** here |
+| Embeddings | `nomic-embed-text` (as for search) | `text-embedding-3-small` |
+
+Product answers also need catalog's search to be indexed (the backfill in
+[Semantic search](#semantic-search)).
+
+### How it works
+
+```
+POST /api/assistant/chat {message}                         (CUSTOMER, token checked at the gateway AND here)
+ 1 retrieve   embed the message → nearest policy passages (≥ 0.7, top 3)       PolicyLibrary, in memory
+ 2 augment    system prompt = rules + those passages
+ 3 generate   model ⇄ tools, the earlier turns replayed from Redis              Spring AI ChatClient
+                searchProducts ──> catalog  GET /api/products/search   ┐ with the CALLER's token,
+                getOrderStatus ──> app      GET /api/orders/{id}/status ┘ never the service's
+                addToCart      ──> PROPOSE only: a pending action in Redis (10 min, single use)
+ 4 check      an answer stating an order's status with no order found → replaced  OrderClaimGuard
+ 5 report     answer + sources + toolsUsed + pendingAction
+POST /api/assistant/actions/{id}/confirm ──> app POST /api/cart/items (caller's token)
+```
+
+- **RAG over policies.** Five Markdown documents in the jar (`policies/*.md`: shipping, returns,
+  payments, warranty, support), one passage per `##` section, embedded once on the first question and
+  held in memory: 19 passages do not need a database. Retrieved on **every** message; a passage is
+  used only above **0.7** similarity, **measured** on nomic-embed-text: each policy question scored its
+  passage 0.85–0.87, no other question scored any passage above 0.68.
+- **RAG over products** is the `searchProducts` tool on top of Phase 28's search: the model chooses the
+  query and the filters ("under 3000" becomes `maxPrice=3000`).
+- **Memory.** Spring AI's `MessageWindowChatMemory` (the last 20 messages) over a repository written on
+  `StringRedisTemplate`: one list per conversation under `assistant:memory:{userId}:{conversationId}`,
+  24 h after the last message. The user id comes from the token, so the same conversation id sent by
+  another customer is another conversation.
+
+### Guardrails, and the authorization boundary
+
+| Risk | What stops it |
+|---|---|
+| Reading another customer's order | Every downstream call carries the **caller's own token**; the application answers 403, and the tool tells the model "not an order on your account" (the same for 404, so it cannot even learn which numbers exist). No tool has a user, customer or token argument: the model cannot choose whose data. |
+| The model inventing an order anyway | `OrderClaimGuard` replaces an answer that states an order's status when no order was found in that turn (the evaluation caught `qwen2.5` doing exactly that under a prompt injection) |
+| Prompt injection changing the cart | `addToCart` only proposes; the cart changes through an endpoint the model cannot call, once, for the proposing customer only |
+| Off-topic use | The system prompt: store topics only |
+| Hallucinated products, prices, policies | Answer only from passages and tool results; `sources` shows what an answer had to stand on |
+| A model looping over tools | Spring AI 2.0's limits: 5 tool calls per answer, 3 per tool; past that a fixed answer, not the model's |
+| Cost and injection length | 1000 characters per message; the window of 20 messages |
+
+### The evaluation set
+
+`scripts/assistant-eval.py` asks 11 questions ([`assistant-eval.json`](scripts/assistant-eval.json))
+through the gateway as two customers, after customer A places an order, and checks each answer
+against what the store actually holds: the product and its price, the policy passage it should cite,
+the tool it should call, no refusal of an in-scope question, nothing of A's order in B's answers, and
+the cart unchanged until confirmed. Every check is a string or structure check, so a run is
+repeatable and a failure names the missing fact.
+
+```bash
+python3 scripts/assistant-eval.py            # BASE_URL=http://localhost:18080 for the cluster
+```
+
+| Model (same code and prompt, 3 runs each) | Passed |
+|---|---|
+| `qwen2.5:7b` | **11/11, 11/11, 11/11** |
+| `llama3.2` (3B) | 8/11, 8/11, 8/11 — printed a tool call as its answer; ignored what a tool told it |
+
+The prompt itself was tuned against this set: a quoted refusal sentence made the small model refuse
+in-scope questions, a list of categories in the prompt let it answer "we don't sell laptops" without
+searching, and tool results as JSON notes were ignored where plain sentences were not. Each change is
+in the test report with the run that prompted it.
+
+### Concepts
+
+- **The RAG pipeline.** Retrieve what is relevant, put it in front of the model, and tell it to answer
+  from that. The model's own knowledge is not trusted for facts about this store; retrieval turns a
+  question about the store into a reading comprehension task.
+- **Tool calling.** The model never runs code. A tool is described to it by name, a sentence and a JSON
+  schema; it answers with a request to call one, the application runs it and returns the result, and
+  the model continues. The descriptions are prompts.
+- **Authorization boundaries.** The model is part of the deputy. Give the assistant no authority of its
+  own and it cannot be talked into using it: the owner service checks the customer's token, whatever
+  the model asks for.
+- **Memory strategies.** A model is stateless; memory is re-sending earlier turns. A sliding window
+  (this), a summary of old turns, or retrieval over the conversation trade forgetting against cost.
+- **Hallucination and grounding.** A fluent answer is not a true one. Grounding means every fact has a
+  source; `sources` and `OrderClaimGuard` make "what did it stand on?" something code can check.
+- **LLM evaluation.** Unit tests prove the code around the model; only asking the real model the real
+  questions shows whether the answers are right, and for which model.
+
+### Tests
+
+The tests script the MODEL (`ScriptedChatModel` replies with text or with a tool call) and fake the
+STORE over real HTTP (`FakeStore`, the JDK's HTTP server), so everything between is production code:
+security, retrieval, the prompt, tool execution, the Authorization header on every downstream call,
+memory in a real Redis, the tool limits and the guard. `AssistantApiIT` (18), `AssistantNotConfiguredIT`
+(2), `ShoppingToolsTest` (a schema test proves no tool can take a user), `PolicyLibraryTest`,
+`OrderClaimGuardTest`, `RetrievalPropertiesTest`. The smoke test's **Shopping assistant** section asks
+a product question and has customer B ask about customer A's order, printing every answer; a
+**SKIP** with setup steps without models.
 
 ## Code quality
 

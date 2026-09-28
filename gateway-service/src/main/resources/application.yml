@@ -81,6 +81,14 @@ spring:
               predicates:
                 - Path=/api/inventory/**
 
+            # assistant-service (Phase 29). CUSTOMER only, in GatewaySecurityConfig. It forwards the
+            # customer's own token on every call it makes, so the Authorization header this route
+            # passes through is not just authentication here - it is the assistant's whole authority.
+            - id: assistant
+              uri: ${ASSISTANT_BASE_URL:http://localhost:8087}
+              predicates:
+                - Path=/api/assistant/**
+
             # The application - cart, orders, batch imports, reports. Last, and deliberately the
             # BROADEST predicate: a route list is evaluated in order, so a catch-all placed earlier
             # would swallow the three above it.

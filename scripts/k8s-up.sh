@@ -63,11 +63,11 @@ step "Images"
 # container with its own image store and cannot see this machine's. The infrastructure images are
 # loaded too, so the node never pulls from Docker Hub (rate limits, and it works offline).
 APP_IMAGES="ecomdemo:latest ecomdemo-catalog:latest ecomdemo-customer:latest ecomdemo-inventory:latest
-ecomdemo-notification:latest ecomdemo-payment:latest ecomdemo-gateway:latest"
+ecomdemo-notification:latest ecomdemo-payment:latest ecomdemo-assistant:latest ecomdemo-gateway:latest"
 INFRA_IMAGES="postgres:18-alpine pgvector/pgvector:0.8.6-pg18-trixie redis:8-alpine apache/kafka:4.2.1"
 if [ -z "${SKIP_BUILD:-}" ]; then
     docker compose build app catalog-service customer-service inventory-service \
-        notification-service payment-service gateway-service
+        notification-service payment-service assistant-service gateway-service
 fi
 for image in $INFRA_IMAGES; do
     docker image inspect "$image" >/dev/null 2>&1 || docker pull -q "$image"
@@ -113,6 +113,7 @@ make_secret customer-service CUSTOMER_DB_PASSWORD
 make_secret inventory-service INVENTORY_DB_PASSWORD
 make_secret notification-service NOTIFICATION_DB_PASSWORD
 make_secret payment-service PAYMENT_DB_PASSWORD
+make_secret assistant-service
 make_secret gateway-service
 
 step "Manifests (kubectl apply -k k8s/)"
@@ -123,7 +124,7 @@ for sts in db catalog-db customer-db inventory-db notification-db payment-db kaf
     k -n "$NS" rollout status "statefulset/$sts" --timeout=300s
 done
 for deploy in cache customer-service inventory-service catalog-service payment-service \
-    notification-service app gateway-service; do
+    notification-service app assistant-service gateway-service; do
     k -n "$NS" rollout status "deployment/$deploy" --timeout=600s
 done
 

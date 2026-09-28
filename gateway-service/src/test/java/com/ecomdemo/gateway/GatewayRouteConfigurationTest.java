@@ -41,7 +41,8 @@ class GatewayRouteConfigurationTest {
      * defaults used when running the gateway outside Docker.
      */
     private static final Set<String> KNOWN_TARGETS = Set.of(
-            "app", "catalog-service", "customer-service", "inventory-service", "localhost");
+            "app", "catalog-service", "customer-service", "inventory-service", "assistant-service",
+            "localhost");
 
     private static final Pattern URI_HOST =
             Pattern.compile("^https?://(?:\\$\\{[A-Z_]+:)?https?://([a-z-]+):(\\d+)\\}?$|^https?://([a-z-]+):(\\d+)\\}?$");

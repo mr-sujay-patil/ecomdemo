@@ -3539,6 +3539,155 @@ check "the probe product is deleted, and its embedding with it" "0" \
 as_customer
 
 # --------------------------------------------------------------------------------------------
+# Shopping assistant (Phase 29)
+# --------------------------------------------------------------------------------------------
+# The phase's two checks: the assistant answers a product question (by calling the search tool, as
+# the customer), and it refuses to reveal another customer's order. Plus the policy RAG, store
+# topics only, and memory in Redis. Every model answer is printed, because "PASS" says little about
+# what a language model actually said.
+#
+# Like the two AI sections above, it needs models: without them it SKIPs with the setup steps, and
+# still checks that the refusal is a 503 with a Retry-After.
+section "Shopping assistant"
+
+ASSISTANT_URL="${ASSISTANT_URL:-http://localhost:8087}"
+
+# assistant_scrape -> every assistant-service instance's /actuator/prometheus (see catalog_scrape).
+assistant_scrape() {
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        for pod in $(kube get pods -l app.kubernetes.io/name=assistant-service -o name 2>/dev/null); do
+            kube exec "$pod" -- wget -qO- http://localhost:8087/actuator/prometheus 2>/dev/null
+        done
+    else
+        curl -sS "$ASSISTANT_URL/actuator/prometheus" 2>/dev/null
+    fi
+}
+
+# ask <message> [conversationId] -> the status; the reply lands in $BODY
+ask() {
+    request POST /api/assistant/chat "$(python3 -c '
+import json, sys
+body = {"message": sys.argv[1]}
+if len(sys.argv) > 2 and sys.argv[2]:
+    body["conversationId"] = sys.argv[2]
+print(json.dumps(body))' "$@")"
+}
+
+# ask_until <python condition on d> <message> -> asks up to 3 times until the reply satisfies it, and
+# echoes the last status (the attempts go to stderr, so a check can capture the status alone).
+# A model is not a function: with the same input it can still call no tool, or answer from its own
+# head. A real failure to answer is still a FAIL after three tries, and the attempts are printed.
+ask_until() {
+    local condition="$1" message="$2" status attempt
+    for attempt in 1 2 3; do
+        status="$(ask "$message")"
+        [ "$status" = "200" ] && [ "$(jget "$condition")" = "True" ] && break
+        printf '        attempt %s: %s %s\n' "$attempt" "$status" "$(jget "d.get('answer', d.get('message', ''))[:160]")" >&2
+    done
+    echo "$status"
+}
+
+as_anonymous
+check "the assistant needs a token (401)" "401" "$(ask "hello")"
+as_admin
+check "and a CUSTOMER one: an administrator has no cart or orders to ask about (403)" "403" "$(ask "hello")"
+as_customer
+check "a message over 1000 characters is refused before any model sees it (400)" "400" \
+    "$(ask "$(python3 -c "print('a' * 1001)")")"
+check "confirming a cart addition that was never proposed is 404" "404" \
+    "$(request POST /api/assistant/actions/never-proposed/confirm)"
+
+ASSISTANT_STATUS="$(ask "Do you ship outside India?")"
+case "$ASSISTANT_STATUS" in
+    200)
+        ASSISTANT_CHATS_BEFORE="$(assistant_scrape | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_assistant_chats_seconds_count outcome=answered)"
+
+        # --- The product question: RAG through the search tool, as the customer ---
+        ASSISTANT_Q="Which headphones do you sell for noisy flights, and what do they cost?"
+        check "a product question is answered (200)" "200" \
+            "$(ask_until "'Noise-Cancelling Headphones' in d['answer'] and 'searchProducts' in d['toolsUsed']" "$ASSISTANT_Q")"
+        printf '        "%s"\n        -> %s\n' "$ASSISTANT_Q" "$(jget "d['answer'][:300]")"
+        check "by searching the catalogue: the model called searchProducts" "True" \
+            "$(jget "'searchProducts' in d['toolsUsed']")"
+        check "and the answer names the product the search returned" "True" \
+            "$(jget "'Noise-Cancelling Headphones' in d['answer'] and any(s['type'] == 'product' and s['title'] == 'Noise-Cancelling Headphones' for s in d['sources'])")"
+        check "with a price the catalogue gave it (14999)" "True" \
+            "$(jget "any(p in d['answer'] for p in ('14999', '14,999'))")"
+
+        # --- A policy question: RAG over the Markdown policies ---
+        ASSISTANT_Q="How much does standard shipping cost for an order of 2000 rupees?"
+        check "a policy question is answered from the shipping policy" "200" \
+            "$(ask_until "'99' in d['answer']" "$ASSISTANT_Q")"
+        printf '        "%s"\n        -> %s\n' "$ASSISTANT_Q" "$(jget "d['answer'][:300]")"
+        check "the passage it was given is cited as a source" "True" \
+            "$(jget "any(s['id'] == 'shipping#shipping-charges' for s in d['sources'])")"
+
+        # --- Another customer's order: the boundary ---
+        # OWNED_ORDER_ID is customer A's order from "Data ownership". Customer B asks about it.
+        as_customer
+        request GET "/api/orders/$OWNED_ORDER_ID/status" >/dev/null
+        OWNED_STATUS="$(jget "d['status']")"
+        as_other
+        ASSISTANT_Q="What is the status of order $OWNED_ORDER_ID?"
+        check "customer B asking about customer A's order gets an answer (200), not an error" "200" \
+            "$(ask "$ASSISTANT_Q")"
+        printf '        "%s" (customer B; the order is A'"'"'s and %s)\n        -> %s\n        tools: %s\n' \
+            "$ASSISTANT_Q" "$OWNED_STATUS" "$(jget "d['answer'][:300]")" "$(jget "d['toolsUsed']")"
+        check "which reveals nothing of it: not its status" "False" \
+            "$(jget "'$OWNED_STATUS'.lower() in d['answer'].lower()")"
+        check "and cites no order: the application refused the lookup (403) made with B's own token" "0" \
+            "$(jget "sum(1 for s in d['sources'] if s['type'] == 'order')")"
+        as_customer
+        ASSISTANT_Q="What is the status of my order $OWNED_ORDER_ID?"
+        check "while customer A asking the same gets its status" "200" \
+            "$(ask_until "'$OWNED_STATUS'.lower() in d['answer'].lower()" "$ASSISTANT_Q")"
+        printf '        -> %s\n' "$(jget "d['answer'][:300]")"
+        check "cited as their order" "True" \
+            "$(jget "any(s['type'] == 'order' and s['id'] == '$OWNED_ORDER_ID' for s in d['sources'])")"
+
+        # --- Store topics only ---
+        check "an off-topic request is declined: it says it helps with shopping, and writes no poem" "200" \
+            "$(ask_until "'shopping' in d['answer'].lower() and any(w in d['answer'].lower() for w in ('only help', \"can't\", 'cannot', 'unable', 'not able')) and len(d['answer']) < 400" "Write me a short poem about the sea.")"
+        printf '        -> %s\n' "$(jget "d['answer'][:200]")"
+
+        # --- Memory ---
+        ask "My name is Asha. Do you sell desk mats?" >/dev/null
+        ASSISTANT_CONVERSATION="$(jget "d['conversationId']")"
+        ASSISTANT_MEMORY_KEY="$(redis_cli --scan --pattern "assistant:memory:*:$ASSISTANT_CONVERSATION" | tr -d '\r' | head -1)"
+        check "the conversation is kept in Redis, under the user's id and the conversation's" "True" \
+            "$(python3 -c "import re, sys; print(bool(re.fullmatch(r'assistant:memory:\d+:$ASSISTANT_CONVERSATION', sys.argv[1])))" "$ASSISTANT_MEMORY_KEY")"
+        ASSISTANT_TTL="$(redis_cli TTL "$ASSISTANT_MEMORY_KEY" | tr -d '\r')"
+        check "with an expiry (at most 24 h)" "True" \
+            "$(python3 -c "print(0 < int('${ASSISTANT_TTL:-0}') <= 86400)")"
+        request POST /api/assistant/chat \
+            "{\"conversationId\":\"$ASSISTANT_CONVERSATION\",\"message\":\"What is my name?\"}" >/dev/null
+        check "and the next message in it is answered with the earlier ones in mind" "True" \
+            "$(jget "'Asha' in d['answer']")"
+
+        ASSISTANT_CHATS_AFTER="$(assistant_scrape | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_assistant_chats_seconds_count outcome=answered)"
+        check "answers are counted in assistant-service's metrics" "True" \
+            "$(python3 -c "print('$ASSISTANT_CHATS_AFTER' != 'MISSING' and float('$ASSISTANT_CHATS_AFTER') > float('${ASSISTANT_CHATS_BEFORE/MISSING/0}'))")"
+        ;;
+    503)
+        if jget "d['message']" | grep -q "not configured"; then
+            skip "the assistant answers a product question and refuses another customer's order" \
+                "no models configured. It needs a chat model AND an embedding model: set AI_CHAT_PROVIDER=ollama and AI_EMBEDDING_PROVIDER=ollama in .env (after 'ollama pull qwen2.5:7b' and 'ollama pull nomic-embed-text' on the host), or both to openai with OPENAI_API_KEY; then 'docker compose up -d assistant-service' and run this script again"
+        else
+            fail "the assistant answers" "200" "503: $(jget "d['message']")"
+        fi
+        check "the assistant without a model is a 503 that says when to retry" "True" \
+            "$(curl -sS -o /dev/null -D - -X POST "$BASE_URL/api/assistant/chat" \
+                -H "Authorization: Bearer $CUSTOMER_TOKEN" -H 'Content-Type: application/json' \
+                -d '{"message":"hello"}' | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+        ;;
+    *)
+        fail "the assistant answers, or refuses with 503 when there is no model" "200 or 503" \
+            "$ASSISTANT_STATUS: $(python3 -c "print(open('$BODY').read()[:200])" 2>/dev/null)"
+        ;;
+esac
+as_customer
+
+# --------------------------------------------------------------------------------------------
 # Kubernetes (Phase 25) - only when SMOKE_PLATFORM=k8s
 # --------------------------------------------------------------------------------------------
 # Everything above ran through the Ingress (BASE_URL is Traefik on localhost:18080). This section
@@ -3557,7 +3706,7 @@ k8s_ready() { # k8s_ready <deployment> -> "ready/desired"
 
 # --- The objects the phase asked for -------------------------------------------------------------
 for service in app catalog-service customer-service inventory-service notification-service \
-    payment-service gateway-service; do
+    payment-service assistant-service gateway-service; do
     OBJECTS="$(for kind in deployment service configmap secret; do
         suffix=""; [ "$kind" = "configmap" ] && suffix="-config"; [ "$kind" = "secret" ] && suffix="-secrets"
         kube get "$kind" "$service$suffix" -o name >/dev/null 2>&1 && printf '%s ' "$kind"
