@@ -5,18 +5,19 @@
 - **Updated:** 2026-09-28
 - **Phase:** 25 — Container Orchestration (Kubernetes, kind)
 - **Branch:** feature/phase-25-kubernetes (cut from `main` at `8047753`)
-- **Step:** WAITING_FOR_USER
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES — the phase's manual step: install `kind` (kubectl v1.36.1 is present;
-  helm optional). Docker has 24 CPUs / ~31 GB, enough.
+- **Waiting for user:** only for `helm` (needed to install Traefik and metrics-server). kind
+  v0.34.0-alpha and kubectl v1.36.1 are installed; Docker has 24 CPUs / ~31 GB.
 
 ## Merge verification before this phase — all PASSED
 - Phase 24: PR #40 merge commit `67f6889`; 0 missing, 0 diffs; CI green; `verify` 524; cold smoke
   361/0/0; tagged `phase-24-complete`.
 - Fix PR #41 (Spring Modulith 2.1.1, not a phase, no tag): merge commit `8047753`; 0 missing, 0 diffs,
   branch alive; CI green; `verify` 524; cold smoke 361/0/0. Dependabot #38 auto-closed.
-- Dependabot #39 (ArchUnit 1.5.1, CI green) is still OPEN — the user's to merge.
+- Dependabot #39 (ArchUnit 1.5.1) merged by the user as `0ea48da`; CI green; merged into this branch
+  (`ac4d08b`).
 
 ## Checklist (from the phase file's "What you'll implement")
 - [ ] Deployment, Service, ConfigMap and Secret per service
@@ -27,6 +28,14 @@
 - [ ] Rolling update and self-healing demos
 - [ ] Smoke test runs against the Ingress URL; deleting a pod keeps the flow working
 - [ ] README, decisions, test report, RECENT rotation, tracker 🔵
+
+## Planning decisions (user chose all three recommended options, 2026-09-28)
+- **Traefik** as the Ingress controller (ingress-nginx is retired, March 2026), installed with Helm.
+- **Kustomize** (`k8s/`, `kubectl apply -k`) for our objects; **Helm only for third-party** pieces
+  (Traefik, metrics-server).
+- **In the cluster:** 7 services + 6 Postgres + Redis + Kafka (StatefulSets with PVCs). Observability
+  stays in compose; the smoke test gets a Kubernetes mode (Ingress URL, `kubectl exec` for DB/Kafka,
+  observability checks SKIPPED, never passed).
 
 ## Next action
 When the user says `done` (kind installed): verify `kind version`, then plan the manifests and
