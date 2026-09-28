@@ -32,14 +32,14 @@
 ## Next action
 STOPPED at PR #43, waiting for the user. Do NOT merge unless the user says `approved, merge
 it` (`gh pr merge <n> --merge`). On `merged, continue`: merge verification (git checks, `verify`, cold
-compose smoke on a COPY of the script - expect 367/0/1 with no model, or 360/0/1 on fresh volumes' probe
-path... compare path-dependently), CI green, tag `phase-27-complete`, then Phase 28 (semantic search).
+compose smoke on a COPY of the script; with no model expect 367/0/1 on fresh volumes, 368/0/1 with kept
+volumes), CI green, tag `phase-27-complete`, then Phase 28 (semantic search).
 The compose stack and a new kind cluster are left running; `scripts/k8s-down.sh` removes the cluster.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
 - Never edit `scripts/smoke-test.sh` while it runs; run a copy.
-- The persistence probe makes the smoke count path-dependent: fresh volumes 360, kept volumes 361.
+- The persistence probe makes the smoke count path-dependent: +1 check with kept volumes (Phase 27: 367 fresh / 368 kept, no model).
 - Repo-local git identity `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
