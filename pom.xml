@@ -73,7 +73,7 @@
 			inventory-service has no reason to carry Modulith for the sake of one architecture
 			rule - so the version is declared here and the dependency named where it is used.
 		-->
-		<archunit.version>1.4.1</archunit.version>
+		<archunit.version>1.5.1</archunit.version>
 
 		<!--
 			Spring Cloud, for Phase 21's gateway. There is NO GA release train baselined on Boot 4.1.x:
