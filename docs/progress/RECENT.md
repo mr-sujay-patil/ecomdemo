@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 23: Distributed Tracing (tag: phase-23-complete, PR #TBD)
+## Phase 23: Distributed Tracing (tag: phase-23-complete, PR #37)
 **What exists now:** all six services trace with OpenTelemetry and export OTLP to **Tempo 3.0.3**
 (18 containers). One checkout = ONE trace: gateway -> app -> inventory (HTTP), inventory -> catalog
 and app -> outbox relay -> Kafka -> notification (async). ECS logs carry `traceId`; Grafana links
