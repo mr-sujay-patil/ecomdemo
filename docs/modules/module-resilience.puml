@@ -9,9 +9,9 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Resilience, "Resilience", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
 }
 
 Rel(EcomdemoApplication.EcomdemoApplication.Resilience, EcomdemoApplication.EcomdemoApplication.Serviceclients, "depends on", $techn="", $tags="", $link="")

@@ -59,6 +59,12 @@ import org.springframework.transaction.PlatformTransactionManager;
  * zone. The zone is the JVM's, which is the same one the cron fires in, and the range is built
  * once here so both queries agree on it. Half-open rather than {@code BETWEEN}: an order placed
  * at exactly midnight belongs to one day, not to both.
+ *
+ * <h2>Only CONFIRMED orders are sales (Phase 24)</h2>
+ *
+ * <p>Before the saga every order was a sale the moment it existed. Now an order may be PENDING
+ * (the saga has not finished) or CANCELLED (stock or payment failed), and neither is revenue. Both
+ * queries filter on the status, so a report never counts money that was not taken.
  */
 @Configuration
 class SalesReportJobConfig {
@@ -80,6 +86,7 @@ class SalesReportJobConfig {
             SELECT count(*) AS order_count, coalesce(sum(total_amount), 0) AS revenue
             FROM orders
             WHERE placed_at >= ? AND placed_at < ?
+              AND status = 'CONFIRMED'
             """;
 
     private static final String TOP_PRODUCTS_SQL = """
@@ -90,6 +97,7 @@ class SalesReportJobConfig {
             FROM order_item oi
             JOIN orders o ON o.id = oi.order_id
             WHERE o.placed_at >= ? AND o.placed_at < ?
+              AND o.status = 'CONFIRMED'
             GROUP BY oi.product_id, oi.product_name
             ORDER BY units_sold DESC, revenue DESC, product_name ASC
             FETCH FIRST %d ROWS ONLY

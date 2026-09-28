@@ -4,4 +4,6 @@
 |`com.ecomdemo.messaging`
 |Spring components
 |* `c.e.m.OutboxWriter`
+|Bean references
+|* `c.e.o.Outbox` (in Outbox)
 |===

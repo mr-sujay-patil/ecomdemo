@@ -1,17 +1,20 @@
 package com.ecomdemo.batch;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.ecomdemo.batch.dto.JobExecutionResponse;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.cart.dto.CartResponse;
+import com.ecomdemo.order.OrderStatus;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.clients.catalog.ProductWrite;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -99,10 +102,16 @@ class SalesReportJobIT extends IntegrationTest {
                 CartResponse.class);
         OrderResponse order = shopper.postForObject("/api/orders", null, OrderResponse.class);
         assertThat(order).as("the checkout should succeed").isNotNull();
+
+        // Since Phase 24 an order is a SALE only once the saga has CONFIRMED it, and the report
+        // counts nothing else. Wait for it, as a shopper waiting for the confirmation would.
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(
+                        shopper.getForObject("/api/orders/" + order.id(), OrderResponse.class).status())
+                .isEqualTo(OrderStatus.CONFIRMED));
     }
 
     @Test
-    @DisplayName("today's report counts the orders, totals the revenue and ranks the best sellers")
+    @DisplayName("today's report counts the CONFIRMED orders, totals the revenue and ranks the best sellers")
     void writesTheDaysSales() throws IOException {
         long popular = createProduct("Popular", "10.00", 100);
         long quiet = createProduct("Quiet", "50.00", 100);
@@ -110,6 +119,18 @@ class SalesReportJobIT extends IntegrationTest {
         buy(popular, 5);      // one order,  50.00
         buy(popular, 3);      // one order,  30.00
         buy(quiet, 1);        // one order,  50.00
+
+        // And one that is NOT a sale (Phase 24): 2 x 6,000.00 is above the payment limit, so the
+        // saga cancels it. It is placed today like the others, and the report must leave it out.
+        // (In this test rather than one of its own: the job runs once per date, and a second test
+        // could not run today's report again.)
+        long declined = createProduct("Declined Camera", "6000.00", 10);
+        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(declined, 2), CartResponse.class);
+        OrderResponse cancelled = shopper.postForObject("/api/orders", null, OrderResponse.class);
+        assertThat(cancelled).isNotNull();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> assertThat(
+                        shopper.getForObject("/api/orders/" + cancelled.id(), OrderResponse.class).status())
+                .isEqualTo(OrderStatus.CANCELLED));
 
         LocalDate today = LocalDate.now();
         JobExecutionResponse execution = batchService.runSalesReport(today);
@@ -129,6 +150,9 @@ class SalesReportJobIT extends IntegrationTest {
         assertThat(report.get(1)).isEqualTo("# date," + today);
         assertThat(orderCount(report)).isGreaterThanOrEqualTo(3);
         assertThat(report.get(4)).isEqualTo("product_id,product_name,units_sold,revenue");
+
+        assertThat(report).as("a cancelled order is not a best seller")
+                .noneMatch(line -> line.contains(PREFIX + "Declined Camera"));
 
         // The chunk step's rows: units summed across orders, revenue as unit price times quantity.
         assertThat(report).anyMatch(line ->

@@ -1,6 +1,8 @@
 package com.ecomdemo.messaging.internal;
 
 import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.outbox.internal.OutboxEvent;
+import com.ecomdemo.outbox.internal.OutboxEventRepository;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Instant;

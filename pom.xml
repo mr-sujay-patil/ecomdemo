@@ -41,10 +41,12 @@
 	-->
 	<modules>
 		<module>common</module>
+		<module>outbox</module>
 		<module>inventory-service</module>
 		<module>catalog-service</module>
 		<module>customer-service</module>
 		<module>notification-service</module>
+		<module>payment-service</module>
 		<module>gateway-service</module>
 		<module>ecomdemo-app</module>
 	</modules>

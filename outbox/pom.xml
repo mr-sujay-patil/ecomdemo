@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>com.ecomdemo</groupId>
+		<artifactId>ecomdemo-parent</artifactId>
+		<version>0.0.1-SNAPSHOT</version>
+	</parent>
+
+	<artifactId>ecomdemo-outbox</artifactId>
+	<name>ecomdemo-outbox</name>
+	<description>Reliable messaging for every service that takes part in the saga: the transactional outbox, the idempotent consumer, and dead-lettering</description>
+
+	<!--
+		A LIBRARY, born in Phase 24, and NOT part of `common` on purpose.
+
+		Until this phase only ecomdemo-app had an outbox. The saga gives inventory-service and
+		payment-service the same problem the app solved in Phase 18 - "change my database AND
+		announce it, or neither" - and copying ~600 lines of subtle code into two more services
+		would be three places to fix the next bug.
+
+		It is its own module rather than a package in `common` because of what it DRAGS IN: JPA and
+		Kafka. `common` is on the gateway's classpath too, which has neither a database nor a
+		broker, and `common`'s pom already explains why a library should not make every service pay
+		for the heaviest dependency. Here the dependency list IS the price of admission: a service
+		that depends on this module has said "I have a database and I publish events".
+	-->
+
+	<dependencies>
+		<!-- The outbox_event and processed_event entities, their repositories, @Transactional. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-jpa</artifactId>
+		</dependency>
+
+		<!-- The relay's producer, and the dead-letter error handler for saga listeners. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-kafka</artifactId>
+		</dependency>
+
+		<!--
+			JACKSON 2, declared on purpose. The payload is written with spring-kafka's
+			`JacksonUtils.enhancedObjectMapper()` because the consumers read with spring-kafka's
+			Jackson 2 `JsonDeserializer` (Outbox's class comment explains why the two must match).
+			Until Phase 24 the app only had Jackson 2 by ACCIDENT, through springdoc's swagger-core.
+			jsr310 is what makes that mapper write an `Instant` as the consumer expects; without it
+			on the classpath the mapper silently falls back to something else. Versions come from
+			Boot's dependency management.
+		-->
+		<dependency>
+			<groupId>com.fasterxml.jackson.core</groupId>
+			<artifactId>jackson-databind</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>com.fasterxml.jackson.datatype</groupId>
+			<artifactId>jackson-datatype-jsr310</artifactId>
+		</dependency>
+
+		<!--
+			OutboxTracing stores and restores the caller's `traceparent` (Phase 23). It needs only
+			the Micrometer Tracing API; the service's own OpenTelemetry starter supplies the bridge.
+		-->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-tracing</artifactId>
+		</dependency>
+
+		<!-- @ApplicationModule on the package, which ModularityTest reads from the app's side. -->
+		<dependency>
+			<groupId>org.springframework.modulith</groupId>
+			<artifactId>spring-modulith-api</artifactId>
+			<version>${spring-modulith.version}</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- OutboxTracingTest runs the REAL OpenTelemetry SDK, not a mock of it. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-opentelemetry</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<!-- Resolves the Mockito agent that surefire's argLine points at (see common's pom). -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-dependency-plugin</artifactId>
+			</plugin>
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+</project>

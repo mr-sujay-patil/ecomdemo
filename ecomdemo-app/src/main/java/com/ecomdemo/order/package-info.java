@@ -16,8 +16,11 @@
  * all.</strong> Every value an order line needs is already in the cart, so order-service will be
  * able to place an order without calling catalog-service - the price charged is the price the
  * shopper was shown, and no network hop stands between the two.
+ *
+ * <p><strong>Phase 24</strong> added {@code outbox}: the saga's replies are received here, and
+ * each is claimed through {@code ProcessedEvents} so a redelivery cannot confirm or cancel twice.
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Order",
-        allowedDependencies = {"cart", "clients :: inventory", "jwt", "messaging", "metrics", "shared"})
+        allowedDependencies = {"cart", "clients :: inventory", "jwt", "messaging", "metrics", "outbox", "shared"})
 package com.ecomdemo.order;

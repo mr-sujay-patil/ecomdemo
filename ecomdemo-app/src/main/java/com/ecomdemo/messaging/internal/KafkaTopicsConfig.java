@@ -68,4 +68,26 @@ public class KafkaTopicsConfig {
                 .replicas(REPLICAS)
                 .build();
     }
+
+    /**
+     * The saga's first topic (Phase 24): a checkout created a PENDING order. inventory-service
+     * reads it. Keyed by order id, three partitions, like {@code orders.placed} - and for the same
+     * reason: one order's events stay in order, different orders run in parallel.
+     */
+    @Bean
+    NewTopic ordersCreatedTopic() {
+        return TopicBuilder.name(KafkaTopics.ORDERS_CREATED)
+                .partitions(PARTITIONS)
+                .replicas(REPLICAS)
+                .build();
+    }
+
+    /** Its dead-letter topic, declared here because this service is the publisher (one owner). */
+    @Bean
+    NewTopic ordersCreatedDltTopic() {
+        return TopicBuilder.name(KafkaTopics.ORDERS_CREATED + KafkaTopics.DLT_SUFFIX)
+                .partitions(1)
+                .replicas(REPLICAS)
+                .build();
+    }
 }

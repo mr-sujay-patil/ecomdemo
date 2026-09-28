@@ -52,6 +52,7 @@ class OpenApiDocumentationTest {
             "/api/cart/items/{productId}",
             "/api/orders",
             "/api/orders/{id}",
+            "/api/orders/{id}/status",
             "/api/admin/batch/product-import",
             "/api/admin/batch/executions/{id}",
             "/api/admin/batch/executions/{id}/restart");
@@ -231,6 +232,7 @@ class OpenApiDocumentationTest {
         assertThat(requiresAuth("/api/cart", "get")).as("viewing the cart").isTrue();
         assertThat(requiresAuth("/api/orders", "post")).as("checking out").isTrue();
         assertThat(requiresAuth("/api/orders/{id}", "get")).as("reading one order").isTrue();
+        assertThat(requiresAuth("/api/orders/{id}/status", "get")).as("reading an order's status").isTrue();
         assertThat(requiresAuth("/api/admin/batch/product-import", "post"))
                 .as("an administrator's import")
                 .isTrue();

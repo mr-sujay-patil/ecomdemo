@@ -69,6 +69,12 @@ scrape_configs:
         labels:
           service: notification-service
 
+      # payment-service, added in Phase 24. Like notification-service, no business API: a payment is
+      # started by an event, so its metrics (and its logs) are how to see it working.
+      - targets: ["payment-service:8086"]
+        labels:
+          service: payment-service
+
       # gateway-service, added in Phase 21. Scraped on 8080 IN-NETWORK, which is also the port it
       # publishes - unlike the application, whose host mapping moved to 8084 while its container port
       # stayed 8080, so the target above needed no edit.

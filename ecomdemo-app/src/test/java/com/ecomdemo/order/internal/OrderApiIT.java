@@ -2,16 +2,19 @@ package com.ecomdemo.order.internal;
 
 import com.ecomdemo.order.OrderStatus;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartResponse;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.order.dto.OrderItemResponse;
 import com.ecomdemo.order.dto.OrderResponse;
+import com.ecomdemo.order.dto.OrderStatusResponse;
 import com.ecomdemo.clients.catalog.ProductWrite;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
@@ -20,6 +23,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -95,8 +99,22 @@ class OrderApiIT extends IntegrationTest {
         return current.stockQuantity();
     }
 
+    /** Polls the status endpoint - what a client does after checkout - until the saga decides. */
+    private OrderStatusResponse awaitDecided(long orderId) {
+        AtomicReference<OrderStatusResponse> decided = new AtomicReference<>();
+        await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
+            ResponseEntity<OrderStatusResponse> status =
+                    shopper.getForEntity("/api/orders/" + orderId + "/status", OrderStatusResponse.class);
+            assertThat(status.getStatusCode()).isEqualTo(HttpStatus.OK);
+            assertThat(status.getBody()).isNotNull();
+            assertThat(status.getBody().status()).isNotEqualTo(OrderStatus.PENDING);
+            decided.set(status.getBody());
+        });
+        return decided.get();
+    }
+
     @Test
-    @DisplayName("a checkout creates the order, empties the cart and reduces the stock")
+    @DisplayName("a checkout creates a PENDING order, empties the cart, and the saga confirms it and takes the stock")
     void placeOrderEndToEnd() {
         ProductSnapshot headset = product("IT Headset", "89.00", 5);
         shopper.postForEntity("/api/cart/items", new AddCartItemRequest(headset.id(), 2), CartResponse.class);
@@ -107,13 +125,20 @@ class OrderApiIT extends IntegrationTest {
         OrderResponse placed = response.getBody();
         assertThat(placed).isNotNull();
         assertThat(placed.id()).isNotNull();
-        assertThat(placed.status()).isEqualTo(OrderStatus.PLACED);
+        // Accepted, not yet decided: the saga (Phase 24) settles stock and payment afterwards.
+        assertThat(placed.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(placed.totalAmount()).isEqualByComparingTo("178.00");
         assertThat(placed.items()).hasSize(1);
         assertThat(placed.items().getFirst().quantity()).isEqualTo(2);
         assertThat(placed.placedAt()).isNotNull();
 
         assertThat(cart().items()).isEmpty();
+
+        // Phase 24: the stock is taken by the saga, after checkout has returned - so the test does
+        // what a client does, and polls the status until the order is decided.
+        OrderStatusResponse decided = awaitDecided(placed.id());
+        assertThat(decided.status()).isEqualTo(OrderStatus.CONFIRMED);
+        assertThat(decided.reason()).isNull();
         assertThat(stockOf(headset.id())).isEqualTo(3);
 
         // Read the order back through its own endpoint: proof it was committed, not just built.
@@ -125,6 +150,27 @@ class OrderApiIT extends IntegrationTest {
         assertThat(fetched.getBody().items())
                 .extracting(OrderItemResponse::productName)
                 .containsExactly("IT Headset");
+    }
+
+    @Test
+    @DisplayName("a declined payment CANCELS the order, says why, and gives the stock back")
+    void declinedPaymentCompensates() {
+        // 2 x 6,000.00 = 12,000.00, above the (fake) payment provider's 10,000.00 limit. Stock is
+        // reserved first and then released again: the saga's failure path, end to end over Kafka.
+        ProductSnapshot camera = product("IT Cinema Camera", "6000.00", 4);
+        shopper.postForEntity("/api/cart/items", new AddCartItemRequest(camera.id(), 2), CartResponse.class);
+
+        ResponseEntity<OrderResponse> response = shopper.postForEntity("/api/orders", null, OrderResponse.class);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().status()).isEqualTo(OrderStatus.PENDING);
+
+        OrderStatusResponse decided = awaitDecided(response.getBody().id());
+        assertThat(decided.status()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(decided.reason()).startsWith("Payment declined: 12000.00 exceeds the limit");
+        assertThat(decided.changedAt()).isNotNull();
+        // Consistent at the end, which is the whole claim of a saga: nothing sold, nothing held.
+        assertThat(stockOf(camera.id())).isEqualTo(4);
     }
 
     @Test
@@ -188,6 +234,13 @@ class OrderApiIT extends IntegrationTest {
         }
 
         // The single unit was sold once: stock is 0, never -1, and exactly one order holds it.
+        // Since Phase 24 the unit is taken by the saga, so wait for the winning order to be
+        // decided first.
+        ResponseEntity<OrderResponse[]> placedOrders = shopper.getForEntity("/api/orders", OrderResponse[].class);
+        assertThat(placedOrders.getBody()).isNotNull();
+        List.of(placedOrders.getBody()).stream()
+                .filter(order -> order.items().stream().anyMatch(item -> item.productId().equals(lastOne.id())))
+                .forEach(order -> assertThat(awaitDecided(order.id()).status()).isEqualTo(OrderStatus.CONFIRMED));
         assertThat(stockOf(lastOne.id())).isZero();
 
         ResponseEntity<OrderResponse[]> orders = shopper.getForEntity("/api/orders", OrderResponse[].class);

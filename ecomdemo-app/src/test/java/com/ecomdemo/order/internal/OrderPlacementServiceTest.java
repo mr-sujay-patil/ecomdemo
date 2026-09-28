@@ -24,6 +24,7 @@ import com.ecomdemo.cart.Cart;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.shared.ConflictException;
 import com.ecomdemo.shared.InsufficientStockException;
+import com.ecomdemo.messaging.OrderCreatedEvent;
 import com.ecomdemo.messaging.OrderPlacedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderItemResponse;
@@ -75,7 +76,8 @@ class OrderPlacementServiceTest {
     private CartService cartService;
 
     /**
-     * Mocked since Phase 20, where {@code TestData.product} was real.
+     * Mocked since Phase 20, where {@code TestData.product} was real. Since Phase 24 checkout only
+     * READS from it (the pre-check); the tests below verify that it never reserves or releases.
      *
      * <p>Stock left {@code ProductSnapshot} for {@code product_stock}, so there is no field on the entity
      * for a real {@code InventoryClient} to change and nothing for an assertion to read back. The
@@ -131,7 +133,7 @@ class OrderPlacementServiceTest {
     private ArgumentCaptor<Order> orderCaptor;
 
     @Test
-    void placeOnce_whenEveryLineIsInStock_savesTheOrderReducesStockAndEmptiesTheCart() {
+    void placeOnce_whenEveryLineIsInStock_savesAPendingOrderStartsTheSagaAndEmptiesTheCart() {
         // Given: 2 x 1500.00 plus 3 x 100.50
         ProductSnapshot lamp = TestData.product(10L, "Lamp", "1500.00");
         ProductSnapshot cable = TestData.product(11L, "Cable", "100.50");
@@ -147,16 +149,26 @@ class OrderPlacementServiceTest {
         OrderResponse placed = placementService.placeOnce();
 
         // Then
-        assertThat(placed.status()).isEqualTo(OrderStatus.PLACED);
+        // PENDING since Phase 24: checkout no longer knows whether stock and payment will come
+        // through - the saga decides, and its replies move the order on.
+        assertThat(placed.status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(placed.statusReason()).isNull();
         assertThat(placed.totalAmount()).isEqualByComparingTo("3301.50");
         assertThat(placed.items())
                 .extracting(OrderItemResponse::productId, OrderItemResponse::quantity)
                 .containsExactly(tuple(10L, 2), tuple(11L, 3));
-        // The arithmetic moved to InventoryServiceTest with the column. What checkout is
-        // responsible for is asking for the right reservation for each line - the id, the name the
-        // error message would need, and the quantity - and asking exactly once per line.
-        verify(inventory).reserve(10L, "Lamp", 2);
-        verify(inventory).reserve(11L, "Cable", 3);
+        // Until Phase 24 checkout reserved each line over HTTP, and this test verified one
+        // reserve() per line. Checkout now takes NO stock: what it owes inventory is the right
+        // lines in OrderCreatedEvent - the id, the name a rejection message needs, and the
+        // quantity - which inventory-service reserves when it reads the event.
+        ArgumentCaptor<OrderCreatedEvent> created = ArgumentCaptor.forClass(OrderCreatedEvent.class);
+        verify(outbox).append(created.capture());
+        assertThat(created.getValue().lines()).containsExactly(
+                new OrderCreatedEvent.Line(10L, "Lamp", 2),
+                new OrderCreatedEvent.Line(11L, "Cable", 3));
+        assertThat(created.getValue().totalAmount()).isEqualByComparingTo("3301.50");
+        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
+        verify(inventory, never()).release(anyLong(), anyInt());
         verify(cartService).clearCart(cart);
     }
 
@@ -236,9 +248,12 @@ class OrderPlacementServiceTest {
         assertThatThrownBy(() -> placementService.placeOnce())
                 .isInstanceOf(InsufficientStockException.class);
 
-        // The point of the test, restated for the split: checking every line BEFORE reserving any
-        // is what stops a short cart leaving a partial reduction behind. Nothing was reserved.
+        // The point of the test, restated for the saga: a short cart is refused before anything is
+        // written - no order, and no OrderCreatedEvent, so inventory never hears of it and
+        // reserves nothing for it.
         verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
+        verify(orderRepository, never()).save(any());
+        verifyNoInteractions(outbox);
     }
 
     @Test
@@ -316,11 +331,15 @@ class OrderPlacementServiceTest {
     }
 
     @Test
-    void placeOnce_whenTheOrderIsPlaced_appendsItToTheOutbox() {
+    void placeOnce_whenTheOrderIsCreated_appendsOrderCreatedToTheOutbox() {
         // The event goes into the outbox inside the order's transaction, so this assertion is
         // about what was recorded and not about Kafka. The event id is generated here, once, and
         // travels with the message - which is what lets the consumer recognise a redelivery (see
-        // NotificationServiceTest), and what lets the relay republish a row safely.
+        // InventorySagaTest), and what lets the relay republish a row safely.
+        //
+        // Phase 24: the event is OrderCreated, the saga's first step. OrderPlaced - the one
+        // notification-service thanks the shopper for - is no longer written at checkout but on
+        // confirmation (OrderSagaHandlerTest), so it cannot thank anyone for a cancelled order.
         ProductSnapshot product = TestData.product(1L, "Desk Lamp", "1200.00");
         when(cartService.currentCart()).thenReturn(TestData.cartWith(1L, product, 2));
         when(currentUser.id()).thenReturn(SHOPPER.id());
@@ -329,12 +348,13 @@ class OrderPlacementServiceTest {
 
         placementService.placeOnce();
 
-        ArgumentCaptor<OrderPlacedEvent> captor = ArgumentCaptor.forClass(OrderPlacedEvent.class);
+        ArgumentCaptor<OrderCreatedEvent> captor = ArgumentCaptor.forClass(OrderCreatedEvent.class);
         verify(outbox).append(captor.capture());
-        OrderPlacedEvent appended = captor.getValue();
+        OrderCreatedEvent appended = captor.getValue();
         assertThat(appended.username()).isEqualTo(SHOPPER.username());
-        assertThat(appended.itemCount()).isEqualTo(1);
+        assertThat(appended.lines()).hasSize(1);
         assertThat(appended.eventId()).isNotNull();
+        verify(outbox, never()).append(any(OrderPlacedEvent.class));
     }
 
     @Test

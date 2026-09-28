@@ -1,8 +1,10 @@
 package com.ecomdemo.shared;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
+import java.util.UUID;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.MigrationInfo;
@@ -11,6 +13,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
@@ -94,13 +98,13 @@ class FlywayMigrationTest {
     }
 
     @Test
-    @DisplayName("V1 to V17 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V19 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -151,7 +155,9 @@ class FlywayMigrationTest {
                 "drop product",
                 "cart and orders hold a user id",
                 "drop users notifications and processed events",
-                "outbox event trace parent");
+                "outbox event trace parent",
+                "processed event for saga replies",
+                "order saga states");
     }
 
     @Test
@@ -193,12 +199,13 @@ class FlywayMigrationTest {
     // that no foreign key enforces it.
 
     @Test
-    @DisplayName("V16 dropped accounts, notifications and the ledger - other services own them")
+    @DisplayName("V16 dropped accounts and notifications - other services own them")
     void dropsTheTablesOtherServicesOwn() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        // Three leftover copies would be three sources of confidently wrong answers: accounts that
-        // cannot log in, notifications nobody sent, and a ledger that deduplicates nothing.
+        // Leftover copies would be sources of confidently wrong answers: accounts that cannot log
+        // in, and notifications nobody sent. (V16 dropped `processed_event` too; V18 brought it
+        // back as this service's OWN ledger for the saga's replies - asserted below.)
         // `table_schema = 'PUBLIC'` is not optional, and leaving it out cost a diagnosis: H2 has its
         // OWN INFORMATION_SCHEMA.USERS, so the unqualified query reported that the application still
         // had a users table when it had dropped it perfectly well. A schema-less catalogue query
@@ -206,10 +213,50 @@ class FlywayMigrationTest {
         assertThat(jdbc.queryForObject(
                         "SELECT count(*) FROM information_schema.tables "
                                 + "WHERE table_schema = 'PUBLIC' AND upper(table_name) IN "
-                                + "('USERS', 'NOTIFICATION', 'PROCESSED_EVENT')",
+                                + "('USERS', 'NOTIFICATION')",
                         Integer.class))
                 .as("this database must keep no copy of another service's table")
                 .isZero();
+    }
+
+    @Test
+    @DisplayName("V19 allows exactly the saga's three states, and no longer PLACED")
+    void ordersHaveTheSagaStates() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        String insert = "INSERT INTO orders (placed_at, status, total_amount, user_id, username) "
+                + "VALUES (CURRENT_TIMESTAMP, ?, 0, 1, 'flyway-test')";
+
+        try {
+            for (String state : List.of("PENDING", "CONFIRMED", "CANCELLED")) {
+                assertThat(jdbc.update(insert, state)).isEqualTo(1);
+            }
+            // V19 rewrote every PLACED row to CONFIRMED and then forbade the word, so nothing can
+            // bring the pre-saga status back.
+            assertThatThrownBy(() -> jdbc.update(insert, "PLACED"))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+        } finally {
+            jdbc.update("DELETE FROM orders WHERE username = 'flyway-test'");
+        }
+    }
+
+    @Test
+    @DisplayName("V18 gives the order service its own processed_event, keyed by the event id")
+    void recreatesProcessedEventForTheSaga() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        UUID eventId = UUID.randomUUID();
+        String insert =
+                "INSERT INTO processed_event (event_id, event_type) VALUES (?, 'PaymentCompletedEvent')";
+
+        jdbc.update(insert, eventId);
+        try {
+            // The primary key IS the deduplication: a second delivery of the same event cannot be
+            // recorded, whatever the Java code in front of it does.
+            assertThatThrownBy(() -> jdbc.update(insert, eventId))
+                    .isInstanceOf(DuplicateKeyException.class);
+        } finally {
+            // Not a transactional test, and the context is shared: leave the table as found.
+            jdbc.update("DELETE FROM processed_event WHERE event_id = ?", eventId);
+        }
     }
 
     @Test

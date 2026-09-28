@@ -8,34 +8,45 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 23: Distributed Tracing — one checkout, one trace, across every service it touches.**
+**Phase 24: Distributed Transactions — checkout is a saga across three services, and both of
+its endings are consistent.**
 
 | Service | Owns | Port |
 |---|---|---|
 | `gateway-service` | the only door: routing, JWT at the edge, rate limiting, CORS (Phase 21) | **8080** |
-| `ecomdemo-app` | carts, orders, the outbox, the batch jobs | 8084 |
+| `ecomdemo-app` | carts, orders, the batch jobs; starts and finishes the checkout saga | 8084 |
 | `catalog-service` | products, and the Redis cache that serves them | 8081 |
-| `inventory-service` | stock, and the only code that may change one | 8082 |
+| `inventory-service` | stock, and the only code that may change one; the saga's reservation step | 8082 |
 | `customer-service` | accounts — the only place a password is checked or a token issued | 8083 |
 | `notification-service` | notifications. Nobody calls it; it reacts to a topic | 8085 |
+| `payment-service` | a **mock** payment provider: the saga's third step (Phase 24) | 8086 |
 
-A database each; eighteen containers. Clients use **8080 only**; 8084 is for looking at the
+A database each; twenty containers. Clients use **8080 only**; 8084 is for looking at the
 application's own actuator.
 
-**What Phase 23 changed.** Every service now records **traces** with OpenTelemetry and sends them to
-**Tempo**. Place an order and Grafana shows it as one tree of timed steps: the gateway, the application,
-inventory-service's reservation, and then, through the outbox and Kafka, notification-service
-consuming the event. Every log line carries the `traceId`, and Grafana links logs and traces both ways.
+**What Phase 24 changed.** Checkout used to reserve stock over HTTP and undo it by hand if its own
+transaction failed. It is now a **choreographed saga over Kafka**: the order is saved **PENDING**
+and `POST /api/orders` answers 201 at once; inventory-service reserves the stock, payment-service
+charges for it, and their replies move the order to **CONFIRMED** or **CANCELLED**. Poll
+`GET /api/orders/{id}/status` for the outcome.
 
-- The trace survives **the outbox**: the event's row stores the checkout's `traceparent`, and the relay
-  restores it before sending, so the Kafka half joins the same trace.
-- **Sampling is decided once, at the gateway**, and every service behind it follows that decision
-  (10% by default, 100% in compose).
-- Health checks, metric scrapes, Spring Security's internals and the outbox relay's idle tick are
-  **not** traced: they buried the real traffic.
+- **Compensation:** if payment is declined, inventory-service gives the reserved stock back.
+  Force it by buying more than 10,000.00 (`PAYMENT_DECLINE_ABOVE`).
+- **Every step is one local transaction:** it claims the event (`processed_event`), changes its
+  data, and writes its outbox row. The outbox is now a shared Maven module, `outbox`, used by three
+  services.
+- **Semantic locks:** only a PENDING order can move, and only once. `stock_reservation` records
+  what each order holds, so the compensation knows what to return.
+- The thank-you notification is sent on **confirmation**, and the sales report counts **confirmed**
+  orders only.
 
-See [Distributed tracing](#distributed-tracing) below. Tempo's API is on **3200**; Prometheus is on
-**19090** on the host (Windows reserves a port range around 9090).
+See [Distributed transactions (the saga)](#distributed-transactions-the-saga) below, and
+[`docs/architecture/saga.md`](docs/architecture/saga.md) for the full design and the
+**orchestration** alternative.
+
+Still true from Phase 23: one checkout is one trace, now through all five services it touches,
+saga included. Tempo is on **3200**; Prometheus is on **19090** on the host (Windows reserves a
+port range around 9090). See [Distributed tracing](#distributed-tracing).
 
 Still true from Phase 22: every call from `ecomdemo-app` to catalog-service goes through a timeout,
 bulkhead, circuit breaker and (for reads) retry. Stop catalog-service and add-to-cart fails fast with a
@@ -43,9 +54,6 @@ bulkhead, circuit breaker and (for reads) retry. Stop catalog-service and add-to
 
 Still true from Phase 20, and worth knowing:
 
-- **Checkout is a saga.** Reserving stock is an HTTP call, so it cannot share the order's transaction.
-  A rollback after a successful reservation triggers a compensating *release* — and that call can
-  itself fail, leaving stock reserved for an order that never existed. Logged, and not reconciled.
 - **The catalogue's stock figure is eventually consistent.** Stale display, correct sale.
 - **Nothing guarantees a cart belongs to a real account any more** — a foreign key cannot span two
   databases.
@@ -53,7 +61,7 @@ Still true from Phase 20, and worth knowing:
 - Tokens are **HS256 with a shared key**: only customer-service issues them by convention, not by
   constraint. Asymmetric keys and a JWKS endpoint are the honest fix.
 
-See [`docs/test-reports/phase-23.md`](docs/test-reports/phase-23.md).
+See [`docs/test-reports/phase-24.md`](docs/test-reports/phase-24.md).
 
 <details>
 <summary>Phase 14: Batch Processing</summary>
@@ -2465,6 +2473,87 @@ curl -s http://localhost:3200/api/v2/traces/$TRACE | head -c 300; echo
 Or open Grafana at **http://localhost:3000**, go to *Explore → Tempo → Search*, and place an order.
 Its trace shows the gateway, the application, inventory-service, then, a second later, the outbox
 relay, the Kafka send and notification-service's consumer.
+
+## Distributed transactions (the saga)
+
+A checkout changes data in three databases: the order (ecomdemo-app), the stock
+(inventory-service) and the payment (payment-service). No transaction spans all three. Phase 24
+makes them consistent anyway, with a **saga**: a chain of local transactions in which every step
+publishes an event that triggers the next, and a failure later in the chain is undone by a
+**compensating transaction** earlier in it. The full design, with a sequence diagram, is in
+[`docs/architecture/saga.md`](docs/architecture/saga.md).
+
+### Why not two-phase commit
+
+2PC makes databases commit together by having a coordinator ask each to *prepare* and then to
+*commit*. A prepared participant keeps its locks until the coordinator answers. So one slow or dead
+coordinator freezes the stock row of a popular product, and every service must be up for any
+checkout to finish. Kafka cannot take part in it either. A saga trades atomicity for availability:
+each step commits on its own, the system is briefly in between, and it always ends consistent.
+
+### The chain
+
+```
+POST /api/orders ─▶ order PENDING ──orders.created──▶ inventory: reserve all lines (or none)
+                                                     │
+      ┌──────────inventory.stock-rejected────────────┤ none fit
+      ▼                                              │ all fit
+  CANCELLED                              inventory.stock-reserved
+                                                     ▼
+                                        payment: charge the total (mock)
+                 ┌──────────payments.completed───────┤─────────payments.failed──────────┐
+                 ▼                                                                      ▼
+   CONFIRMED + orders.placed (thank-you)                  CANCELLED   +   inventory RELEASES the stock
+```
+
+Every step is **one local transaction** with the same three parts:
+
+- the **claim**: `processed_event`, keyed by the event's own id, so a redelivery does nothing;
+- the **change**: the order's status, the stock, or the payment row;
+- the **announcement**: an outbox row for the next step.
+
+Leave out the claim and a redelivered event does the work twice. Leave out the announcement and
+the saga stops dead. Split them into two transactions and one can commit without the other.
+The same code does this in all three services: Phase 18's outbox, moved into a shared Maven
+module (`outbox`), plus `ProcessedEvents` and a dead-letter error handler.
+
+### Choreography, not orchestration
+
+Nobody coordinates. Each service reacts to the events it cares about. When payment is declined,
+the order service cancels the order and inventory-service gives the stock back, **independently**,
+because both read `payments.failed`.
+
+The alternative is an **orchestrator**: one class in the order service holding each order's step
+in a table and sending *commands* (`reserve`, `charge`, `release`) instead of reacting to events.
+It makes the flow visible in one place and gives timeouts an owner, at the cost of coupling every
+participant to it. [`docs/architecture/saga.md`](docs/architecture/saga.md#the-alternative-orchestration)
+compares the two.
+
+### Semantic locks, and what "eventually" means here
+
+- An order is **PENDING** until the saga decides. Only PENDING can move, and only once: the move is
+  a conditional `UPDATE … WHERE status = 'PENDING'`, so a late or duplicate reply changes nothing.
+  The sales report ignores PENDING and CANCELLED orders.
+- `stock_reservation` rows marked **RESERVED** are held for an undecided order: not sold, not
+  available.
+- Checkout still **pre-checks** stock, so an obviously short cart gets an instant 409. That check
+  is a courtesy, not a guarantee: two shoppers can both pass it for the last unit, and then the
+  reservation (made against a locked row) gives it to one and cancels the other.
+
+### Watch it
+
+```bash
+docker compose up --build --wait
+# Log in as a customer (see "Accounts and logging in"), put 2 x a 6,000.00 product in the cart,
+# then:
+curl -s -X POST localhost:8080/api/orders -H "Authorization: Bearer $TOKEN"        # 201, PENDING
+curl -s localhost:8080/api/orders/<id>/status -H "Authorization: Bearer $TOKEN"    # CANCELLED,
+# "Payment declined: 12000.00 exceeds the limit of 10000.00", and the stock is back.
+```
+
+In Grafana's Tempo view the same checkout is one trace across the gateway, the order service,
+inventory-service, payment-service and back. The smoke test's **Saga** section runs both endings
+and a two-buyers-one-unit race, and checks the rows in all three databases.
 
 ## Code quality
 
