@@ -8,7 +8,7 @@
 - **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES — Docker Desktop's WSL integration dropped mid-session (`docker` not found)
+- **Waiting for user:** NO
 
 ## Fix-branch merge verification (PR #36) — PASSED, no tag (not a phase)
 Merged as a merge commit `c232a27` (2 parents); 0 missing commits, 0 diffs, branch alive; CI green;
@@ -41,7 +41,7 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 ## Next action
 `verify` GREEN on 2026-09-28 (stale Flyway V17 + LOG_FORMAT-location tests fixed). `ModularityTest` regenerates
 `docs/modules/*` (new `tracing` module) - uncommitted, review and commit with the phase.
-Once `docker info` works again: `docker compose up --build --wait -d`, run `scripts/smoke-test.sh`,
+Docker works again (29.8.0). Next: `docker compose up --build --wait -d`, run `scripts/smoke-test.sh`,
 fix the new "Distributed tracing" section until green (expected services in a checkout trace:
 gateway-service, ecomdemo, inventory-service, notification-service, probably catalog-service). Then
 check the gateway's log lines carry `traceId`; then the full testing protocol.
