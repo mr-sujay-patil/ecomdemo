@@ -35,7 +35,7 @@ on main PASS, `verify` 539/0/0/0 PASS, cold compose smoke FAILED twice (368/1/0:
 orders-per-minute query returns data", a first-order vs. second-scrape race). NOT tagged. Fix on this
 branch: the check polls up to 45s; cold runs 369/0/0 twice (the user's .env now has
 AI_CHAT_PROVIDER=ollama, so the model check runs for real: 369 fresh, 370 kept volumes).
-STOPPED at the follow-up PR. On `approved, merge it`: `gh pr merge <n> --merge`. On `merged,
+STOPPED at the follow-up PR #44 (https://github.com/mr-sujay-patil/ecomdemo/pull/44). On `approved, merge it`: `gh pr merge <n> --merge`. On `merged,
 continue`: rerun merge verification (git checks, CI, verify, cold smoke on a COPY), tag
 `phase-27-complete`, then Phase 28 (semantic search).
 
