@@ -3,54 +3,60 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-28
-- **Phase:** 28 — Semantic Search (pgvector)
-- **Branch:** feature/phase-28-semantic-search (cut from `main` at `1106b0d`)
-- **Step:** PR_OPEN
+- **Phase:** 29 — AI Shopping Assistant (RAG + tool calling)
+- **Branch:** feature/phase-29-ai-assistant (cut from `main` at `5fb6ac1`)
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #45 https://github.com/mr-sujay-patil/ecomdemo/pull/45
-- **Waiting for user:** YES - review of the Phase 28 PR
+- **PR:** none yet
+- **Waiting for user:** NO
 
 ## Merge verification before this phase — PASSED
-- Phase 27: PR #43 (`190f782`) + follow-up PR #44 (`1106b0d`, the smoke dashboard-query poll). First
-  verification FAILED (cold smoke 368/1/0 twice, the dashboard query race) → fixed in #44. Second: git
-  checks PASS (0 missing, 0 diffs, branch alive), CI on main green (run 36456544229), `verify` 539/0/0/0,
-  cold compose smoke 369/0/0 (the user's `.env` has AI_CHAT_PROVIDER=ollama). Tagged `phase-27-complete`.
+- Phase 28: PR #45 merged as `5fb6ac1` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
+  locally and on GitHub. CI on main green (run 36466418725). `verify` on main 570/0/0/0. Cold compose
+  (down -v, --build) smoke on a COPY 385/0/0 (the user's `.env` now sets AI_EMBEDDING_PROVIDER=ollama too).
+  Tagged `phase-28-complete`.
 
-## Design (decided at the start; see decisions.md when written)
-- catalog-db image → `pgvector/pgvector:0.8.6-pg18-trixie` (compose, k8s, catalog's Testcontainer).
-  Debian vs Alpine collation → V4 REINDEXes `idx_product_name`, `idx_product_category`.
-- `product_embedding` (id = product id, FK ON DELETE CASCADE, content, metadata json, vector(768), HNSW
-  cosine). PgVectorStore built BY HAND only when an EmbeddingModel exists (`spring.ai.vectorstore.type=none`),
-  like Phase 27's ChatClient. `AI_EMBEDDING_PROVIDER` openai (text-embedding-3-small @768) | ollama
-  (nomic-embed-text, 768) | none (default).
-- Sync: ProductChanged{productId} via the shared outbox (`@EnableOutbox`) in every write transaction →
-  topic `catalog.product-changed` → catalog's own indexer (own group) re-embeds CURRENT state or deletes.
-- Backfill: Spring Batch job (`spring-boot-starter-batch-jdbc`), ADMIN `POST /api/products/embeddings/backfill`.
-- `GET /api/products/search?q=&category=&minPrice=&maxPrice=&limit=` (public GET at the gateway).
+## Design (decided at the start; decisions.md entries to write)
+- New module `assistant-service` (port 8087), NO database: Redis holds memory and pending actions.
+- `POST /api/assistant/chat {conversationId?, message}` -> `{conversationId, answer, sources[], pendingAction?}`;
+  `POST /api/assistant/actions/{id}/confirm` does the cart write. Gateway: `/api/assistant/**` CUSTOMER,
+  route before the `app` catch-all.
+- The assistant acts AS THE USER: every downstream call carries the caller's own JWT (catalog search,
+  app orders/cart); no service token, no userId argument on any tool. The owner service decides.
+- Tools: `searchProducts` (catalog `/api/products/search`), `getOrderStatus` (app `/api/orders/{id}/status`;
+  403 and 404 both answer "not an order on your account"), `addToCart` = PROPOSE only (pending action in
+  Redis, TTL 10 min); the user confirms outside the model.
+- RAG over policies: `resources/policies/*.md`, chunked by `##`, embedded lazily into an in-memory
+  SimpleVectorStore (tiny corpus shipped in the jar), top-k above a threshold into the system prompt, cited
+  in `sources`. Needs BOTH a chat and an embedding model; otherwise 503 with setup steps.
+- Memory: own `ChatMemoryRepository` on StringRedisTemplate (the Spring AI Redis one pulls Jedis + gson +
+  a search index), key `assistant:memory:{user}:{conversationId}`, TTL; MessageWindowChatMemory.
+- Guardrails: store topics only (fixed refusal sentence), grounded answers, input size limit, identity
+  from the token only, memory per user, confirmation for writes.
+- Evaluation: ~10 cases in `scripts/assistant-eval.json`, run by `scripts/assistant-eval.py` against
+  the live stack (deterministic checks: expected facts, tool/sources used, refusals, no leak).
+- Registration points: root pom, Dockerfile, compose, prometheus, alloy, k8s (kustomization, service,
+  ConfigMap, k8s-up), ContainerMemoryBudgetTest (7 -> 8), README.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [x] pgvector extension + product_embedding (Flyway V4), images switched
-- [x] Embedding provider config; vector store only when configured; 503 otherwise
-- [x] Embeddings on create/update (outbox → Kafka → indexer), delete handled
-- [x] Spring Batch backfill + endpoint
-- [x] `GET /api/products/search` with metadata filters
-- [x] Tests (unit, IT with a deterministic fake embedding model, e2e through Kafka)
-- [x] Smoke section "Semantic search"
-- [x] Testing protocol (verify 570; compose cold 377/0/1; real models 385/0/0; k8s 354/0/6), test report,
-  README, decisions (14), RECENT rotation (Phase 25 archived), tracker 🔵
+- [ ] assistant-service + `POST /api/assistant/chat` (+ gateway route, compose, k8s)
+- [ ] RAG over products and policy Markdown documents
+- [ ] Tools searchProducts, getOrderStatus (current user only), addToCart (with confirmation)
+- [ ] Conversation memory in Redis
+- [ ] Guardrails (store topics only, no cross-user data)
+- [ ] Evaluation set (~10 questions), passing with a real model
+- [ ] Smoke: answers a product question; refuses another user's order
+- [ ] Testing protocol, test report, README, decisions, RECENT rotation, tracker
 
 ## Next action
-STOPPED at PR #45, waiting for the user. Do NOT merge unless the user says `approved, merge it`
-(`gh pr merge 45 --merge`). On `merged, continue`: merge verification (git checks, CI on main, `verify`,
-cold compose smoke on a COPY; default config expects 377/0/1 on fresh volumes, 378/0/1 kept), tag
-`phase-28-complete`, then Phase 29 (AI shopping assistant). Throwaway Ollama container removed; compose
-stack (default config) and the kind cluster are running.
+Implement the checklist on `feature/phase-29-ai-assistant`, in order. Nothing written yet.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
 - Never edit `scripts/smoke-test.sh` while it runs; run a copy.
 - The persistence probe makes the smoke count path-dependent: +1 check with kept volumes.
-- The user's `.env` sets AI_CHAT_PROVIDER=ollama (host Ollama). Never print `.env`.
+- The user's `.env` sets AI_CHAT_PROVIDER=ollama and AI_EMBEDDING_PROVIDER=ollama (host Ollama:
+  llama3.2, nomic-embed-text; RTX 5070 Ti). Never print `.env`.
 - Repo-local git identity `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
