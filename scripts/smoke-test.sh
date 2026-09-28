@@ -1623,9 +1623,9 @@ check "JVM and pool meters are published for the USE panels" "True" \
 # --- Prometheus and Grafana ------------------------------------------------------------------------
 # Only meaningful against the compose stack. Skipped, never passed, when they are not reachable:
 # a monitoring check that quietly succeeds because nothing was there to check is worse than none.
-# Follows PROMETHEUS_PORT, the variable compose.yaml publishes Prometheus on, so moving the host port
-# (Windows can reserve 9090 - see docs/process/development-environment.md) needs one setting, not two.
-PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:${PROMETHEUS_PORT:-9090}}"
+# Follows PROMETHEUS_PORT, the variable compose.yaml publishes Prometheus on, and defaults to the same
+# 19090 compose does (Windows can reserve 9090 - see docs/process/development-environment.md).
+PROMETHEUS_URL="${PROMETHEUS_URL:-http://localhost:${PROMETHEUS_PORT:-19090}}"
 GRAFANA_URL="${GRAFANA_URL:-http://localhost:3000}"
 GRAFANA_AUTH="${GRAFANA_USER:-admin}:${GRAFANA_PASSWORD:-admin}"
 

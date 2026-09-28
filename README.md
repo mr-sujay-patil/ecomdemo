@@ -1454,7 +1454,7 @@ Monitoring fails silent by construction, which is exactly backwards from how a t
 docker compose up -d --build
 
 # Prometheus: Status -> Targets should show `ecomdemo` UP
-open http://localhost:9090/targets
+open http://localhost:19090/targets
 
 # Grafana: the EcomDemo Overview dashboard is the home page (admin/admin)
 open http://localhost:3000

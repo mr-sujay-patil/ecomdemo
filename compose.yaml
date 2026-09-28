@@ -606,7 +606,7 @@ services:
       # retention is a decision, and a disk that fills up silently is the usual way people find
       # out they never made it.
       - --storage.tsdb.retention.time=15d
-      # Lets `curl -X POST localhost:9090/-/reload` apply a changed prometheus.yml or alerts.yml
+      # Lets `curl -X POST localhost:19090/-/reload` apply a changed prometheus.yml or alerts.yml
       # without losing the stored data to a restart.
       - --web.enable-lifecycle
     volumes:
@@ -616,7 +616,7 @@ services:
       - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
+      - "${PROMETHEUS_PORT:-19090}:9090"
     healthcheck:
       # The image has no shell and no curl or wget: it is built FROM scratch with the binary and
       # nothing else. Prometheus itself is therefore the only thing available to make an HTTP
