@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-28
 - **Phase:** 27 — LLM Integration (Spring AI)
 - **Branch:** feature/phase-27-spring-ai (cut from `main` at `615889c`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** no
+- **PR:** #43 https://github.com/mr-sujay-patil/ecomdemo/pull/43
+- **Waiting for user:** YES - review of the Phase 27 PR
 
 ## Merge verification before this phase — all PASSED
 - Phase 25: PR #42 merge commit `615889c` (2 parents); branch is an ancestor of main; 0 missing, 0 diffs,
@@ -30,8 +30,11 @@
   README, decisions (12), RECENT rotation (Phase 24 archived), tracker 🔵
 
 ## Next action
-Re-run `./mvnw clean verify` on the docs commit, push, open the PR (template filled in), set Step to
-PR_OPEN, and STOP with the Phase Review Report.
+STOPPED at PR #43, waiting for the user. Do NOT merge unless the user says `approved, merge
+it` (`gh pr merge <n> --merge`). On `merged, continue`: merge verification (git checks, `verify`, cold
+compose smoke on a COPY of the script - expect 367/0/1 with no model, or 360/0/1 on fresh volumes' probe
+path... compare path-dependently), CI green, tag `phase-27-complete`, then Phase 28 (semantic search).
+The compose stack and a new kind cluster are left running; `scripts/k8s-down.sh` removes the cluster.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

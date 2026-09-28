@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 27: LLM Integration (tag: phase-27-complete, PR #TBD) — Phase 26 (AKS) was SKIPPED
+## Phase 27: LLM Integration (tag: phase-27-complete, PR #43) — Phase 26 (AKS) was SKIPPED
 **What exists now:** catalog-service `POST /api/products/{id}/generate-description` (ADMIN at the
 gateway): Spring AI 2.0.1 → `ProductCopy` record (description, tags, seoTitle), validated, description
 saved to the product (cache evicted), full answer + model + tokens in `product_description_generation`
