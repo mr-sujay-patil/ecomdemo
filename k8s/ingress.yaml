@@ -1,0 +1,29 @@
+# The Ingress: the cluster's front door, in front of the gateway (Phase 25).
+#
+# Two layers of "gateway", and they do different jobs. The Ingress controller (Traefik) is
+# INFRASTRUCTURE: it gets traffic from outside the cluster to a Service inside it, and could do TLS
+# and host-based routing for many applications. gateway-service is APPLICATION: it knows our routes,
+# validates JWTs, rate-limits per caller and adds the correlation id (Phase 21). So the Ingress has
+# exactly one rule - everything to the gateway - and all the routing that knows about our API stays
+# in code, where it is tested.
+#
+# No `host`: any host name reaching the node is accepted, so http://localhost:18080 works without
+# editing /etc/hosts. A real cluster would name its host here and add a `tls` section.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ecomdemo
+  labels:
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway-service
+                port:
+                  name: http

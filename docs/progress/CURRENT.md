@@ -3,28 +3,45 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-28
-- **Phase:** between 24 and 25 — `fix/spring-modulith-2` (agreed with the user; not a phase)
-- **Branch:** fix/spring-modulith-2 (cut from `main` at `67f6889`)
+- **Phase:** 25 — Container Orchestration (Kubernetes, kind)
+- **Branch:** feature/phase-25-kubernetes (cut from `main` at `8047753`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** see `gh pr list --head fix/spring-modulith-2`
-- **Waiting for user:** YES — review of the fix PR; also Dependabot #39 (ArchUnit, CI green) to merge
+- **PR:** #42 https://github.com/mr-sujay-patil/ecomdemo/pull/42
+- **Waiting for user:** YES - review of the Phase 25 PR (tools: kind v0.34.0-alpha, kubectl v1.36.1,
+  helm v3.22.0).
 
-## Phase 24 merge verification — PASSED, `phase-24-complete` TAGGED at `67f6889`
-PR #40 merged as a merge commit (2 parents); 0 missing commits, 0 diffs, branch alive; CI on `main`
-green; `verify` on `main` 524 tests (stack down); cold smoke **361/0/0**.
+## Merge verification before this phase — all PASSED
+- Phase 24: PR #40 merge commit `67f6889`; 0 missing, 0 diffs; CI green; `verify` 524; cold smoke
+  361/0/0; tagged `phase-24-complete`.
+- Fix PR #41 (Spring Modulith 2.1.1, not a phase, no tag): merge commit `8047753`; 0 missing, 0 diffs,
+  branch alive; CI green; `verify` 524; cold smoke 361/0/0. Dependabot #38 auto-closed.
+- Dependabot #39 (ArchUnit 1.5.1) merged by the user as `0ea48da`; CI green; merged into this branch
+  (`ac4d08b`).
 
-## This branch
-- [x] `spring-modulith.version` 2.1.1 (supersedes Dependabot #38, which failed to compile)
-- [x] `ModularityTest`: `new Documenter(MODULES, Documenter.Options.defaults().withOutputFolder(...))`
-- [x] docs/modules regenerated: style only, all 14 diagrams keep identical `Rel(...)` lines
-- Verified: `verify` 524/0/0; cold smoke 361/0/0.
+## Checklist (from the phase file's "What you'll implement")
+- [x] Deployment, Service, ConfigMap and Secret per service (k8s/services/, secrets by k8s-up.sh)
+- [x] Probes and resource limits (startup/liveness/readiness, CPU request, memory limit)
+- [x] An Ingress in front of the gateway (Traefik, localhost:18080)
+- [x] Infrastructure through manifests (6 PostgreSQL + Kafka StatefulSets, Redis Deployment)
+- [x] An HPA (catalog-service 2-4 @ 60 % CPU; demo 2 → 4)
+- [x] Rolling update and self-healing demos (scripts/k8s-demo.sh; rollout 744/0, selfheal 156/0)
+- [x] Smoke through the Ingress + Kubernetes section: 338/0/4 on 3 new clusters; compose 361/0/0
+- [x] README, decisions (12), test report, RECENT rotation (Phase 23 archived), tracker 🔵
+
+## Planning decisions (user chose all three recommended options, 2026-09-28)
+- **Traefik** as the Ingress controller (ingress-nginx is retired, March 2026), installed with Helm.
+- **Kustomize** (`k8s/`, `kubectl apply -k`) for our objects; **Helm only for third-party** pieces
+  (Traefik, metrics-server).
+- **In the cluster:** 7 services + 6 Postgres + Redis + Kafka (StatefulSets with PVCs). Observability
+  stays in compose; the smoke test gets a Kubernetes mode (Ingress URL, `kubectl exec` for DB/Kafka,
+  observability checks SKIPPED, never passed).
 
 ## Next action
-Waiting for review of the fix PR. On `approved, merge it`: merge with `--merge`, verify it (ancestor,
-no diffs, `verify`, cold smoke on a COPY of the script), then START PHASE 25 per
-`execution-protocol.md` §3 (its first commit marks Phase 24 ✅ in the ROADMAP tracker). Dependabot
-#38 closes itself once `main` has 2.1.1; #39 is the user's to merge.
+STOPPED at PR #42, waiting for the user. Do NOT merge unless the user says `approved, merge
+it` (`gh pr merge <n> --merge`). On `merged, continue`: merge verification (git checks, `verify`, cold
+compose smoke on a COPY of the script, CI green), tag `phase-25-complete`. The kind cluster and the
+compose stack may be left running; `scripts/k8s-down.sh` removes the cluster.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

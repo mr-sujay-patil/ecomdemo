@@ -1,0 +1,32 @@
+# Traefik, the Ingress controller (Phase 25), installed with Helm by scripts/k8s-up.sh:
+#   helm upgrade --install traefik traefik/traefik --version <pinned> -n traefik -f this-file
+# The chart version is pinned in the script (41.6.0 = Traefik v3.7.13): a chart's values schema
+# changes between releases - an unpinned install broke on exactly that while this was written.
+#
+# Why Traefik: ingress-nginx, the controller most tutorials use, was retired by the Kubernetes
+# project in March 2026. Traefik implements the standard `Ingress` resource our manifests use (and
+# the Gateway API, its successor), so k8s/ingress.yaml would work unchanged under any conforming
+# controller - the controller is infrastructure, the Ingress is ours.
+deployment:
+  replicas: 1
+service:
+  # NodePort, not LoadBalancer: kind has no cloud load balancer to hand out an address. (Under
+  # `spec:` in this chart - a top-level `type:` is silently ignored, and the resulting LoadBalancer
+  # Service waits for an external IP for ever, which made `helm --wait` time out.)
+  spec:
+    type: NodePort
+ports:
+  web:
+    nodePort: 30080     # mapped to localhost:18080 by kind-cluster.yaml
+  websecure:
+    expose:
+      default: false    # no TLS on a laptop cluster
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: false      # our routing is plain Ingress; Traefik's own CRDs are not needed

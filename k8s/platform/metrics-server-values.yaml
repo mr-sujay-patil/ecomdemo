@@ -1,0 +1,9 @@
+# metrics-server, installed with Helm by scripts/k8s-up.sh. It is what `kubectl top` and the
+# HorizontalPodAutoscaler read CPU and memory from; without it the HPA shows `<unknown>` and
+# never scales.
+#
+# --kubelet-insecure-tls: kind's kubelet serves a self-signed certificate that metrics-server
+# cannot verify. Acceptable on a laptop cluster, and ONLY there - a real cluster has kubelet
+# certificates signed by its CA.
+args:
+  - --kubelet-insecure-tls

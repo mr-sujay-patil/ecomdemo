@@ -1,0 +1,90 @@
+# PostgreSQL for ecomdemo-app, the first of six. The other five (k8s/data/*-db.yaml) are the same
+# object with a different name, database and Secret - one database per service, as since Phase 20.
+#
+# A StatefulSet, not a Deployment, and the difference is the point:
+#   - a stable identity: the pod is always `db-0`, never `db-7f9c4-x2k1p`;
+#   - its OWN volume: `volumeClaimTemplates` gives db-0 a PersistentVolumeClaim that outlives the
+#     pod. Delete the pod and the new db-0 mounts the same data. A Deployment's pods are
+#     interchangeable, which is exactly what a database's pods are not.
+# One replica: this is not a replicated PostgreSQL (that is an operator's job, e.g. CloudNativePG),
+# it is one database that Kubernetes restarts and reattaches to its disk.
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+spec:
+  # The DNS name the service connects to (db:5432) - the same name compose used, so the
+  # application's configuration did not have to change.
+  selector:
+    app.kubernetes.io/name: db
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/component: database
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db
+        app.kubernetes.io/component: database
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18-alpine
+          env:
+            - name: POSTGRES_DB
+              value: ecomdemo
+            - name: POSTGRES_USER
+              value: ecomdemo
+            # From the OWNING SERVICE's Secret, so the database and its only client read the same
+            # value from one place. scripts/k8s-up.sh creates it; it is never in Git.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ecomdemo", "-d", "ecomdemo"]
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "ecomdemo", "-d", "ecomdemo"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

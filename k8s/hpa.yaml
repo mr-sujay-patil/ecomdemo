@@ -1,0 +1,34 @@
+# A HorizontalPodAutoscaler for catalog-service (Phase 25): between 2 and 4 pods, aiming for 60 % of
+# the CPU the pods REQUEST (250m each, in services/catalog-service.yaml).
+#
+# Why catalog-service: it is stateless - everything it answers comes from its database or the shared
+# Redis cache - and it takes the most read traffic, so another pod is simply more capacity. The app
+# cannot be scaled this way yet (its scheduled jobs would run once per pod; see services/app.yaml).
+#
+# The HPA reads CPU from metrics-server every 15 s and computes
+#     desired = ceil(current replicas x current utilisation / target utilisation)
+# Scale-down waits five minutes by default (the stabilisation window below makes that explicit), so
+# a burst does not make it flap. `scripts/k8s-demo.sh hpa` generates load and watches it scale.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: catalog-service
+  labels:
+    app.kubernetes.io/name: catalog-service
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: catalog-service
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

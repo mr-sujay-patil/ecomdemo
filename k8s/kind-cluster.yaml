@@ -1,0 +1,22 @@
+# The local cluster for Phase 25: ONE node, created by scripts/k8s-up.sh (`kind create cluster`).
+#
+# kind runs Kubernetes nodes as Docker containers, so "the cluster" is one container on this machine
+# with a full control plane and kubelet inside it. One node is enough to learn Deployments, Services,
+# probes, rollouts and the HPA; what it cannot show is a pod being rescheduled onto ANOTHER node
+# when its node dies - self-healing here means "the ReplicaSet replaces a deleted pod".
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ecomdemo
+nodes:
+  - role: control-plane
+    # The only door from this machine into the cluster. Traefik's `web` entrypoint is a NodePort
+    # (30080, fixed in platform/traefik-values.yaml) and kind maps it to host port 18080 - so
+    # http://localhost:18080 is the Ingress, the way a cloud load balancer's address would be.
+    #
+    # 18080 rather than 80 or 8080: compose's gateway already owns 8080, and binding 80 needs
+    # privileges on some hosts. Both stacks can then exist side by side, though running both at
+    # once costs twice the memory.
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 18080
+        protocol: TCP

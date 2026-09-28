@@ -1,0 +1,33 @@
+# The whole system, for `kubectl apply -k k8s/` (Kustomize is built into kubectl).
+#
+# Kustomize rather than a Helm chart for OUR objects: every Deployment, Service and ConfigMap is a
+# plain YAML file you can read, with nothing templated. Helm is used only to install third-party
+# software (Traefik, metrics-server; see k8s/platform/), which is what Helm is best at.
+#
+# NOT listed here: the Secrets. scripts/k8s-up.sh creates them from .env and generated passwords,
+# so no secret value is ever in Git.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: ecomdemo
+resources:
+  - namespace.yaml
+  # data: databases, Kafka, Redis
+  - data/db.yaml
+  - data/catalog-db.yaml
+  - data/customer-db.yaml
+  - data/inventory-db.yaml
+  - data/notification-db.yaml
+  - data/payment-db.yaml
+  - data/kafka.yaml
+  - data/cache.yaml
+  # our services
+  - services/app.yaml
+  - services/catalog-service.yaml
+  - services/customer-service.yaml
+  - services/inventory-service.yaml
+  - services/notification-service.yaml
+  - services/payment-service.yaml
+  - services/gateway-service.yaml
+  # the edge and the autoscaler
+  - ingress.yaml
+  - hpa.yaml
