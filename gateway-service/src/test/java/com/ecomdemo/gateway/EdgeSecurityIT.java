@@ -125,6 +125,30 @@ class EdgeSecurityIT extends GatewayTest {
                 .expectStatus().is5xxServerError();
     }
 
+    /**
+     * Phase 28. The semantic search sits under the public GET rule; the backfill's status sits under
+     * the same prefix and must NOT - the rule for it has to come before the public one.
+     */
+    @Test
+    @DisplayName("semantic search is public, the embedding backfill's status is ADMIN-only")
+    void searchIsPublicButTheBackfillIsNot() {
+        web.get().uri("/api/products/search?q=laptop")
+                .exchange()
+                .expectStatus().is5xxServerError();
+
+        web.get().uri("/api/products/embeddings/backfill/1")
+                .exchange()
+                .expectStatus().isUnauthorized();
+        web.get().uri("/api/products/embeddings/backfill/1")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithRoles("shopper", "CUSTOMER"))
+                .exchange()
+                .expectStatus().isForbidden();
+        web.get().uri("/api/products/embeddings/backfill/1")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithRoles("boss", "ADMIN"))
+                .exchange()
+                .expectStatus().is5xxServerError();
+    }
+
     @Test
     @DisplayName("login is reachable without a token, or nobody could ever get one")
     void loginIsAnonymous() {

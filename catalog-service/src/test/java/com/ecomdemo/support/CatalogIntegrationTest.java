@@ -29,7 +29,7 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
-@Import({PostgresContainerConfig.class, RedisContainerConfig.class, InMemoryInventoryConfig.class})
+@Import({PgVectorContainerConfig.class, RedisContainerConfig.class, InMemoryInventoryConfig.class})
 @ActiveProfiles("it")
 public abstract class CatalogIntegrationTest {
 

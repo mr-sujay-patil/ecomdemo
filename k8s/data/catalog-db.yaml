@@ -37,7 +37,8 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:18-alpine
+          # pgvector's build of PostgreSQL 18 (Phase 28), the same image as compose.yaml's.
+          image: pgvector/pgvector:0.8.6-pg18-trixie
           env:
             - name: POSTGRES_DB
               value: catalog

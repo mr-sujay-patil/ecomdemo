@@ -64,7 +64,7 @@ step "Images"
 # loaded too, so the node never pulls from Docker Hub (rate limits, and it works offline).
 APP_IMAGES="ecomdemo:latest ecomdemo-catalog:latest ecomdemo-customer:latest ecomdemo-inventory:latest
 ecomdemo-notification:latest ecomdemo-payment:latest ecomdemo-gateway:latest"
-INFRA_IMAGES="postgres:18-alpine redis:8-alpine apache/kafka:4.2.1"
+INFRA_IMAGES="postgres:18-alpine pgvector/pgvector:0.8.6-pg18-trixie redis:8-alpine apache/kafka:4.2.1"
 if [ -z "${SKIP_BUILD:-}" ]; then
     docker compose build app catalog-service customer-service inventory-service \
         notification-service payment-service gateway-service

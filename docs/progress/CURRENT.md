@@ -29,18 +29,19 @@
 - `GET /api/products/search?q=&category=&minPrice=&maxPrice=&limit=` (public GET at the gateway).
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] pgvector extension + product_embedding (Flyway V4), images switched
-- [ ] Embedding provider config; vector store only when configured; 503 otherwise
-- [ ] Embeddings on create/update (outbox → Kafka → indexer), delete handled
-- [ ] Spring Batch backfill + endpoint
-- [ ] `GET /api/products/search` with metadata filters
-- [ ] Tests (unit, IT with a deterministic fake embedding model, e2e through Kafka)
+- [x] pgvector extension + product_embedding (Flyway V4), images switched
+- [x] Embedding provider config; vector store only when configured; 503 otherwise
+- [x] Embeddings on create/update (outbox → Kafka → indexer), delete handled
+- [x] Spring Batch backfill + endpoint
+- [x] `GET /api/products/search` with metadata filters
+- [x] Tests (unit, IT with a deterministic fake embedding model, e2e through Kafka)
 - [ ] Smoke section "Semantic search"
 - [ ] Testing protocol, test report, README, decisions, RECENT rotation, tracker 🔵
 
 ## Next action
-Implement the checklist top to bottom on this branch. catalog-service/pom.xml already has the three
-new dependencies (uncommitted until the first feature commit).
+Code + tests committed (catalog ITs green incl. EmbeddingSyncIT through a real Kafka). Next: compose /
+k8s / .env.example config (AI_EMBEDDING_PROVIDER etc.), measure a real model (host Ollama,
+nomic-embed-text) to set SEARCH_MIN_SIMILARITY and decide the nomic prefixes, then the smoke section.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

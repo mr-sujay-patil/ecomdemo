@@ -5,7 +5,9 @@ import java.time.Duration;
 import org.springframework.ai.ollama.api.OllamaApi;
 import org.springframework.ai.retry.RetryUtils;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.AnyNestedCondition;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
@@ -23,10 +25,30 @@ import org.springframework.web.client.RestClient;
  * calls still appear in traces.
  *
  * <p>OpenAI needs none of this: its client takes {@code spring.ai.openai.chat.timeout} directly.
+ *
+ * <p>Phase 28: one {@code OllamaApi} serves both the chat model and the embedding model, so this
+ * applies when EITHER uses Ollama. Keyed on chat alone, an Ollama embedding with chat set to
+ * {@code none} would have got Spring AI's client back - the one with no deadline.
  */
 @Configuration
-@ConditionalOnProperty(name = "spring.ai.model.chat", havingValue = "ollama")
+@Conditional(OllamaClientConfig.OllamaInUse.class)
 class OllamaClientConfig {
+
+    /** Chat OR embeddings on Ollama: the nested conditions are OR-ed. */
+    static class OllamaInUse extends AnyNestedCondition {
+
+        OllamaInUse() {
+            super(ConfigurationPhase.REGISTER_BEAN);
+        }
+
+        @ConditionalOnProperty(name = "spring.ai.model.chat", havingValue = "ollama")
+        static class Chat {
+        }
+
+        @ConditionalOnProperty(name = "spring.ai.model.embedding", havingValue = "ollama")
+        static class Embedding {
+        }
+    }
 
     @Bean
     OllamaApi ollamaApi(

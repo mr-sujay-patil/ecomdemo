@@ -450,7 +450,11 @@ services:
   # catalog-service's database (Phase 20c)
   # -------------------------------------------------------------------------------------------
   catalog-db:
-    image: postgres:18-alpine
+    # pgvector's image, not postgres:18-alpine (Phase 28): the same PostgreSQL 18 with the `vector`
+    # extension compiled in, which the semantic search's embeddings are stored and searched with.
+    # Pinned to the extension's version, because the index format belongs to it. Debian-based, so
+    # its text collation differs from Alpine's; V4 rebuilds the two text indexes for that reason.
+    image: pgvector/pgvector:0.8.6-pg18-trixie
     container_name: ecomdemo-catalog-db
     environment:
       POSTGRES_DB: ${CATALOG_DB_NAME:-catalog}

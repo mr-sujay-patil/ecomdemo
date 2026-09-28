@@ -47,6 +47,11 @@ public class GatewaySecurityConfig {
                         // Reading the catalogue is anonymous - a shop nobody can browse sells
                         // nothing - but WRITING it is an administrator's job. The order matters:
                         // the GET rule is narrower and must come first.
+                        //
+                        // Phase 28: except the embedding backfill's status, which is under the same
+                        // prefix and is operations data, not catalogue. So it goes FIRST of all:
+                        // the first matching rule wins, and the public GET rule would match it too.
+                        .pathMatchers("/api/products/embeddings/**").hasRole("ADMIN")
                         .pathMatchers(HttpMethod.GET, "/api/products", "/api/products/**").permitAll()
                         .pathMatchers("/api/products/**").hasRole("ADMIN")
 
