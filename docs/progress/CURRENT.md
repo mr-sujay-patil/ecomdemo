@@ -22,13 +22,15 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 - [x] Propagation over Kafka: V17 `trace_parent`, `OutboxTracing`; verified live (smoke: relay
       span + notification consumer span in the checkout's trace)
 - [x] Tempo 3.0.3 in compose (`docker/tempo/tempo.yaml`) + Grafana Tempo datasource
-- [~] Trace IDs in logs: verified live that Loki finds a checkout's trace id on >=3 services, and Loki's
-      trace_id field links to Tempo (Tempo->Loki link not smoke-checked). STILL OPEN: confirm the GATEWAY's lines carry `traceId` (MDC on
-      WebFlux may need `spring.reactor.context-propagation=auto`)
+- [x] Trace IDs in logs: Loki finds a checkout's trace id on >=3 services; Loki's trace_id field
+      links to Tempo (Tempo->Loki link not smoke-checked). Gateway fixed with
+      `spring.reactor.context-propagation=auto`: its 5xx ERROR line had no traceId, now has it and
+      Loki finds it by trace_id (verified live by stopping catalog-service; not a smoke check)
 - [x] Sampling: parent-based, `TRACING_SAMPLING_PROBABILITY` (0.1 default, 1.0 in compose)
 - [x] Smoke section "Distributed tracing" green; poll now waits for gateway AND notification spans
       (one run failed the gateway check because notification's batch reached Tempo first)
-- [~] DONE 2026-09-28: `verify` green, cold smoke ×3 = 327/0/0 (this machine, PROMETHEUS_PORT=19090).
+- [~] DONE 2026-09-28: `verify` green, cold smoke ×3 = 327/0/0, +1 cold run after the gateway fix
+      and port change = 327/0/0 (this machine).
       LEFT: test report, README, decisions, RECENT rotation, tracker 🔵
 
 ## Planning decisions
@@ -42,11 +44,10 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 - OTel sets traceparent flags `03` (sampled + W3C L2 "random"), not `01` — tests read the bit.
 
 ## Next action
-Check the gateway's log lines carry `traceId` (Loki: `{service="gateway-service"}` for a smoke
-trace id); fix if not. Then: test report, README, decisions, RECENT rotation, tracker 🔵; commit the
-regenerated `docs/modules/*` (new `tracing` module, from `ModularityTest`); push; raise the PR; STOP.
-Port 9090 is inside a Windows-reserved range today (9014-9113): run compose AND the smoke test with
-`PROMETHEUS_PORT=19090` exported.
+Test report (`docs/test-reports/phase-23.md`), README, decisions, RECENT rotation, tracker 🔵; commit
+the regenerated `docs/modules/*` (new `tracing` module, from `ModularityTest`); push; raise the PR;
+STOP. Prometheus' HOST port is 19090 for good (user's decision 2026-09-28; compose, `.env.example`,
+smoke default) - nothing needs exporting.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
