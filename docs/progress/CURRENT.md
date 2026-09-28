@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-28
 - **Phase:** 27 — LLM Integration (Spring AI)
 - **Branch:** feature/phase-27-spring-ai (cut from `main` at `615889c`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** no
@@ -19,18 +19,19 @@
 - Pre-flight for 27: tree clean, no open PRs. No LLM key in the environment, no Ollama installed.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] Spring AI (compatible with Boot 4.1.1) in catalog-service
-- [ ] ADMIN endpoint generating product descriptions; structured output → record (description, tags, SEO title)
-- [ ] Prompt templates as resource files
-- [ ] Configurable provider (OpenAI, Anthropic, Azure OpenAI, or Ollama), key from the environment
-- [ ] Timeouts, error handling, and token metrics
-- [ ] Generated descriptions are saved; failures degrade gracefully
+- [x] Spring AI 2.0.1 (built on Boot 4.1.1) in catalog-service: OpenAI + Ollama starters
+- [x] `POST /api/products/{id}/generate-description` (ADMIN at the gateway) → `ProductCopy` record
+- [x] Prompt templates: `prompts/product-description-{system,user}.st`
+- [x] `AI_CHAT_PROVIDER` = openai | ollama | none (default); OPENAI_API_KEY from env
+- [x] AI_TIMEOUT (OpenAI option; own OllamaApi client), 1 retry, all failures → 503; `ecomdemo.ai.tokens`, `ecomdemo.ai.generations`
+- [x] Saved to product + `product_description_generation` (V3); failures leave the product unchanged
 - [ ] Smoke: endpoint returns structured JSON; without a key → ⚠️ with setup steps, never faked
 - [ ] Testing protocol, test report, README, decisions, RECENT rotation (Phase 24 archived), tracker 🔵
 
 ## Next action
-Ask the user which LLM provider(s) to support as default (none available on this machine yet), then
-implement the checklist on this branch.
+User chose **OpenAI + Ollama** (2026-09-28). Code + tests done (ProductCopyGeneratorTest 8,
+ProductDescriptionApiIT 6, DescriptionGenerationNotConfiguredIT 1, all green). Next: smoke-test
+section (⚠️ SKIP with setup steps when no provider), k8s ConfigMap/extra env, then the testing protocol.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

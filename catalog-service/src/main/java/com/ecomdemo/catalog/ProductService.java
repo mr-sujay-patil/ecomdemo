@@ -165,6 +165,21 @@ public class ProductService {
         return ProductResponse.from(saved, request.stockQuantity());
     }
 
+    /**
+     * Replaces only the description, for Phase 27's generated copy. Evicts rather than puts: the
+     * cached response also carries the stock figure, which this method does not know, and the next
+     * read fetching it once is cheaper than guessing.
+     */
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.PRODUCT, key = "#id"),
+            @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'")})
+    @Transactional
+    public Product replaceDescription(Long id, String description) {
+        Product product = requireProduct(id);
+        product.setDescription(description);
+        return productRepository.save(product);
+    }
+
     /** A delete has to remove both: the entry for this id, and the listing that contained it. */
     @Caching(evict = {
             @CacheEvict(cacheNames = CacheNames.PRODUCT, key = "#id"),

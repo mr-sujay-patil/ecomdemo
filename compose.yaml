@@ -515,6 +515,22 @@ services:
       # with. That is the honest argument for asymmetric signing in a real deployment, and it is
       # recorded in docs/decisions.md rather than pretended away.
       JWT_SECRET: ${JWT_SECRET:-}
+
+      # Phase 27: the language model behind POST /api/products/{id}/generate-description. `none`
+      # (the default) starts the service without one, and that endpoint answers 503. The key comes
+      # from .env or the shell and is never written here.
+      AI_CHAT_PROVIDER: ${AI_CHAT_PROVIDER:-none}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
+      AI_TIMEOUT: ${AI_TIMEOUT:-30s}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Ollama runs on the HOST, not in compose (it wants the GPU and several GB of model files),
+      # and a container reaches the host through host.docker.internal - see extra_hosts.
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      # Docker Desktop defines host.docker.internal by itself; Docker Engine on Linux does not,
+      # and `host-gateway` is how compose asks for the same thing there.
+      - "host.docker.internal:host-gateway"
     ports:
       - "${CATALOG_PORT:-8081}:8081"
     healthcheck:
