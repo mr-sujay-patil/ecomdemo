@@ -3337,9 +3337,26 @@ LLM_METRIC_BEFORE="$(catalog_scrape \
     | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
 [ "$LLM_METRIC_BEFORE" = "MISSING" ] && LLM_METRIC_BEFORE=0
 
+# Up to three attempts, the way a client honouring Retry-After would. A real model's output varies
+# from call to call: in Phase 28's real-model runs llama3.2 once wrote a 71-character SEO title, the
+# service refused it with 503 "unusable answer" (correctly - that is the graceful degradation), and
+# the next call was fine. Only THAT kind of refusal is retried; "not configured" and "did not answer"
+# are the same every time. Headers are kept per attempt, so the Retry-After check below reads the
+# refusal it describes, not a new request that might succeed.
 as_admin
-LLM_STATUS="$(request POST "/api/products/$LLM_PRODUCT/generate-description")"
-cp "$BODY" "$BODY.llm"
+LLM_ATTEMPTS=0
+while :; do
+    LLM_ATTEMPTS=$((LLM_ATTEMPTS + 1))
+    LLM_STATUS="$(curl -sS -o "$BODY" -D "$BODY.llm.headers" -w '%{http_code}' -X POST \
+        "$BASE_URL/api/products/$LLM_PRODUCT/generate-description" -H "Authorization: Bearer $AUTH")"
+    cp "$BODY" "$BODY.llm"
+    if [ "$LLM_STATUS" = "503" ] && [ "$LLM_ATTEMPTS" -lt 3 ] \
+        && jget "d['message']" | grep -q "unusable answer"; then
+        printf '        attempt %s: the model broke the limits, refused with 503 and retried\n' "$LLM_ATTEMPTS"
+        continue
+    fi
+    break
+done
 
 case "$LLM_STATUS" in
     200)
@@ -3371,8 +3388,7 @@ case "$LLM_STATUS" in
                 "200" "503: $(jget "d['message']") (a model is configured but did not answer usably)"
         fi
         check "a refusal says when to retry (Retry-After)" "True" \
-            "$(curl -sS -o /dev/null -D - -X POST "$BASE_URL/api/products/$LLM_PRODUCT/generate-description" \
-                -H "Authorization: Bearer $AUTH" | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+            "$(grep -qi '^retry-after: [1-9]' "$BODY.llm.headers" && echo True || echo False)"
         request GET "/api/products/$LLM_PRODUCT" >/dev/null
         check "and the product is left exactly as it was" "$LLM_ORIGINAL" "$(jget "d['description']")"
         ;;
@@ -3381,7 +3397,7 @@ case "$LLM_STATUS" in
             "$LLM_STATUS: $(python3 -c "print(open('$BODY.llm').read()[:200])" 2>/dev/null)"
         ;;
 esac
-rm -f "$BODY.llm"
+rm -f "$BODY.llm" "$BODY.llm.headers"
 
 LLM_METRIC_AFTER="$(catalog_scrape \
     | python3 -c "$METRIC_PY" /dev/stdin ecomdemo_ai_generations_seconds_count)"
