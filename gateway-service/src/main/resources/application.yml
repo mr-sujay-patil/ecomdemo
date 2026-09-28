@@ -18,6 +18,16 @@ spring:
   config:
     import: classpath:ecomdemo-observability.properties
 
+  # WHY THE GATEWAY'S LOG LINES CARRY A traceId. A log line gets the trace id from the MDC, which is
+  # a ThreadLocal. On the servlet services one request is one thread, so that just works. Here a
+  # request hops between Netty event-loop threads, and the current span travels in Reactor's
+  # Context instead. `limited` (the default) copies it back into ThreadLocals only where Reactor is
+  # told to; `auto` does it on every operator, so a line logged anywhere in the chain - such as the
+  # ERROR Boot's error handler writes for a 5xx - has the trace id. Measured before this line: that
+  # ERROR had none.
+  reactor:
+    context-propagation: auto
+
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
