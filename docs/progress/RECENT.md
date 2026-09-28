@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 24: Distributed Transactions (tag: phase-24-complete, PR #__PR__)
+## Phase 24: Distributed Transactions (tag: phase-24-complete, PR #40)
 **What exists now:** checkout is a CHOREOGRAPHED SAGA over Kafka. `POST /api/orders` = stock pre-check
 (read, instant 409) + order PENDING + `OrderCreatedEvent` in the outbox -> 201 PENDING. inventory
 reserves all lines or none (`inventory.stock-reserved` / `-rejected`), the MOCK payment-service

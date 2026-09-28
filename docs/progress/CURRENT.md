@@ -7,8 +7,8 @@
 - **Branch:** feature/phase-24-saga (cut from `main` at `a2d5b8c`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #40 https://github.com/mr-sujay-patil/ecomdemo/pull/40
+- **Waiting for user:** YES - review of PR #40
 
 ## Phase 23 merge verification — PASSED, `phase-23-complete` TAGGED at `a2d5b8c`
 PR #37 merged as a merge commit (2 parents); 0 missing commits, 0 diffs, branch alive; CI on `main`
@@ -55,10 +55,11 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Three cold runs (down → up --build --wait → a COPY of smoke-test.sh; never run the repo file while
-editing it) are in progress. Then: fill the placeholders in docs/test-reports/phase-24.md
-(__RESULT__, __SAGA_BLOCK__, __RUNS__, __MEMORY__) and RECENT.md (__SMOKE__, __PR__), final
-`./mvnw clean verify`, commit, push, tracker 🔵, `gh pr create`, Phase Review Report, STOP.
+STOPPED at PR #40, waiting for the user. Do NOT merge unless the user says `approved, merge it`
+(then `gh pr merge 40 --merge`, never squash/rebase/--delete-branch). On `merged, continue`: merge
+verification per `docs/process/git-workflow.md` step 5 + checklist, `./mvnw clean verify` and a cold
+smoke on `main` (run a COPY of the script), CI green, then tag `phase-24-complete`. On
+`changes: ...`: back to IMPLEMENTING on this branch. The stack is left running.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
