@@ -75,6 +75,11 @@ scrape_configs:
         labels:
           service: payment-service
 
+      # assistant-service, added in Phase 29: its answers by outcome, tool calls, and model tokens.
+      - targets: ["assistant-service:8087"]
+        labels:
+          service: assistant-service
+
       # gateway-service, added in Phase 21. Scraped on 8080 IN-NETWORK, which is also the port it
       # publishes - unlike the application, whose host mapping moved to 8084 while its container port
       # stayed 8080, so the target above needed no edit.

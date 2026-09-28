@@ -41,9 +41,9 @@ class ContainerMemoryBudgetTest {
         double share = heapShare();
         Map<String, Long> limits = limitsInMib();
 
-        // Seven JVM services since Phase 24 (payment-service). Fewer means the pattern stopped
+        // Eight JVM services since Phase 29 (assistant-service). Fewer means the pattern stopped
         // matching, not that a service is fine.
-        assertThat(limits).as("memory limits found in compose.yaml").hasSize(7);
+        assertThat(limits).as("memory limits found in compose.yaml").hasSize(8);
         limits.forEach((service, limitMib) -> assertThat(limitMib * (1 - share / 100))
                 .as("%s: %d MiB limit at a %.0f%% heap share leaves this much for non-heap", service, limitMib, share)
                 .isGreaterThanOrEqualTo(MIN_NON_HEAP_MIB));

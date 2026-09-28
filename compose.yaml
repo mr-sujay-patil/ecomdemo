@@ -610,6 +610,67 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
+  # assistant-service (Phase 29) - the shopping assistant
+  # -------------------------------------------------------------------------------------------
+  # No database: it asks catalog-service and the application, always with the customer's own
+  # token, and keeps conversations and proposed cart additions in Redis (assistant:* keys, all with
+  # an expiry). The models are the same switches as catalog-service's; with none (the default) it
+  # starts and answers every chat with a 503 that says how to set it up.
+  assistant-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: assistant-service
+    image: ecomdemo-assistant:latest
+    container_name: ecomdemo-assistant-service
+    depends_on:
+      cache:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    environment:
+      <<: *observability-env
+      SPRING_DATA_REDIS_HOST: cache
+      SPRING_DATA_REDIS_PORT: 6379
+      # Where it asks, by compose service name. Never through the gateway: that would count the
+      # assistant's calls against the customer's rate limit, and add a hop for nothing.
+      CATALOG_BASE_URL: http://catalog-service:8081
+      APP_BASE_URL: http://app:8080
+
+      JWT_SECRET: ${JWT_SECRET:-}
+
+      AI_CHAT_PROVIDER: ${AI_CHAT_PROVIDER:-none}
+      AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-none}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Its own chat model variables: calling tools reliably is a harder job than catalog's
+      # descriptions, and may want a bigger model.
+      ASSISTANT_OPENAI_MODEL: ${ASSISTANT_OPENAI_MODEL:-gpt-4.1-mini}
+      ASSISTANT_OLLAMA_MODEL: ${ASSISTANT_OLLAMA_MODEL:-llama3.2}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      AI_TIMEOUT: ${AI_TIMEOUT:-30s}
+      POLICY_MIN_SIMILARITY: ${POLICY_MIN_SIMILARITY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "${ASSISTANT_PORT:-8087}:8087"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8087/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: ${ASSISTANT_MEMORY_LIMIT:-768M}
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
   # gateway-service (Phase 21) - the single door, and the only port a client needs
   # -------------------------------------------------------------------------------------------
   # It publishes 8080, which the application used to. Everything a client does now arrives here:
@@ -633,7 +694,7 @@ services:
         # refused every request because its counter was down would be a worse outage than the one it
         # is protecting against - so this is about a clean start rather than correctness.
         condition: service_healthy
-      # Every route's target. `service_healthy` on all four means the first request after
+      # Every route's target. `service_healthy` on all five means the first request after
       # `docker compose up --wait` meets a service that can answer, instead of the 503 a route to a
       # starting container produces.
       app:
@@ -644,6 +705,8 @@ services:
         condition: service_healthy
       inventory-service:
         condition: service_healthy
+      assistant-service:
+        condition: service_healthy
     environment:
       <<: *observability-env
       # The route targets, by compose service name on the internal network. The application is
@@ -652,6 +715,7 @@ services:
       CATALOG_BASE_URL: http://catalog-service:8081
       CUSTOMER_BASE_URL: http://customer-service:8083
       INVENTORY_BASE_URL: http://inventory-service:8082
+      ASSISTANT_BASE_URL: http://assistant-service:8087
 
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379

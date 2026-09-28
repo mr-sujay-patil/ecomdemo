@@ -27,6 +27,7 @@ resources:
   - services/inventory-service.yaml
   - services/notification-service.yaml
   - services/payment-service.yaml
+  - services/assistant-service.yaml
   - services/gateway-service.yaml
   # the edge and the autoscaler
   - ingress.yaml
