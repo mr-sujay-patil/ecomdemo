@@ -51,6 +51,12 @@ BASE_URL="${BASE_URL:-http://localhost:8080}"
 # reach the application and not the gateway, which has an actuator of its own and would answer
 # every one of them plausibly and wrongly.
 APP_URL="${APP_URL:-http://localhost:8084}"
+# The mock payment-service's limit (Phase 24): any order total ABOVE this is declined, and the order
+# CANCELLED. Every product this script picks for an order that must SUCCEED is filtered to stay under
+# it, times the quantity. Without that, a run on a stack whose cheap products had sold out picked a
+# 9,499.00 SSD for the happy path, bought two, and the saga - correctly - cancelled it: the third cold
+# run of Phase 24 failed exactly so. The Saga section forces a decline on purpose, with its own probe.
+PAYMENT_LIMIT="${PAYMENT_DECLINE_ABOVE:-10000.00}"
 BODY="$(mktemp)"
 # A whole Prometheus scrape, kept in a file rather than a variable: it is a few hundred lines and
 # the same snapshot is read several times per check, so re-fetching it per assertion would both
@@ -657,10 +663,10 @@ fi
 pass "catalogue is seeded ($PRODUCT_COUNT products)"
 
 # Pick the first product with enough stock to order 2 of.
-PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
-PRODUCT_NAME="$(jget "next(p['name'] for p in d if p['stockQuantity'] >= 2)")"
-UNIT_PRICE="$(jget "next(str(p['price']) for p in d if p['stockQuantity'] >= 2)")"
-STOCK_BEFORE="$(jget "next(p['stockQuantity'] for p in d if p['stockQuantity'] >= 2)")"
+PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
+PRODUCT_NAME="$(jget "next(p['name'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
+UNIT_PRICE="$(jget "next(str(p['price']) for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
+STOCK_BEFORE="$(jget "next(p['stockQuantity'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
 QUANTITY=2
 EXPECTED_TOTAL="$(python3 -c "from decimal import Decimal;print(Decimal('$UNIT_PRICE')*$QUANTITY)")"
 pass "selected '$PRODUCT_NAME' (id=$PRODUCT_ID, price=$UNIT_PRICE, stock=$STOCK_BEFORE)"
@@ -1629,8 +1635,8 @@ check "and checkout.duration carries all five outcome tags" "5" \
        done | grep -vc MISSING)"
 
 METRICS_PRODUCT_ID="$(as_anonymous; request GET /api/products >/dev/null; \
-    jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
-METRICS_UNIT_PRICE="$(jget "next(str(p['price']) for p in d if p['stockQuantity'] >= 1)")"
+    jget "next(p['id'] for p in d if p['stockQuantity'] >= 1 and p['price'] * 1 <= $PAYMENT_LIMIT)")"
+METRICS_UNIT_PRICE="$(jget "next(str(p['price']) for p in d if p['stockQuantity'] >= 1 and p['price'] * 1 <= $PAYMENT_LIMIT)")"
 as_customer
 request POST /api/cart/items "{\"productId\":$METRICS_PRODUCT_ID,\"quantity\":1}" >/dev/null
 STATUS="$(request POST /api/orders)"
@@ -2148,7 +2154,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
 
 
     request GET /api/products >/dev/null
-    KAFKA_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
+    KAFKA_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1 and p['price'] * 1 <= $PAYMENT_LIMIT)")"
     OFFSETS_BEFORE="$(topic_message_count orders.placed)"
 
     request POST /api/cart/items "{\"productId\":$KAFKA_PRODUCT_ID,\"quantity\":1}" >/dev/null
@@ -2230,7 +2236,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     # The stronger claim, and the one a user would notice: the partition kept moving. A consumer
     # that retried the bad record in place would have stopped everything behind it.
     request GET /api/products >/dev/null
-    POISON_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1)")"
+    POISON_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1 and p['price'] * 1 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$POISON_PRODUCT_ID,\"quantity\":1}" >/dev/null
     check "an order placed AFTER the poison message still succeeds" "201" "$(request POST /api/orders)"
     AFTER_POISON_ORDER_ID="$(jget "d['id']")"
@@ -2315,7 +2321,7 @@ if command -v docker >/dev/null 2>&1 \
 
     # --- An ordinary order leaves a published row ----------------------------------------------
     request GET /api/products >/dev/null
-    OUTBOX_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
+    OUTBOX_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$OUTBOX_PRODUCT_ID,\"quantity\":1}" >/dev/null
     check "an order placed with the broker UP returns 201" "201" "$(request POST /api/orders)"
     OUTBOX_ORDER_ID="$(jget "d['id']")"
@@ -2400,7 +2406,7 @@ if command -v docker >/dev/null 2>&1 \
     # for cluster metadata. Now the request never touches Kafka at all - it writes a row - so the
     # broker being down should be invisible to the customer.
     request GET /api/products >/dev/null
-    OUTAGE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
+    OUTAGE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$OUTAGE_PRODUCT_ID,\"quantity\":1}" >/dev/null
 
     OUTAGE_STARTED_AT="$(date +%s)"
@@ -2763,7 +2769,7 @@ NOT_PERMITTED_BEFORE="$(metric resilience4j_circuitbreaker_not_permitted_calls_t
 # --- Fill a cart while the catalogue is up ------------------------------------------------------
 as_customer
 request GET /api/products >/dev/null
-RES_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 3)")"
+RES_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 3 and p['price'] * 3 <= $PAYMENT_LIMIT)")"
 check "with catalog-service UP, adding to the cart works" "200" \
     "$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
 
@@ -2922,7 +2928,7 @@ if curl -fsS "$TEMPO_URL/ready" >/dev/null 2>&1; then
     TRACE_ID="$(random_hex 16)"
     CLIENT_SPAN_ID="$(random_hex 8)"
     request GET /api/products >/dev/null
-    TRACE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2)")"
+    TRACE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$TRACE_PRODUCT_ID,\"quantity\":1}" >/dev/null
     check "a checkout sent with a W3C traceparent returns 201" "201" \
         "$(curl -sS -o "$BODY" -w '%{http_code}' -X POST "$BASE_URL/api/orders" \
