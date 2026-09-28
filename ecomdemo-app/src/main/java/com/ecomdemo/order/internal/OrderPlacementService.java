@@ -5,7 +5,7 @@ import com.ecomdemo.cart.Cart;
 import com.ecomdemo.cart.CartItem;
 import com.ecomdemo.cart.CartService;
 import com.ecomdemo.shared.ConflictException;
-import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.messaging.OrderCreatedEvent;
 import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.clients.inventory.InventoryGateway;
@@ -14,8 +14,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -26,6 +24,10 @@ import org.springframework.transaction.annotation.Transactional;
  * auto-committed statement, so a crash — or a constraint violation, or a lost update — in the
  * middle left stock already sold with no order to show for it. {@code @Transactional} makes the
  * whole sequence one unit: it all commits, or the database is left exactly as it was found.
+ *
+ * <p>(Phase 6's words. Since Phase 24 the stock is no longer one of the things this transaction
+ * changes - it starts a saga instead; see {@link #placeOnce()}. The single-transaction rule now
+ * covers the order, the cart and the outbox row that starts the saga.)
  *
  * <p>This is a separate bean from {@link OrderService} on purpose. Spring implements
  * {@code @Transactional} with a proxy, so the transaction begins only when a call arrives from
@@ -60,30 +62,30 @@ class OrderPlacementService {
     }
 
     /**
-     * Checks stock, reduces it, saves the order and empties the cart — all or nothing.
+     * Checks stock, saves the order as PENDING, empties the cart and starts the saga — all or
+     * nothing.
      *
      * <p>Rollback rules: Spring rolls back on an unchecked exception and commits on a checked
      * one. Every failure here is a {@link RuntimeException}, so the default is what we want; a
      * checked exception would have needed {@code rollbackFor}.
      *
-     * <p>The stock of every line is still checked before a single one is written. The
-     * transaction would undo a partial reduction anyway, but failing early gives the caller the
-     * accurate "3 requested, 2 available" message rather than one about whichever line happened
-     * to break first, and it spares the database work it would only have to throw away.
+     * <h2>Phase 24: this method no longer takes any stock</h2>
      *
-     * <p><strong>Since Phase 19 the stock itself belongs to somebody else.</strong> This method
-     * asks {@code InventoryGateway} to check and to reserve; it no longer calls
-     * {@code reduceStock} or saves the product, and it does not know that either happens. What it
-     * kept is the SEQUENCE — check every line, then write — because that is an ordering concern,
-     * about the message a shopper gets when a cart cannot be fulfilled. What it gave up is the
-     * mechanics of a number going down, which is an inventory concern. That division is the
-     * whole point of the module split, and it is why the rest of this method did not change.
+     * <p>Since Phase 20b it reserved each line over HTTP and, if its own transaction then rolled
+     * back, gave the stock back with an after-rollback hook - a compensation that could be lost if
+     * this process died in between, and that nothing reconciled. The saga replaces all of it.
+     * Checkout now does only what is local to this service - the order row, the cart, and one
+     * outbox row, {@code OrderCreatedEvent} - and commits them together. inventory-service
+     * reserves the stock when it reads that event, payment-service charges for it, and their
+     * replies move the order to CONFIRMED or CANCELLED ({@code OrderSagaHandler}). There is no
+     * remote write left inside this transaction, so there is nothing left to compensate here.
      *
-     * <p>What the pre-check cannot do is stop a <em>concurrent</em> checkout from selling the
-     * same unit between the check and the write. Nothing inside a single transaction can; that
-     * is what {@code Product}'s {@code @Version} column is for, and the failure it raises
-     * surfaces here as {@code OptimisticLockingFailureException} at flush or commit time — after
-     * this method has returned, which is why {@link OrderService} and not this class handles it.
+     * <p><strong>The stock pre-check stays</strong>, and it is a read. It is what lets a shopper
+     * who asks for more than exists get an immediate "3 requested, 2 available" (409) instead of
+     * a PENDING order that is cancelled a second later. It can still be wrong - another checkout
+     * may take the last unit between this check and inventory's reservation - and then the saga
+     * cancels the order with the same message. The pre-check is a courtesy; the reservation is the
+     * guarantee.
      */
     @Transactional
     OrderResponse placeOnce() {
@@ -105,84 +107,31 @@ class OrderPlacementService {
             // somebody else's name, because neither is ever named in a request.
             Order order = new Order(Instant.now(), currentUser.id(), currentUser.username());
 
-            // What has been taken from inventory so far, so it can be given back if this
-            // transaction does not survive. See the compensation below.
-            List<Reservation> reserved = new ArrayList<>();
-
-            // THE COMPENSATION, and the most important lines in this method.
-            //
-            // Until Phase 20b `reserve` was Propagation.MANDATORY inside this very transaction, so
-            // a rollback after this point un-reserved the stock automatically and there was
-            // nothing to write here. inventory-service is another process now: each reservation
-            // commits there before this method reaches its next line, and no rollback of ours can
-            // reach them.
-            //
-            // So the undo becomes an action. The synchronisation fires after this transaction
-            // completes, and only when it completed by ROLLING BACK - the same machinery Phase 16
-            // used for cache eviction, pointed at the opposite outcome.
-            //
-            // REGISTERED BEFORE THE LOOP, and a test is the reason. The first version registered
-            // it AFTER, which reads naturally - you have the list, now say what to do with it -
-            // and is wrong in the one case that matters: a failure DURING the loop, which is the
-            // likeliest failure there is, left nothing registered and released nothing. The list
-            // is mutated as reservations succeed, so whatever was taken before the throw is
-            // exactly what gets given back.
-            //
-            // A compensating transaction is not a rollback. It is a second business operation that
-            // happens to mean the opposite of the first, and it can be lost: if this process dies
-            // between a reservation and the rollback, the stock stays taken for an order that never
-            // existed. Nothing reconciles that yet, and the test report says so rather than leaving
-            // it to be discovered.
-            if (TransactionSynchronizationManager.isSynchronizationActive()) {
-                TransactionSynchronizationManager.registerSynchronization(
-                        new TransactionSynchronization() {
-                            @Override
-                            public void afterCompletion(int status) {
-                                if (status != STATUS_ROLLED_BACK) {
-                                    return;
-                                }
-                                reserved.forEach(r -> inventory.release(r.productId(), r.quantity()));
-                            }
-                        });
-            }
-
+            List<OrderCreatedEvent.Line> reservation = new ArrayList<>();
             for (CartItem line : lines) {
-                // Both the order line and the reservation are built from the CART's snapshot, not
-                // from the catalogue. Checkout no longer reads a product at all - which is what
-                // lets order-service place an order without calling catalog-service, and is worth
-                // noticing: the price charged is the price the shopper was shown.
+                // Both the order line and the line to reserve are built from the CART's snapshot,
+                // not from the catalogue. Checkout does not read a product at all - the price
+                // charged is the price the shopper was shown.
                 order.addItem(
                         line.getProductId(), line.getProductName(), line.getUnitPrice(),
                         line.getQuantity());
-                inventory.reserve(
-                        line.getProductId(), line.getProductName(), line.getQuantity());
-                reserved.add(new Reservation(line.getProductId(), line.getQuantity()));
+                reservation.add(new OrderCreatedEvent.Line(
+                        line.getProductId(), line.getProductName(), line.getQuantity()));
             }
-
 
             Order placed = orderRepository.save(order);
             cartService.clearCart(cart);
 
-            // The event is written to the OUTBOX, in this transaction, as one more insert
-            // alongside the order and the stock reduction. That single line is the whole of
-            // Phase 18.
-            //
-            // Phase 17 published a Spring application event here and let an AFTER_COMMIT listener
-            // put it on Kafka. The shape was right — nothing announced until the order was real —
-            // but it left the dual-write window: commit, then a separate send that a dead broker
-            // or a dying process could swallow. It was measured, not feared: four orders lost
-            // their notification permanently in that phase's failure test.
-            //
-            // Now the event commits or rolls back WITH the order, because it is the same
-            // transaction and the same database. OutboxRelay does the sending afterwards, from
-            // the table. This method still neither knows nor cares that Kafka exists — the
-            // difference is that now, neither does the guarantee.
+            // The saga starts HERE, as one more insert in this transaction - Phase 18's outbox,
+            // now carrying the first step of a distributed transaction instead of a notification.
+            // If this transaction rolls back, the event never existed and inventory never hears
+            // of the order; if it commits, the relay will deliver it, however long Kafka is down.
             outbox.append(
-                    OrderPlacedEvent.of(
+                    OrderCreatedEvent.of(
                             placed.getId(),
                             placed.getUsername(),
                             placed.getTotalAmount(),
-                            placed.getItems().size(),
+                            reservation,
                             placed.getPlacedAt()));
 
             return OrderResponse.from(placed);
@@ -193,12 +142,4 @@ class OrderPlacementService {
             throw ex;
         }
     }
-
-    /**
-     * One line's worth of stock taken from inventory-service, remembered so it can be given back.
-     *
-     * <p>A local record rather than anything shared: the compensation needs an id and a number,
-     * and nothing else about the reservation is this method's business.
-     */
-    private record Reservation(Long productId, int quantity) {}
 }

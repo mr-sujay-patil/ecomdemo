@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -11,6 +12,8 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ecomdemo.cart.CartService;
+import com.ecomdemo.messaging.OrderCreatedEvent;
+import com.ecomdemo.messaging.OutboxWriter;
 import com.ecomdemo.cart.dto.AddCartItemRequest;
 import com.ecomdemo.cart.dto.CartItemResponse;
 import com.ecomdemo.shared.ConflictException;
@@ -40,6 +43,9 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
 
 /**
  * The "Done when" of Phase 6: two checkouts race for the last unit, exactly one wins, and the
@@ -78,7 +84,8 @@ class ConcurrentCheckoutTest {
      * ARITHMETIC, and they should not pretend to: {@code InventoryServiceTest} and
      * {@code ConcurrentReservationTest} cover that, against a real database, in the service that
      * owns it. What is left here is ordering and auditing, which is what this class was always
-     * really about — and one thing that is genuinely new, the saga compensation below.
+     * really about. (Phase 20b added a compensation test here; Phase 24's saga replaced that
+     * compensation, and the test now asserts what replaced it - see below.)
      */
     @MockitoBean
     private InventoryClient inventory;
@@ -94,6 +101,19 @@ class ConcurrentCheckoutTest {
 
     @Autowired
     private OrderAuditRepository orderAuditRepository;
+
+    @Autowired
+    private OrderRepository orderRepository;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    /**
+     * A SPY, not a mock (Phase 24): every checkout here writes its OrderCreatedEvent for real, and
+     * one test makes that write fail to show what a late failure leaves behind.
+     */
+    @MockitoSpyBean
+    private OutboxWriter outboxWriter;
 
     /**
      * The shopper both racing threads act as. They share one account deliberately: the race is
@@ -150,64 +170,76 @@ class ConcurrentCheckoutTest {
     // overselling.
 
     @Test
-    @DisplayName("a checkout that rolls back RELEASES the stock it had already reserved")
-    void aRolledBackCheckoutCompensates() {
-        // THE MOST IMPORTANT TEST IN PHASE 20b, and it exists because the old one stopped being
-        // true rather than because anything new was wanted.
-        //
-        // This test used to be called "the checkout that loses the race rolls back the stock it
-        // had already reduced", and it asserted exactly that: the loser's reduction disappeared
-        // with its transaction, because the reduction WAS its transaction.
-        //
-        // That is no longer what happens. Each reservation commits in inventory-service before
-        // this checkout reaches its next line, and no rollback here can reach it. What undoes it
-        // is InventoryClient.release, called from a transaction synchronisation that fires only
-        // on rollback - a compensating transaction, which is a second operation that can be lost
-        // rather than a guarantee that cannot.
-        //
-        // So the claim moves from "the stock came back" to "we asked for it back". That is
-        // genuinely weaker, and asserting the weaker thing honestly is better than asserting the
-        // stronger thing falsely.
+    @DisplayName("a checkout refused by the stock pre-check takes nothing and releases nothing")
+    void aRefusedCheckoutReleasesNothing() {
+        // Phase 20b's "most important test", when checkout reserved over HTTP and compensated with
+        // InventoryClient.release on rollback. Its assertion still stands, for a simpler reason
+        // since Phase 24: checkout never reserves anything at all (the saga does, in
+        // inventory-service), so a refused checkout has nothing to give back - and a release here
+        // would put stock into existence.
         ProductSnapshot plentiful = create(PRODUCT_PREFIX + "Bulk Item", 10);
         ProductSnapshot scarce = create(PRODUCT_PREFIX + "Scarce Item", 1);
         cartService.addItem(new AddCartItemRequest(plentiful.id(), 2));
         cartService.addItem(new AddCartItemRequest(scarce.id(), 1));
 
-        // The second line fails its availability check, so checkout throws after the first line
-        // has already been reserved. That is precisely the window the compensation exists for.
+        // The second line fails its availability check, so checkout throws before writing anything.
         doThrow(new InsufficientStockException("Scarce Item", 1, 0))
                 .when(inventory).requireAvailable(eq(scarce.id()), anyString(), anyInt());
 
         assertThatThrownBy(() -> orderService.place())
                 .isInstanceOf(ConflictException.class);
 
-        // Nothing was reserved, because every line is checked before any line is written - so
-        // there is nothing to compensate for, and release must NOT be called. A compensation that
-        // fires when nothing was taken would put stock into existence.
+        // Nothing was reserved and nothing is released.
+        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
         verify(inventory, never()).release(anyLong(), anyInt());
     }
 
     @Test
-    @DisplayName("a rollback AFTER reserving releases every line that was taken")
-    void aRollbackAfterReservingReleasesEveryLine() {
-        // The other half, and the one that actually exercises the synchronisation: both lines pass
-        // their availability check and are reserved, and the checkout then fails afterwards. Every
-        // reservation that happened must be released, and only those.
+    @DisplayName("a checkout that fails AFTER writing its lines leaves no order and no saga event behind")
+    void aLateFailureLeavesNothingToCompensate() {
+        // REWRITTEN in Phase 24. This test was "a rollback AFTER reserving releases every line
+        // that was taken": it failed the second HTTP reservation and verified release() for the
+        // first. That compensation no longer exists, because the thing it undid no longer happens -
+        // checkout reserves nothing over HTTP; it writes an OrderCreatedEvent to the outbox and
+        // inventory-service reserves when it reads it.
+        //
+        // So the guarantee this test protects has CHANGED SHAPE, not disappeared. It used to be
+        // "if checkout fails late, we ask for the stock back". It is now "if checkout fails late,
+        // inventory never hears of the order at all" - because the order, the emptied cart and the
+        // saga's first event are ONE local transaction. That is stronger: there is no remote write
+        // inside it, so there is nothing that can be left behind for a lost compensation to miss.
+        //
+        // The failure is injected at the last step, the outbox write, after the order has been
+        // saved and the cart emptied - the latest point a checkout can fail.
         ProductSnapshot first = create(PRODUCT_PREFIX + "First", 10);
         ProductSnapshot second = create(PRODUCT_PREFIX + "Second", 10);
         cartService.addItem(new AddCartItemRequest(first.id(), 2));
         cartService.addItem(new AddCartItemRequest(second.id(), 3));
+        int ordersBefore = orderRepository.findAllByUserIdWithItems(SHOPPER_ID).size();
+        long sagaEventsBefore = sagaEventsStarted();
 
-        // Fail on the SECOND reservation, after the first has committed in the other service.
-        doThrow(new IllegalStateException("inventory-service fell over mid-checkout"))
-                .when(inventory).reserve(eq(second.id()), anyString(), anyInt());
+        // Stubbed on the proxy's TARGET: OutboxWriter is @Transactional(MANDATORY), and stubbing
+        // through the proxy would run that check - with no transaction open - before Mockito ever
+        // saw the call.
+        OutboxWriter target = AopTestUtils.getUltimateTargetObject(outboxWriter);
+        doThrow(new IllegalStateException("the outbox write fell over mid-checkout"))
+                .when(target).append(any(OrderCreatedEvent.class));
 
         assertThatThrownBy(() -> orderService.place()).isInstanceOf(RuntimeException.class);
 
-        // The first line's units go back. The second's do not, because they were never taken -
-        // the call that would have taken them is the one that threw.
-        verify(inventory).release(first.id(), 2);
-        verify(inventory, never()).release(eq(second.id()), anyInt());
+        // No order, no event - so inventory-service has nothing to reserve and nothing to undo.
+        assertThat(orderRepository.findAllByUserIdWithItems(SHOPPER_ID)).hasSize(ordersBefore);
+        assertThat(sagaEventsStarted()).isEqualTo(sagaEventsBefore);
+        // The emptied cart came back with the rollback: the shopper can simply try again.
+        assertThat(cartService.view().items()).hasSize(2);
+        // And, as before the saga as after it, no stock was released that was never taken.
+        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
+        verify(inventory, never()).release(anyLong(), anyInt());
+    }
+
+    private long sagaEventsStarted() {
+        return jdbc.queryForObject(
+                "SELECT count(*) FROM outbox_event WHERE event_type = 'OrderCreatedEvent'", Long.class);
     }
 
     @Test

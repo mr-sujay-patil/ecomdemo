@@ -51,11 +51,14 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 @WithMockUser(username = "shopper", roles = "CUSTOMER")
 class OrderControllerTest {
 
+    /** What checkout returns since Phase 24: accepted, and PENDING until the saga decides. */
     private static final OrderResponse PLACED_ORDER = new OrderResponse(
             5L,
             Instant.parse("2026-01-01T10:15:30Z"),
             "shopper",
-            OrderStatus.PLACED,
+            OrderStatus.PENDING,
+            null,
+            null,
             new BigDecimal("3000.00"),
             List.of(new OrderItemResponse(
                     10L, "Lamp", new BigDecimal("1500.00"), 2, new BigDecimal("3000.00"))));
@@ -81,7 +84,7 @@ class OrderControllerTest {
                     .hasHeader("Location", "/api/orders/5")
                     .bodyJson()
                     .isLenientlyEqualTo("""
-                            {"id":5,"status":"PLACED","totalAmount":3000.00,
+                            {"id":5,"status":"PENDING","totalAmount":3000.00,
                              "placedAt":"2026-01-01T10:15:30Z",
                              "items":[{"productId":10,"productName":"Lamp","unitPrice":1500.00,
                                        "quantity":2,"lineTotal":3000.00}]}
@@ -163,7 +166,7 @@ class OrderControllerTest {
                     .hasStatus(OK)
                     .bodyJson()
                     .extractingPath("$.status")
-                    .isEqualTo("PLACED");
+                    .isEqualTo("PENDING");
         }
 
         @Test
@@ -182,6 +185,45 @@ class OrderControllerTest {
     }
 
     @Nested
+    @DisplayName("GET /api/orders/{id}/status")
+    class Status {
+
+        @Test
+        void status_whenTheOrderWasCancelled_returnsTheStatusAndTheReason() {
+            // Given: the saga has decided this one
+            OrderResponse cancelled = new OrderResponse(
+                    5L,
+                    Instant.parse("2026-01-01T10:15:30Z"),
+                    "shopper",
+                    OrderStatus.CANCELLED,
+                    "Payment declined: 12000.00 exceeds the limit of 10000.00",
+                    Instant.parse("2026-01-01T10:15:33Z"),
+                    new BigDecimal("12000.00"),
+                    List.of());
+            when(orderService.findById(5L)).thenReturn(cancelled);
+
+            // When / Then: the small thing a client polls - no lines, just where the order stands
+            assertThat(mvc.get().uri("/api/orders/5/status"))
+                    .hasStatus(OK)
+                    .bodyJson()
+                    .isStrictlyEqualTo("""
+                            {"orderId":5,"status":"CANCELLED",
+                             "reason":"Payment declined: 12000.00 exceeds the limit of 10000.00",
+                             "changedAt":"2026-01-01T10:15:33Z"}
+                            """);
+        }
+
+        @Test
+        void status_whenTheOrderIsMissing_returns404() {
+            // Same service call as GET /api/orders/{id}, so the same answers - and the same
+            // ownership rule, which lives in OrderService.findById (OrderServiceTest).
+            when(orderService.findById(404L)).thenThrow(NotFoundException.order(404L));
+
+            assertThat(mvc.get().uri("/api/orders/404/status")).hasStatus(NOT_FOUND);
+        }
+    }
+
+    @Nested
     @DisplayName("access rules")
     class Access {
 
@@ -193,6 +235,7 @@ class OrderControllerTest {
             assertThat(mvc.get().uri("/api/orders")).hasStatus(UNAUTHORIZED);
             assertThat(mvc.post().uri("/api/orders")).hasStatus(UNAUTHORIZED);
             assertThat(mvc.get().uri("/api/orders/5")).hasStatus(UNAUTHORIZED);
+            assertThat(mvc.get().uri("/api/orders/5/status")).hasStatus(UNAUTHORIZED);
         }
 
         @Test
@@ -203,6 +246,7 @@ class OrderControllerTest {
             assertThat(mvc.get().uri("/api/orders")).hasStatus(FORBIDDEN);
             assertThat(mvc.post().uri("/api/orders")).hasStatus(FORBIDDEN);
             assertThat(mvc.get().uri("/api/orders/5")).hasStatus(FORBIDDEN);
+            assertThat(mvc.get().uri("/api/orders/5/status")).hasStatus(FORBIDDEN);
         }
 
         @Test

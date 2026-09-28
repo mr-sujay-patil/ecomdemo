@@ -327,7 +327,7 @@ class OrderServiceTest {
             OrderResponse found = orderService.findById(5L);
 
             // Then
-            assertThat(found.status()).isEqualTo(OrderStatus.PLACED);
+            assertThat(found.status()).isEqualTo(OrderStatus.PENDING);
             assertThat(found.totalAmount()).isEqualByComparingTo("100.00");
         }
 

@@ -382,6 +382,71 @@ services:
     restart: unless-stopped
 
   # -------------------------------------------------------------------------------------------
+  # payment-service's database (Phase 24)
+  # -------------------------------------------------------------------------------------------
+  payment-db:
+    image: postgres:18-alpine
+    container_name: ecomdemo-payment-db
+    environment:
+      POSTGRES_DB: ${PAYMENT_DB_NAME:-payment}
+      POSTGRES_USER: ${PAYMENT_DB_USER:-payment}
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment}
+    ports:
+      - "${PAYMENT_DB_PORT:-5437}:5432"
+    volumes:
+      - payment-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PAYMENT_DB_USER:-payment} -d ${PAYMENT_DB_NAME:-payment}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
+  # payment-service (Phase 24) - a MOCK payment provider, the saga's third step
+  # -------------------------------------------------------------------------------------------
+  payment-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        MODULE: payment-service
+    image: ecomdemo-payment:latest
+    container_name: ecomdemo-payment-service
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      kafka:
+        # Its only input, as for notification-service: a payment starts from a StockReserved event.
+        condition: service_healthy
+    environment:
+      <<: *observability-env
+      PAYMENT_DB_HOST: payment-db
+      PAYMENT_DB_PORT: 5432
+      PAYMENT_DB_NAME: ${PAYMENT_DB_NAME:-payment}
+      PAYMENT_DB_USER: ${PAYMENT_DB_USER:-payment}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment}
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      JWT_SECRET: ${JWT_SECRET:-}
+      # Orders with a total ABOVE this are declined - the way to force the saga's failure path.
+      PAYMENT_DECLINE_ABOVE: ${PAYMENT_DECLINE_ABOVE:-10000.00}
+    ports:
+      # Published only for health and metrics, like notification-service. No business API.
+      - "${PAYMENT_PORT:-8086}:8086"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8086/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          memory: ${PAYMENT_MEMORY_LIMIT:-768M}
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------------------------
   # catalog-service's database (Phase 20c)
   # -------------------------------------------------------------------------------------------
   catalog-db:
@@ -884,6 +949,7 @@ volumes:
   # alone; `docker compose down -v` removes it. `docker volume ls` shows what is on the machine.
   customer-data:
   notification-data:
+  payment-data:
   catalog-data:
   inventory-data:
 

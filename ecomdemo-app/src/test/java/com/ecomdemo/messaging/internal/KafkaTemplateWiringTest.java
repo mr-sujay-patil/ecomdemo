@@ -59,9 +59,11 @@ class KafkaTemplateWiringTest {
 
     @Test
     @DisplayName("the relay still has a sender, whose producer is private to it")
-    void theRelayHasItsOwnSender() {
+    void theRelayHasItsOwnSender() throws ClassNotFoundException {
         // The relay does send with a StringSerializer - that requirement did not go away. It just
         // does it through a producer this bean owns rather than one the context can resolve.
-        assertThat(context.getBeanNamesForType(OutboxKafkaSender.class)).hasSize(1);
+        // Package-private in the outbox library since Phase 24, so it is named, not imported.
+        Class<?> sender = Class.forName("com.ecomdemo.outbox.internal.OutboxKafkaSender");
+        assertThat(context.getBeanNamesForType(sender)).hasSize(1);
     }
 }

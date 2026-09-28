@@ -1,6 +1,10 @@
 package com.ecomdemo;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -25,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * The one integration test of this phase: the whole place-order flow against a real Spring
@@ -51,6 +56,9 @@ class PlaceOrderFlowTest {
     @Autowired
     private OrderService orderService;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
     /** A shopper of this class's own, so its cart cannot collide with another test class's. */
     /**
      * Stock is in inventory-service since Phase 20b, so creating a product and reserving at
@@ -72,7 +80,7 @@ class PlaceOrderFlowTest {
     }
 
     @Test
-    void placingAnOrderChargesTheCartTotalReservesStockAndEmptiesTheCart() {
+    void placingAnOrderChargesTheCartTotalStartsTheSagaAndEmptiesTheCart() {
         // A product of our own, so the test does not depend on the seeded catalogue.
         ProductSnapshot product = catalogue.create(
                 new ProductWrite("Test Widget", "Created by the flow test", new BigDecimal("19.99"), 10, "ACCESSORIES"));
@@ -84,7 +92,8 @@ class PlaceOrderFlowTest {
         OrderResponse order = orderService.place();
 
         assertThat(order.id()).isNotNull();
-        assertThat(order.status()).isEqualTo(OrderStatus.PLACED);
+        // PENDING: the saga has only just started (Phase 24).
+        assertThat(order.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(order.totalAmount()).isEqualByComparingTo("59.97");
         assertThat(order.items()).singleElement().satisfies(line -> {
             assertThat(line.productId()).isEqualTo(product.id());
@@ -93,16 +102,20 @@ class PlaceOrderFlowTest {
             assertThat(line.quantity()).isEqualTo(3);
         });
 
-        // ...inventory was asked to take exactly the ordered quantity...
+        // ...inventory will be asked to take exactly the ordered quantity...
         //
-        // The assertion CHANGED in Phase 20b, and the change is the split in one line. It used to
-        // read the stock back and expect 7: create with 10, order 3. Stock is in another service's
-        // database now, so this test can see the REQUEST and not the result - what actually
-        // happened to the number is asserted in inventory-service, against the row itself.
-        //
-        // Weaker, and honest about being weaker. The alternative was to stand up a second
-        // application to re-assert something already covered where it belongs.
-        verify(inventory).reserve(product.id(), "Test Widget", 3);
+        // The assertion has changed twice. Until Phase 20b it read the stock back and expected 7.
+        // Phase 20b could only see the REQUEST: verify(inventory).reserve(id, name, 3). Since
+        // Phase 24 checkout makes no request at all - it writes an OrderCreatedEvent carrying the
+        // lines into the outbox, in this transaction, and inventory-service reserves them when it
+        // reads it (InventorySagaTest). So the request is now a ROW, and the row is asserted.
+        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
+        assertThat(jdbc.queryForObject(
+                        "SELECT payload FROM outbox_event WHERE aggregate_id = ? AND event_type = 'OrderCreatedEvent'",
+                        String.class,
+                        String.valueOf(order.id())))
+                .contains("\"productId\":" + product.id())
+                .contains("\"quantity\":3");
 
         // ...the cart is empty again...
         assertThat(cartService.view().items()).isEmpty();

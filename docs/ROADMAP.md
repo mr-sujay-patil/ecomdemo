@@ -92,8 +92,8 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 20d | [Microservices Split — the rest](phases/phase-20d-plan.md) | **customer + notification** extracted. FIVE services, five databases | `feature/phase-20d-customer-service` | ✅ |
 | 21 | [API Gateway](phases/phase-21-gateway.md) | Spring Cloud Gateway | `feature/phase-21-gateway` | ✅ |
 | 22 | [Resilience](phases/phase-22-resilience.md) | Resilience4j | `feature/phase-22-resilience` | ✅ |
-| 23 | [Distributed Tracing](phases/phase-23-tracing.md) | OpenTelemetry + Tempo | `feature/phase-23-tracing` | 🔵 |
-| 24 | [Distributed Transactions](phases/phase-24-saga.md) | Saga pattern | `feature/phase-24-saga` | ⬜ |
+| 23 | [Distributed Tracing](phases/phase-23-tracing.md) | OpenTelemetry + Tempo | `feature/phase-23-tracing` | ✅ |
+| 24 | [Distributed Transactions](phases/phase-24-saga.md) | Saga pattern | `feature/phase-24-saga` | 🔵 |
 | 25 | [Container Orchestration](phases/phase-25-kubernetes.md) | Kubernetes (kind/minikube) | `feature/phase-25-kubernetes` | ⬜ |
 | 26 | [Cloud Deployment (Optional)](phases/phase-26-aks.md) | Azure AKS + ACR | `feature/phase-26-aks` | ⬜ |
 | 27 | [LLM Integration](phases/phase-27-spring-ai.md) | Spring AI | `feature/phase-27-spring-ai` | ⬜ |

@@ -74,11 +74,16 @@ import org.springframework.test.context.ActiveProfiles;
  * like inventory so their assertions keep meaning what they meant; what it cannot prove, and does
  * not pretend to, is that the HTTP client speaks the protocol the real service serves. That is the
  * smoke test's job once Compose runs both.
+ *
+ * <p><strong>{@link FakeSagaParticipants} joined in Phase 24.</strong> Checkout no longer reserves
+ * stock; it starts a saga, and an order stays PENDING until inventory and payment answer. The fake
+ * answers over the real Kafka container, so a test that checks out and then waits for CONFIRMED is
+ * exercising this application's outbox, relay and saga listeners for real.
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
 @Import({PostgresContainerConfig.class, RedisContainerConfig.class, KafkaContainerConfig.class,
-        InMemoryInventoryConfig.class, InMemoryCatalogConfig.class})
+        InMemoryInventoryConfig.class, InMemoryCatalogConfig.class, FakeSagaParticipants.class})
 @ActiveProfiles("it")
 public abstract class IntegrationTest {
 

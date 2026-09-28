@@ -9,9 +9,11 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Outbox, "Outbox", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
 }
 
+Rel(EcomdemoApplication.EcomdemoApplication.Messaging, EcomdemoApplication.EcomdemoApplication.Outbox, "uses", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
 @enduml
