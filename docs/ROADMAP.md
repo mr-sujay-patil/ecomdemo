@@ -96,7 +96,7 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 24 | [Distributed Transactions](phases/phase-24-saga.md) | Saga pattern | `feature/phase-24-saga` | ✅ |
 | 25 | [Container Orchestration](phases/phase-25-kubernetes.md) | Kubernetes (kind/minikube) | `feature/phase-25-kubernetes` | ✅ |
 | 26 | [Cloud Deployment (Optional)](phases/phase-26-aks.md) | Azure AKS + ACR | `feature/phase-26-aks` | ⏭️ |
-| 27 | [LLM Integration](phases/phase-27-spring-ai.md) | Spring AI | `feature/phase-27-spring-ai` | 🟡 |
+| 27 | [LLM Integration](phases/phase-27-spring-ai.md) | Spring AI | `feature/phase-27-spring-ai` | 🔵 |
 | 28 | [Semantic Search](phases/phase-28-semantic-search.md) | pgvector | `feature/phase-28-semantic-search` | ⬜ |
 | 29 | [AI Shopping Assistant](phases/phase-29-ai-assistant.md) | RAG + tool calling | `feature/phase-29-ai-assistant` | ⬜ |
 | 30 | [Performance Testing](phases/phase-30-gatling.md) | Gatling | `feature/phase-30-gatling` | ⬜ |
