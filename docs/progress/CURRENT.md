@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-28
 - **Phase:** 29 — AI Shopping Assistant (RAG + tool calling)
 - **Branch:** feature/phase-29-ai-assistant (cut from `main` at `5fb6ac1`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -39,17 +39,23 @@
   ConfigMap, k8s-up), ContainerMemoryBudgetTest (7 -> 8), README.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] assistant-service + `POST /api/assistant/chat` (+ gateway route, compose, k8s)
-- [ ] RAG over products and policy Markdown documents
-- [ ] Tools searchProducts, getOrderStatus (current user only), addToCart (with confirmation)
-- [ ] Conversation memory in Redis
-- [ ] Guardrails (store topics only, no cross-user data)
-- [ ] Evaluation set (~10 questions), passing with a real model
-- [ ] Smoke: answers a product question; refuses another user's order
-- [ ] Testing protocol, test report, README, decisions, RECENT rotation, tracker
+- [x] assistant-service + `POST /api/assistant/chat` (+ confirm endpoint, gateway route, compose, k8s)
+- [x] RAG over products (search tool) and policy Markdown (5 docs, 19 passages, threshold 0.7 measured)
+- [x] Tools searchProducts, getOrderStatus (caller's token), addToCart (by name, propose + confirm)
+- [x] Conversation memory in Redis (own repository, key user:conversation, TTL 24h, window 20)
+- [x] Guardrails (prompt, input 1000, Spring AI tool limits 5/3, OrderClaimGuard output check)
+- [x] Evaluation set: 11 cases (`scripts/assistant-eval.{json,py}`). qwen2.5:7b 11/11 x3; llama3.2 8/11 x3
+  -> default ASSISTANT_OLLAMA_MODEL=qwen2.5:7b (user must `ollama pull qwen2.5:7b`)
+- [x] Smoke section "Shopping assistant" (+ k8s object loop)
+- [ ] Testing protocol: verify (last full: 604/0/0 before tuning), cold compose default (AI none), cold
+  compose real models (throwaway Ollama `ecomdemo-eval-ollama` + volume `ecomdemo-eval-ollama` with
+  qwen2.5:7b, llama3.2, nomic), outage, k8s in place; then test report, README, decisions, RECENT
+  rotation (archive Phase 27), tracker, PR
 
 ## Next action
-Implement the checklist on `feature/phase-29-ai-assistant`, in order. Nothing written yet.
+Run the testing protocol (above). Real-model runs: OLLAMA_BASE_URL=http://ecomdemo-eval-ollama:11434
+(throwaway container on ecomdemo_default, GPU). Remove the container AND volume when done. The gateway
+caches upstream IPs: after recreating app, restart the gateway (follow-up, not this phase).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
