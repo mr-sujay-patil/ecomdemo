@@ -2,7 +2,7 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-27
+- **Updated:** 2026-09-28
 - **Phase:** 23 — Distributed Tracing (OpenTelemetry + Tempo)
 - **Branch:** feature/phase-23-tracing (cut from `main` at `c232a27`)
 - **Step:** IMPLEMENTING
@@ -33,10 +33,17 @@ manual steps are done (`.env` memory pins gone, stash dropped).
 - Services export straight to Tempo (`tempo:4318`), not via Alloy: one hop fewer to learn/debug.
 - The smoke test sends its OWN W3C `traceparent` (sampled) so it knows the trace ID to query.
 - Not traced: `/actuator/**` (ObservationPredicate, servlet in common + reactive in gateway),
-  `spring.security.*` and `tasks.scheduled.*` observations (measured noise in Tempo).
+  `spring.security.*` observations, and the OutboxRelay's tick only (`OutboxObservationConfig`
+  predicate; was the whole `tasks.scheduled` prefix until ultrareview showed it also hid the
+  cleanup sweep and nightly sales report).
 - OTel sets traceparent flags `03` (sampled + W3C L2 "random"), not `01` — tests read the bit.
 
 ## Next action
+KNOWN RED in `verify` (pre-existing in this phase, confirmed with the fix stashed):
+`FlywayMigrationTest` x2 (expects V1..V16, V17 now exists) and
+`LoggingStackConfigTest.thePropertyReadsTheEnvironmentVariable` (property moved to
+`common/.../ecomdemo-observability.properties`). `ModularityTest` also regenerates
+`docs/modules/*` (new `tracing` module) - uncommitted, review and commit with the phase.
 Once `docker info` works again: `docker compose up --build --wait -d`, run `scripts/smoke-test.sh`,
 fix the new "Distributed tracing" section until green (expected services in a checkout trace:
 gateway-service, ecomdemo, inventory-service, notification-service, probably catalog-service). Then
