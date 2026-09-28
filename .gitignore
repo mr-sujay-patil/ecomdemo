@@ -76,3 +76,7 @@ logs/
 ehthumbs.db
 Thumbs.db
 desktop.ini
+
+# Python bytecode (scripts/assistant-eval.py)
+__pycache__/
+*.pyc
