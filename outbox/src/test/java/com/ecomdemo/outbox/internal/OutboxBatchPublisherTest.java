@@ -1,8 +1,7 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
-import com.ecomdemo.messaging.OutboxWriter;
-import com.ecomdemo.messaging.OrderPlacedEvent;
-import com.ecomdemo.messaging.KafkaTopics;
+import com.ecomdemo.outbox.OutboxRoutes;
+import com.ecomdemo.outbox.SampleOrderEvent;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -48,6 +47,9 @@ class OutboxBatchPublisherTest {
     @Mock
     private OutboxKafkaSender sender;
 
+    /** A route like the one ecomdemo-app declares for its OrderPlacedEvent. */
+    private static final String TOPIC = "orders.placed";
+
     private OutboxBatchPublisher publisher;
 
     @BeforeEach
@@ -57,15 +59,16 @@ class OutboxBatchPublisherTest {
                         outbox,
                         sender,
                         new OutboxProperties(Duration.ofSeconds(1), 10, Duration.ofDays(7), "-"),
-                        new OutboxTracing(Tracer.NOOP, Propagator.NOOP));
+                        new OutboxTracing(Tracer.NOOP, Propagator.NOOP),
+                        OutboxRoutes.builder().route(SampleOrderEvent.class, TOPIC).build());
     }
 
     private static OutboxEvent orderEvent(String orderId) {
         return new OutboxEvent(
                 UUID.randomUUID(),
-                OutboxWriter.ORDER_AGGREGATE,
+                "Order",
                 orderId,
-                OrderPlacedEvent.class.getSimpleName(),
+                SampleOrderEvent.class.getSimpleName(),
                 "{\"orderId\":" + orderId + "}",
                 null);
     }
@@ -117,7 +120,7 @@ class OutboxBatchPublisherTest {
 
             publisher.publishPendingBatch();
 
-            verify(sender).send(eq(KafkaTopics.ORDERS_PLACED), eq("4812"), anyString());
+            verify(sender).send(eq(TOPIC), eq("4812"), anyString());
         }
 
         @Test

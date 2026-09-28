@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,8 +61,8 @@ class OutboxRelay {
      * an empty outbox poll does.
      */
     @Scheduled(
-            fixedDelayString = "${ecomdemo.outbox.poll-delay}",
-            initialDelayString = "${ecomdemo.outbox.poll-delay}")
+            fixedDelayString = "${ecomdemo.outbox.poll-delay:1s}",
+            initialDelayString = "${ecomdemo.outbox.poll-delay:1s}")
     void relay() {
         try {
             int published = publisher.publishPendingBatch();

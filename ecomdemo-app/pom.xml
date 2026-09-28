@@ -27,6 +27,14 @@
 			<version>${project.version}</version>
 		</dependency>
 
+		<!-- The transactional outbox, moved out of this module in Phase 24 so the saga's other
+		     services can use it too. -->
+		<dependency>
+			<groupId>com.ecomdemo</groupId>
+			<artifactId>ecomdemo-outbox</artifactId>
+			<version>${project.version}</version>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>

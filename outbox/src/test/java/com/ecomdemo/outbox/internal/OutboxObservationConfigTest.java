@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,11 +46,13 @@ class OutboxObservationConfigTest {
     }
 
     @Test
-    @DisplayName("keeps the nightly sales report")
-    void keepsTheSalesReport() throws ClassNotFoundException {
-        // Package-private in com.ecomdemo.batch, so it is named rather than imported.
-        Class<?> salesReport = Class.forName("com.ecomdemo.batch.SalesReportScheduler");
-        assertThat(observe(salesReport).isNoop()).isFalse();
+    @DisplayName("keeps the service's own scheduled jobs, such as the app's nightly sales report")
+    void keepsTheServicesOwnJobs() {
+        // In ecomdemo-app this was the real SalesReportScheduler. The library cannot see any
+        // service's classes (Phase 24), so a stand-in plays its part: any @Scheduled job that is
+        // not the relay must still be traced - the regression ultrareview caught in Phase 23 was
+        // a predicate that hid ALL of them.
+        assertThat(observe(NightlyReport.class).isNoop()).isFalse();
     }
 
     @Test
@@ -77,6 +79,13 @@ class OutboxObservationConfigTest {
                     }
                 };
         return Observation.createNotStarted(NAME, () -> context, registry);
+    }
+
+    /** A service's own scheduled job, standing in for the app's sales report. */
+    static final class NightlyReport {
+        @Scheduled(cron = "0 0 2 * * *")
+        void run() {
+        }
     }
 
     /** Without a handler every observation is a no-op, and the test would prove nothing. */

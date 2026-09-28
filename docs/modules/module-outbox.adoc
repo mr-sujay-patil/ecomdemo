@@ -1,0 +1,9 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.outbox`
+|Spring components
+|* `c.e.o.Outbox`
+* `c.e.o.ProcessedEvents`
+* `c.e.o.SagaListenerErrors`
+|===

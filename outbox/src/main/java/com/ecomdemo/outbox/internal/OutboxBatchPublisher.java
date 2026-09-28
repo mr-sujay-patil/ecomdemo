@@ -1,7 +1,6 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
-import com.ecomdemo.messaging.OrderPlacedEvent;
-import com.ecomdemo.messaging.KafkaTopics;
+import com.ecomdemo.outbox.OutboxRoutes;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -63,16 +62,19 @@ class OutboxBatchPublisher {
     private final OutboxKafkaSender sender;
     private final OutboxProperties properties;
     private final OutboxTracing tracing;
+    private final OutboxRoutes routes;
 
     OutboxBatchPublisher(
             OutboxEventRepository outbox,
             OutboxKafkaSender sender,
             OutboxProperties properties,
-            OutboxTracing tracing) {
+            OutboxTracing tracing,
+            OutboxRoutes routes) {
         this.outbox = outbox;
         this.sender = sender;
         this.properties = properties;
         this.tracing = tracing;
+        this.routes = routes;
     }
 
     /**
@@ -102,10 +104,11 @@ class OutboxBatchPublisher {
 
                 event.markFailed(e.getMessage() == null ? e.toString() : e.getMessage());
                 log.error(
-                        "Outbox event {} (order {}) could not be published on attempt {}: {}. It "
+                        "Outbox event {} ({} {}) could not be published on attempt {}: {}. It "
                                 + "stays pending and will be retried; {} event(s) published before it "
                                 + "this tick.",
                         event.getEventId(),
+                        event.getAggregateType(),
                         event.getAggregateId(),
                         event.getAttempts(),
                         e.getMessage(),
@@ -138,8 +141,8 @@ class OutboxBatchPublisher {
     /**
      * Sends one event and waits for the broker to acknowledge it.
      *
-     * <p>The key is the aggregate id — the order id — exactly as in Phase 17, so that every event
-     * about one order lands in the same partition and is read in the order it was written. The
+     * <p>The key is the aggregate id — for every saga event, the order id — exactly as in Phase 17,
+     * so that every event about one order lands in the same partition and is read in the order it was written. The
      * key is a {@code String} here rather than a formatted {@code Long} because that is what the
      * column holds; the bytes are identical.
      */
@@ -153,17 +156,19 @@ class OutboxBatchPublisher {
      *
      * <p>A mapping in code rather than a {@code topic} column in the table, deliberately. The
      * topic is a deployment detail: renaming one, or splitting a topic in two, should be a change
-     * to this method and not a migration that rewrites history. The row records what HAPPENED;
-     * where that fact gets delivered is the relay's business.
+     * to code and not a migration that rewrites history. The row records what HAPPENED; where that
+     * fact gets delivered is decided by the service's {@link OutboxRoutes} (Phase 24 moved the
+     * mapping there when this class became a library).
      */
-    private static String topicFor(OutboxEvent event) {
+    private String topicFor(OutboxEvent event) {
         String type = event.getEventType();
-        if (OrderPlacedEvent.class.getSimpleName().equals(type)) {
-            return KafkaTopics.ORDERS_PLACED;
+        String topic = routes.topicFor(type);
+        if (topic != null) {
+            return topic;
         }
         // Not a log-and-skip. An unroutable row would otherwise sit pending for ever while the
         // batch stopped dead at it, blocking every event behind it — so it fails loudly, which is
-        // what a deployment that forgot to map a new event type deserves.
+        // what a deployment that forgot to route a new event type deserves.
         throw new IllegalStateException(
                 "No topic is mapped for outbox event type '" + type + "'");
     }

@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
@@ -52,7 +52,7 @@ public class OutboxTracing {
     private final Tracer tracer;
     private final Propagator propagator;
 
-    OutboxTracing(Tracer tracer, Propagator propagator) {
+    public OutboxTracing(Tracer tracer, Propagator propagator) {
         this.tracer = tracer;
         this.propagator = propagator;
     }
@@ -91,9 +91,13 @@ public class OutboxTracing {
 
         Span span = propagator.extract(Map.of(TRACEPARENT, traceParent), Map::get)
                 .name(RELAY_SPAN)
-                // The two ids anyone will search Tempo by when a notification did not arrive.
+                // What anyone will search Tempo by when a downstream service never heard of
+                // something. Generic since Phase 24 (it was `order.id` while only orders used
+                // the outbox); in the saga the aggregate id IS the order id in every service.
                 .tag("outbox.event_id", event.getEventId().toString())
-                .tag("order.id", event.getAggregateId())
+                .tag("outbox.event_type", event.getEventType())
+                .tag("outbox.aggregate_type", event.getAggregateType())
+                .tag("outbox.aggregate_id", event.getAggregateId())
                 .start();
         try (Tracer.SpanInScope ignored = tracer.withSpan(span)) {
             action.run();

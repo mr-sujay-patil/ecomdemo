@@ -9,13 +9,13 @@ top to bottom direction
 !include <C4/C4_Component>
 
 Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Cart, "Cart", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Order, "Order", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Metrics, "Metrics", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
   Component(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "JWT and token handling", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
+  Component(EcomdemoApplication.EcomdemoApplication.Messaging, "Messaging", $techn="Module", $descr="", $tags="", $link="")
 }
 
 Rel(EcomdemoApplication.EcomdemoApplication.Cart, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")

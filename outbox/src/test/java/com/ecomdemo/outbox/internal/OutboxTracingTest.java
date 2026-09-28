@@ -1,9 +1,9 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.outbox.SampleOrderEvent;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
 import io.micrometer.tracing.otel.bridge.OtelCurrentTraceContext;
@@ -124,7 +124,12 @@ class OutboxTracingTest {
         SpanData relay = finishedSpan(OutboxTracing.RELAY_SPAN);
         assertThat(relay.getTraceId()).isEqualTo(traceId);
         assertThat(relay.getParentSpanId()).isEqualTo(requestSpanId);
-        assertThat(relay.getAttributes().get(AttributeKey.stringKey("order.id"))).isEqualTo("4812");
+        assertThat(relay.getAttributes().get(AttributeKey.stringKey("outbox.aggregate_type")))
+                .isEqualTo("Order");
+        assertThat(relay.getAttributes().get(AttributeKey.stringKey("outbox.aggregate_id")))
+                .isEqualTo("4812");
+        assertThat(relay.getAttributes().get(AttributeKey.stringKey("outbox.event_type")))
+                .isEqualTo("SampleOrderEvent");
         assertThat(relay.getAttributes().get(AttributeKey.stringKey("outbox.event_id")))
                 .isEqualTo(row.getEventId().toString());
     }
@@ -174,7 +179,7 @@ class OutboxTracingTest {
                 UUID.randomUUID(),
                 "Order",
                 "4812",
-                OrderPlacedEvent.class.getSimpleName(),
+                SampleOrderEvent.class.getSimpleName(),
                 "{}",
                 traceParent);
     }

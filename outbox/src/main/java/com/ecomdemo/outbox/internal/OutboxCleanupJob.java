@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
 import java.time.Instant;
 import org.slf4j.Logger;
@@ -49,7 +49,7 @@ class OutboxCleanupJob {
      * a time somebody chose. {@code "-"} disables it outright, which is how a second instance, or
      * a developer's laptop, opts out.
      */
-    @Scheduled(cron = "${ecomdemo.outbox.cleanup-cron}")
+    @Scheduled(cron = "${ecomdemo.outbox.cleanup-cron:0 0 3 * * *}")
     @Transactional
     void sweep() {
         Instant cutoff = Instant.now().minus(properties.retention());

@@ -16,9 +16,10 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 **327/0/0** (this machine).
 
 ## Checklist (from the phase file's "What you'll implement", split into steps)
-- [ ] 1. `outbox` Maven module (`com.ecomdemo.outbox`): the app's outbox moved + generalised (row
-      stores its `topic`), idempotent-consumer `processed_event` claim, DLT error handler. App on it
-      with V18; behaviour unchanged, build green
+- [x] 1. `outbox` Maven module (`com.ecomdemo.outbox`): the app's outbox moved + generalised
+      (`OutboxRoutes` bean per service, NOT a topic column - keeps Phase 18's decision),
+      `ProcessedEvents` claim, `SagaListenerErrors` (blocking retries → `-dlt`), `@EnableOutbox`.
+      App on it with V18 (`processed_event`); verify green, 492 tests
 - [ ] 2. inventory-service: outbox + processed_event + `stock_reservation`; consumes
       `orders.created` → StockReserved/StockRejected; consumes `payments.failed` → release (compensation)
 - [ ] 3. New mock `payment-service` (+ payment-db): consumes `inventory.stock-reserved` →
@@ -47,8 +48,10 @@ green; `verify` on `main` BUILD SUCCESS (483 tests, 0 failed/skipped, stack down
 - Events carry what the next step needs (choreography): StockReserved carries amount + username.
 
 ## Next action
-Step 1: create the `outbox` module (move `ecomdemo-app/.../messaging/internal/Outbox*`), add the
-`topic` column (app V18), wire the app onto it; `./mvnw clean verify` must stay green.
+Step 2: inventory-service joins the saga. Add `ecomdemo-outbox` dep + `@EnableOutbox`, Flyway V3
+(outbox_event incl. trace_parent, processed_event, stock_reservation), OutboxRoutes, topics
+`inventory.stock-reserved`/`-rejected` (+`-dlt`), listeners for `orders.created` and `payments.failed`,
+consumer Kafka config (ErrorHandlingDeserializer + per-listener default type), CommonErrorHandler bean.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

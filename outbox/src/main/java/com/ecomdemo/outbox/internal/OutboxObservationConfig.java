@@ -1,4 +1,4 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox.internal;
 
 import io.micrometer.observation.ObservationPredicate;
 import org.springframework.context.annotation.Bean;

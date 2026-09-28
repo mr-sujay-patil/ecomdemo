@@ -1,7 +1,8 @@
-package com.ecomdemo.messaging.internal;
+package com.ecomdemo.outbox;
 
-import com.ecomdemo.messaging.OutboxWriter;
-import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.outbox.internal.OutboxEvent;
+import com.ecomdemo.outbox.internal.OutboxEventRepository;
+import com.ecomdemo.outbox.internal.OutboxTracing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.verify;
 
@@ -32,26 +33,26 @@ import org.springframework.kafka.support.JacksonUtils;
  * refused for lack of.
  */
 @ExtendWith(MockitoExtension.class)
-@DisplayName("OutboxWriter")
-class OutboxWriterTest {
+@DisplayName("Outbox")
+class OutboxTest {
 
     @Mock
     private OutboxEventRepository outbox;
 
-    private OutboxWriter writer;
+    private Outbox writer;
 
     @BeforeEach
     void setUp() {
         // Constructed here and not in a field initialiser: field initialisers run before Mockito
         // populates @Mock, so the writer would be built around a null repository.
-        writer = new OutboxWriter(outbox, new OutboxTracing(Tracer.NOOP, Propagator.NOOP));
+        writer = new Outbox(outbox, new OutboxTracing(Tracer.NOOP, Propagator.NOOP));
     }
 
-    private static final OrderPlacedEvent EVENT =
-            OrderPlacedEvent.of(4812L, "shopper", new BigDecimal("1299.50"), 3, Instant.now());
+    private static final SampleOrderEvent EVENT =
+            SampleOrderEvent.of(4812L, "shopper", new BigDecimal("1299.50"), 3, Instant.now());
 
     private OutboxEvent append() {
-        writer.append(EVENT);
+        writer.append("Order", EVENT.orderId(), EVENT.eventId(), EVENT);
         ArgumentCaptor<OutboxEvent> captor = ArgumentCaptor.forClass(OutboxEvent.class);
         verify(outbox).save(captor.capture());
         return captor.getValue();
@@ -73,7 +74,7 @@ class OutboxWriterTest {
 
         assertThat(row.getAggregateType()).isEqualTo("Order");
         assertThat(row.getAggregateId()).isEqualTo("4812");
-        assertThat(row.getEventType()).isEqualTo("OrderPlacedEvent");
+        assertThat(row.getEventType()).isEqualTo("SampleOrderEvent");
     }
 
     @Test
@@ -96,8 +97,8 @@ class OutboxWriterTest {
         // assertion that would have caught a mapper mismatch - Boot 4's Jackson 3 writes an
         // Instant differently from spring-kafka's Jackson 2, and nothing else in the build would
         // notice until a message failed to deserialise on the broker.
-        OrderPlacedEvent readBack =
-                JacksonUtils.enhancedObjectMapper().readValue(payload, OrderPlacedEvent.class);
+        SampleOrderEvent readBack =
+                JacksonUtils.enhancedObjectMapper().readValue(payload, SampleOrderEvent.class);
 
         assertThat(readBack).isEqualTo(EVENT);
     }

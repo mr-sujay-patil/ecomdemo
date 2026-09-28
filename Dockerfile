@@ -50,6 +50,7 @@ WORKDIR /build
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
 COPY common/pom.xml common/
+COPY outbox/pom.xml outbox/
 COPY inventory-service/pom.xml inventory-service/
 COPY catalog-service/pom.xml catalog-service/
 COPY customer-service/pom.xml customer-service/
@@ -59,6 +60,7 @@ COPY ecomdemo-app/pom.xml ecomdemo-app/
 RUN ./mvnw -B -q dependency:go-offline
 
 COPY common/src/ common/src/
+COPY outbox/src/ outbox/src/
 COPY inventory-service/src/ inventory-service/src/
 COPY catalog-service/src/ catalog-service/src/
 COPY customer-service/src/ customer-service/src/
