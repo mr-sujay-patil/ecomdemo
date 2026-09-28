@@ -62,6 +62,75 @@ BODY="$(mktemp)"
 # the same snapshot is read several times per check, so re-fetching it per assertion would both
 # be slow and - worse - compare two different moments in time.
 SCRAPE="$(mktemp)"
+# --------------------------------------------------------------------------------------------
+# Where the containers are: compose, or Kubernetes (Phase 25)
+# --------------------------------------------------------------------------------------------
+# About a third of these checks look INSIDE the system - a SQL query in a database, a Kafka topic's
+# offsets, a file in the application's volume - and a few stop a service on purpose. Under compose
+# that is `docker exec` / `docker stop` on a container name. On the Phase 25 cluster the same thing
+# is `kubectl exec` / `kubectl scale` on a workload. These three functions are the only place that
+# knows the difference, so every check below reads the same on both platforms.
+#
+# SMOKE_PLATFORM=k8s is set by scripts/k8s-smoke.sh, which also points BASE_URL at the Ingress.
+# A container name maps to a workload by dropping the `ecomdemo-` prefix: databases and Kafka are
+# StatefulSets, everything else a Deployment - `ecomdemo-catalog-db` -> statefulset/catalog-db.
+SMOKE_PLATFORM="${SMOKE_PLATFORM:-compose}"
+K8S_NAMESPACE="${K8S_NAMESPACE:-ecomdemo}"
+K8S_CONTEXT="${K8S_CONTEXT:-kind-ecomdemo}"
+
+k8s_workload() { # k8s_workload <container name> -> statefulset/<n> or deployment/<n>
+    local name="${1#ecomdemo-}"
+    [ "$name" = "postgres" ] && name="db"
+    case "$name" in
+        db | *-db | kafka) echo "statefulset/$name" ;;
+        *) echo "deployment/$name" ;;
+    esac
+}
+
+kube() { kubectl --context "$K8S_CONTEXT" -n "$K8S_NAMESPACE" "$@"; }
+
+ctr_exec() { # ctr_exec [-i] <container> <command...>
+    local stdin=""
+    if [ "$1" = "-i" ]; then stdin="-i"; shift; fi
+    local name="$1"; shift
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        # shellcheck disable=SC2086
+        kube exec $stdin "$(k8s_workload "$name")" -- "$@"
+    else
+        # shellcheck disable=SC2086
+        docker exec $stdin "$name" "$@"
+    fi
+}
+
+# ctr_stop / ctr_start <container>: take a service away and bring it back.
+# On Kubernetes a stopped container is a workload scaled to ZERO - deleting a pod would not do,
+# because its Deployment would replace it within seconds (which is the self-healing the Kubernetes
+# section tests on purpose). The replica count is remembered so the start restores it, and an HPA
+# leaves a workload at zero alone.
+CTR_REPLICAS_DIR="$(mktemp -d)"
+ctr_stop() {
+    local name="$1"
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        local workload; workload="$(k8s_workload "$name")"
+        kube get "$workload" -o jsonpath='{.spec.replicas}' > "$CTR_REPLICAS_DIR/${name}" 2>/dev/null
+        kube scale "$workload" --replicas=0 >/dev/null 2>&1
+        kube wait --for=delete pod -l "app.kubernetes.io/name=${name#ecomdemo-}" --timeout=120s >/dev/null 2>&1
+    else
+        docker stop "$name"
+    fi
+}
+ctr_start() {
+    local name="$1"
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        local workload replicas; workload="$(k8s_workload "$name")"
+        replicas="$(cat "$CTR_REPLICAS_DIR/${name}" 2>/dev/null || echo 1)"
+        kube scale "$workload" --replicas="${replicas:-1}" >/dev/null 2>&1
+        kube rollout status "$workload" --timeout=300s >/dev/null 2>&1
+    else
+        docker start "$name"
+    fi
+}
+
 # The Phase 18 section stops the Kafka container on purpose. If anything between the stop and the
 # start fails - a failed check under `set -e`, or a Ctrl-C - the broker would be left down and
 # every later run of this script would report a broken stack rather than a failed check. This
@@ -70,7 +139,7 @@ KAFKA_WAS_STOPPED=false
 restore_kafka() {
     if [ "$KAFKA_WAS_STOPPED" = true ]; then
         printf '\033[33mrestoring the Kafka container, which this script had stopped\033[0m\n' >&2
-        docker start "${KAFKA_CONTAINER:-ecomdemo-kafka}" >/dev/null 2>&1 || true
+        ctr_start "${KAFKA_CONTAINER:-ecomdemo-kafka}" >/dev/null 2>&1 || true
     fi
 }
 
@@ -79,10 +148,10 @@ CATALOG_WAS_STOPPED=false
 restore_catalog() {
     if [ "$CATALOG_WAS_STOPPED" = true ]; then
         printf '\033[33mrestoring the catalog-service container, which this script had stopped\033[0m\n' >&2
-        docker start "${CATALOG_CONTAINER:-ecomdemo-catalog-service}" >/dev/null 2>&1 || true
+        ctr_start "${CATALOG_CONTAINER:-ecomdemo-catalog-service}" >/dev/null 2>&1 || true
     fi
 }
-trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka; restore_catalog' EXIT
+trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka; restore_catalog; rm -rf "$CTR_REPLICAS_DIR"' EXIT
 
 PASSED=0
 FAILED=0
@@ -299,7 +368,7 @@ POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-}"
 if [ -z "$POSTGRES_CONTAINER" ]; then
     for candidate in ecomdemo-db ecomdemo-postgres; do
         if command -v docker >/dev/null 2>&1 \
-            && docker exec "$candidate" true >/dev/null 2>&1; then
+            && ctr_exec "$candidate" true >/dev/null 2>&1; then
             POSTGRES_CONTAINER="$candidate"
             break
         fi
@@ -314,7 +383,7 @@ REDIS_CONTAINER="${REDIS_CONTAINER:-}"
 if [ -z "$REDIS_CONTAINER" ]; then
     for candidate in ecomdemo-cache ecomdemo-redis; do
         if command -v docker >/dev/null 2>&1 \
-            && docker exec "$candidate" true >/dev/null 2>&1; then
+            && ctr_exec "$candidate" true >/dev/null 2>&1; then
             REDIS_CONTAINER="$candidate"
             break
         fi
@@ -328,8 +397,8 @@ redis_cli() {
     if command -v redis-cli >/dev/null 2>&1; then
         redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>/dev/null
     elif command -v docker >/dev/null 2>&1 \
-        && docker exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
-        docker exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null
+        && ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
+        ctr_exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null
     else
         return 1
     fi
@@ -342,8 +411,8 @@ psql_query() {
             -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
             -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
     elif command -v docker >/dev/null 2>&1 \
-        && docker exec "$POSTGRES_CONTAINER" true >/dev/null 2>&1; then
-        docker exec "$POSTGRES_CONTAINER" psql -qtAX -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
+        && ctr_exec "$POSTGRES_CONTAINER" true >/dev/null 2>&1; then
+        ctr_exec "$POSTGRES_CONTAINER" psql -qtAX -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
     else
         return 1
     fi
@@ -353,7 +422,7 @@ psql_query() {
 # 0. The application must be up
 # customer_psql_query <sql> -> against CUSTOMER-SERVICE's database, which owns `users` since 20d.
 customer_psql_query() {
-    docker exec "${CUSTOMER_DB_CONTAINER:-ecomdemo-customer-db}" \
+    ctr_exec "${CUSTOMER_DB_CONTAINER:-ecomdemo-customer-db}" \
         psql -qtAX -U "${CUSTOMER_DB_USER:-customer}" \
         -d "${CUSTOMER_DB_NAME:-customer}" -c "$1" 2>/dev/null
 }
@@ -396,7 +465,7 @@ wait_for_notification() {
 # the old database would not fail loudly - it would report zero notifications for an order that was
 # notified perfectly well, which reads like a broken consumer.
 notification_psql_query() {
-    docker exec "${NOTIFICATION_DB_CONTAINER:-ecomdemo-notification-db}" \
+    ctr_exec "${NOTIFICATION_DB_CONTAINER:-ecomdemo-notification-db}" \
         psql -qtAX -U "${NOTIFICATION_DB_USER:-notification}" \
         -d "${NOTIFICATION_DB_NAME:-notification}" -c "$1" 2>/dev/null
 }
@@ -404,13 +473,13 @@ notification_psql_query() {
 # inventory_psql_query / payment_psql_query <sql> -> the saga's other two databases (Phase 24): the
 # reservations inventory-service holds, and the payments payment-service decided.
 inventory_psql_query() {
-    docker exec "${INVENTORY_DB_CONTAINER:-ecomdemo-inventory-db}" \
+    ctr_exec "${INVENTORY_DB_CONTAINER:-ecomdemo-inventory-db}" \
         psql -qtAX -U "${INVENTORY_DB_USER:-inventory}" \
         -d "${INVENTORY_DB_NAME:-inventory}" -c "$1" 2>/dev/null
 }
 
 payment_psql_query() {
-    docker exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" \
+    ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" \
         psql -qtAX -U "${PAYMENT_DB_USER:-payment}" \
         -d "${PAYMENT_DB_NAME:-payment}" -c "$1" 2>/dev/null
 }
@@ -846,7 +915,7 @@ PROBE_DB_ID=""
 # in. Watching the application's database instead would report "the data did not survive a restart"
 # every time the catalogue was re-provisioned, which is the exact confusion this identifier exists
 # to prevent.
-CURRENT_DB_ID="$(docker exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+CURRENT_DB_ID="$(ctr_exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
     psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
     -c "SELECT system_identifier FROM pg_control_system();" 2>/dev/null | tr -d '\r ')"
 
@@ -953,13 +1022,13 @@ if HISTORY="$(psql_query \
     # V4 did add this column, and its V14 dropped the whole table when catalog-service took it;
     # catalog_db's own V1 recreates it with the same shape. Pointing this check at the application's
     # database would assert that a table it deliberately dropped is still there.
-    VERSION_COLUMN="$(docker exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+    VERSION_COLUMN="$(ctr_exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
         psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
         -c "SELECT count(*) FROM information_schema.columns \
             WHERE table_name = 'product' AND column_name = 'version';" 2>/dev/null | tr -d '\r ')"
     check "catalog_db has the product.version column, the optimistic lock" "1" "$VERSION_COLUMN"
 
-    CATALOG_SEED="$(docker exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
+    CATALOG_SEED="$(ctr_exec "${CATALOG_DB_CONTAINER:-ecomdemo-catalog-db}" \
         psql -qtAX -U "${CATALOG_DB_USER:-catalog}" -d "${CATALOG_DB_NAME:-catalog}" \
         -c "SELECT count(*) FROM product WHERE id BETWEEN 1 AND 10;" 2>/dev/null | tr -d '\r ')"
     # The check Phase 20b learned to make: moving a table moves its DDL, and the DATA has to be
@@ -1481,10 +1550,10 @@ check "an imported product is in the cached listing" "True" \
 # is read through the container when there is one.
 if [ -n "${IMPORT_ERROR_FILE:-}" ] && [ "$IMPORT_ERROR_FILE" != "None" ]; then
     pass "the response names an error file"
-    if command -v docker >/dev/null 2>&1 && docker exec ecomdemo-app true >/dev/null 2>&1; then
-        # `sh -c` so the redirection runs INSIDE the container: `docker exec ... wc -l < file`
+    if command -v docker >/dev/null 2>&1 && ctr_exec ecomdemo-app true >/dev/null 2>&1; then
+        # `sh -c` so the redirection runs INSIDE the container: `ctr_exec ... wc -l < file`
         # would have the host's shell try to open a path that only exists in the container.
-        ERROR_LINES="$(docker exec ecomdemo-app sh -c "wc -l < '$IMPORT_ERROR_FILE'" 2>/dev/null \
+        ERROR_LINES="$(ctr_exec ecomdemo-app sh -c "wc -l < '$IMPORT_ERROR_FILE'" 2>/dev/null \
             | tr -d ' \r')"
         check "it holds one line per rejected row, plus a header" "$((IMPORT_BAD + 1))" \
             "${ERROR_LINES:-<unreadable>}"
@@ -2078,7 +2147,7 @@ KAFKA_CONTAINER="${KAFKA_CONTAINER:-ecomdemo-kafka}"
 # with. Always against localhost:9092, the INTERNAL listener, because this runs inside the broker.
 kafka() {
     local script="$1"; shift
-    docker exec "$KAFKA_CONTAINER" "/opt/kafka/bin/$script" --bootstrap-server localhost:9092 "$@" 2>/dev/null
+    ctr_exec "$KAFKA_CONTAINER" "/opt/kafka/bin/$script" --bootstrap-server localhost:9092 "$@" 2>/dev/null
 }
 
 # topic_message_count <topic> -> total messages across every partition, from the END offsets.
@@ -2086,12 +2155,12 @@ kafka() {
 # reached, which for a topic nothing has compacted or expired is the number of messages ever
 # written to it.
 topic_message_count() {
-    docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-get-offsets.sh \
+    ctr_exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-get-offsets.sh \
         --bootstrap-server localhost:9092 --topic "$1" 2>/dev/null \
         | awk -F: '{total += $3} END {print (total == "" ? 0 : total)}'
 }
 
-if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/dev/null 2>&1; then
+if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/null 2>&1; then
     TOPICS="$(kafka kafka-topics.sh --list)"
 
     check "the orders.placed topic exists" "True" \
@@ -2200,7 +2269,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     # The MESSAGE itself, read back off the topic. `--from-beginning` with a timeout rather than a
     # message count, because the interesting assertion is about a specific order somewhere in the
     # topic rather than about whichever message happens to be last.
-    TOPIC_DUMP="$(docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-consumer.sh \
+    TOPIC_DUMP="$(ctr_exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-consumer.sh \
         --bootstrap-server localhost:9092 --topic orders.placed --from-beginning \
         --property print.key=true --timeout-ms 8000 2>/dev/null)"
 
@@ -2219,7 +2288,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
     # application code runs - the case that would otherwise be unrecoverable, because there is
     # nothing to catch it and the offset is never committed.
     printf 'poison:{"not":"an OrderPlacedEvent"}\n' \
-        | docker exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
+        | ctr_exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
             --bootstrap-server localhost:9092 --topic orders.placed \
             --property parse.key=true --property key.separator=: >/dev/null 2>&1
 
@@ -2254,7 +2323,7 @@ if command -v docker >/dev/null 2>&1 && docker exec "$KAFKA_CONTAINER" true >/de
 
     for _ in 1 2; do
         printf '%s:%s\n' "$DUPLICATE_ORDER_ID" "$DUPLICATE_EVENT" \
-            | docker exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
+            | ctr_exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
                 --bootstrap-server localhost:9092 --topic orders.placed \
                 --property parse.key=true --property key.separator=: >/dev/null 2>&1
     done
@@ -2300,7 +2369,7 @@ as_customer
 section "Reliable event publishing"
 
 if command -v docker >/dev/null 2>&1 \
-    && docker exec "$KAFKA_CONTAINER" true >/dev/null 2>&1 \
+    && ctr_exec "$KAFKA_CONTAINER" true >/dev/null 2>&1 \
     && psql_query "SELECT 1;" >/dev/null 2>&1; then
 
     # --- The outbox exists and is being drained ------------------------------------------------
@@ -2398,7 +2467,7 @@ if command -v docker >/dev/null 2>&1 \
         sleep 1
     done
 
-    docker stop "$KAFKA_CONTAINER" >/dev/null 2>&1
+    ctr_stop "$KAFKA_CONTAINER" >/dev/null 2>&1
     KAFKA_WAS_STOPPED=true   # the EXIT trap restores it if anything below fails
 
     # The checkout must still succeed, and must still be FAST. Phase 17's failure test found a
@@ -2458,11 +2527,11 @@ if command -v docker >/dev/null 2>&1 \
         "$(notification_psql_query "SELECT count(*) FROM notification WHERE order_id = $OUTAGE_ORDER_ID;" | tr -d ' ')"
 
     # --- RECOVERY ------------------------------------------------------------------------------
-    docker start "$KAFKA_CONTAINER" >/dev/null 2>&1
+    ctr_start "$KAFKA_CONTAINER" >/dev/null 2>&1
     KAFKA_WAS_STOPPED=false
 
     for _ in $(seq 1 60); do
-        docker exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh \
+        ctr_exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh \
             --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
         sleep 1
     done
@@ -2774,7 +2843,7 @@ check "with catalog-service UP, adding to the cart works" "200" \
     "$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
 
 # --- Stop it ------------------------------------------------------------------------------------
-docker stop "$CATALOG_CONTAINER" >/dev/null 2>&1
+ctr_stop "$CATALOG_CONTAINER" >/dev/null 2>&1
 CATALOG_WAS_STOPPED=true   # the EXIT trap restores it if anything below fails
 
 STARTED_MS="$(now_ms)"
@@ -2829,7 +2898,7 @@ check "the application itself stays healthy - an open breaker is not a health fa
 as_customer
 
 # --- Bring it back ------------------------------------------------------------------------------
-docker start "$CATALOG_CONTAINER" >/dev/null 2>&1
+ctr_start "$CATALOG_CONTAINER" >/dev/null 2>&1
 CATALOG_WAS_STOPPED=false
 
 # No restart of the application, no manual reset: the breaker goes HALF_OPEN after its 10 s wait,
@@ -3059,8 +3128,8 @@ as_anonymous
 check "and has no business API: a payment cannot be asked for, only caused by an event" "403" \
     "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PAYMENT_URL/api/payments")"
 
-if command -v docker >/dev/null 2>&1 && docker exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1; then
-    SAGA_TOPICS="$(docker exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-topics.sh \
+if command -v docker >/dev/null 2>&1 && ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1; then
+    SAGA_TOPICS="$(ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-topics.sh \
         --bootstrap-server localhost:9092 --list 2>/dev/null)"
     MISSING_TOPICS=""
     for topic in orders.created inventory.stock-reserved inventory.stock-rejected \
@@ -3102,7 +3171,7 @@ request GET "/api/orders/$SAGA_OK_ORDER/status" >/dev/null
 check "the status endpoint gives no reason for a confirmed order" "None" "$(jget "d['reason']")"
 check "and says when it was decided" "True" "$(jget "d['changedAt'] is not None")"
 check "the stock was taken: the catalogue converges on 3" "3" "$(wait_for_stock "$SAGA_OK_PRODUCT" 3)"
-if docker exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
+if ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
     check "payment-service kept a COMPLETED payment for the order total" "COMPLETED|50.00" \
         "$(payment_psql_query "SELECT status || '|' || amount FROM payment WHERE order_id = $SAGA_OK_ORDER;")"
     check "inventory-service holds its reservation as RESERVED" "RESERVED|2" \
@@ -3125,7 +3194,7 @@ check "the saga ends CANCELLED" "CANCELLED" "$(wait_for_order_status "$SAGA_FAIL
 request GET "/api/orders/$SAGA_FAIL_ORDER/status" >/dev/null
 check "and the status says why" "True" \
     "$(jget "d['reason'].startswith('Payment declined: 12000.00 exceeds the limit')")"
-if docker exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
+if ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
     check "payment-service kept the decline, with its reason" "FAILED|12000.00" \
         "$(payment_psql_query "SELECT status || '|' || amount FROM payment WHERE order_id = $SAGA_FAIL_ORDER;")"
     # THE COMPENSATION. Polled: it runs in inventory-service when it reads payments.failed, which
@@ -3205,6 +3274,124 @@ for product_id in "$SAGA_OK_PRODUCT" "$SAGA_FAIL_PRODUCT" "$SAGA_LAST_PRODUCT"; 
 done
 as_customer
 pass "the saga probe products are cleaned up"
+
+# --------------------------------------------------------------------------------------------
+# Kubernetes (Phase 25) - only when SMOKE_PLATFORM=k8s
+# --------------------------------------------------------------------------------------------
+# Everything above ran through the Ingress (BASE_URL is Traefik on localhost:18080). This section
+# checks what only an orchestrator can do. The phase's "done when": delete a pod and the flow still
+# works while it is replaced; plus the objects the phase asked for, and a rolling update that no
+# caller notices.
+#
+# Nothing is printed in compose mode: these checks have no meaning there, and a SKIP line for each
+# would only be noise on every compose run.
+if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+section "Kubernetes"
+
+k8s_ready() { # k8s_ready <deployment> -> "ready/desired"
+    kube get deployment "$1" -o jsonpath='{.status.readyReplicas}/{.spec.replicas}' 2>/dev/null
+}
+
+# --- The objects the phase asked for -------------------------------------------------------------
+for service in app catalog-service customer-service inventory-service notification-service \
+    payment-service gateway-service; do
+    OBJECTS="$(for kind in deployment service configmap secret; do
+        suffix=""; [ "$kind" = "configmap" ] && suffix="-config"; [ "$kind" = "secret" ] && suffix="-secrets"
+        kube get "$kind" "$service$suffix" -o name >/dev/null 2>&1 && printf '%s ' "$kind"
+    done)"
+    check "$service has a Deployment, Service, ConfigMap and Secret" \
+        "deployment service configmap secret " "$OBJECTS"
+done
+check "every application container has a startup, liveness and readiness probe" "0" \
+    "$(kube get deployments -l app.kubernetes.io/part-of=ecomdemo -o json | python3 -c "
+import json, sys
+print(sum(1 for d in json.load(sys.stdin)['items'] for c in d['spec']['template']['spec']['containers']
+          if not all(c.get(p) for p in ('startupProbe', 'livenessProbe', 'readinessProbe'))))")"
+check "and a memory limit and a CPU request" "0" \
+    "$(kube get deployments -l app.kubernetes.io/part-of=ecomdemo -o json | python3 -c "
+import json, sys
+print(sum(1 for d in json.load(sys.stdin)['items'] for c in d['spec']['template']['spec']['containers']
+          if not (c.get('resources', {}).get('limits', {}).get('memory')
+                  and c.get('resources', {}).get('requests', {}).get('cpu'))))")"
+check "the Ingress sends everything to the gateway" "gateway-service" \
+    "$(kube get ingress ecomdemo -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}')"
+
+# The HPA needs metrics-server: until it reports, the target reads <unknown> and nothing scales.
+HPA_CPU=""
+for _ in $(seq 1 90); do
+    HPA_CPU="$(kube get hpa catalog-service -o jsonpath='{.status.currentMetrics[0].resource.current.averageUtilization}' 2>/dev/null)"
+    [ -n "$HPA_CPU" ] && break
+    sleep 2
+done
+check "the HPA on catalog-service reads its CPU (now ${HPA_CPU:-unknown}% of request)" "True" \
+    "$([ -n "$HPA_CPU" ] && echo True || echo False)"
+check "and keeps between 2 and 4 replicas" "2-4" \
+    "$(kube get hpa catalog-service -o jsonpath='{.spec.minReplicas}-{.spec.maxReplicas}')"
+
+# --- Self-healing: delete pods, and the flow does not notice -------------------------------------
+# One gateway pod and one catalog pod are deleted, and a whole checkout runs IMMEDIATELY, while their
+# replacements are still starting. It works because each Deployment keeps two replicas: the Service
+# stops sending to a terminating pod and the survivor answers. The ReplicaSet notices it is one pod
+# short and creates a new one - nobody asked it to; its only job is to make "actual" match "desired".
+GATEWAY_VICTIM="$(kube get pods -l app.kubernetes.io/name=gateway-service -o jsonpath='{.items[0].metadata.name}')"
+CATALOG_VICTIM="$(kube get pods -l app.kubernetes.io/name=catalog-service -o jsonpath='{.items[0].metadata.name}')"
+kube delete pod "$GATEWAY_VICTIM" "$CATALOG_VICTIM" --wait=false >/dev/null
+pass "deleted $GATEWAY_VICTIM and $CATALOG_VICTIM"
+
+as_anonymous
+check "the catalogue still answers through the Ingress" "200" "$(request GET /api/products)"
+HEAL_PRODUCT="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1 and p['price'] <= $PAYMENT_LIMIT)")"
+check "a customer can still log in" "True" \
+    "$([ -n "$(login "$CUSTOMER_USER" "$CUSTOMER_PASSWORD")" ] && echo True || echo False)"
+as_customer
+request GET /api/cart >/dev/null
+for product_id in $(jget "' '.join(str(i['productId']) for i in d['items'])"); do
+    request DELETE "/api/cart/items/$product_id" >/dev/null
+done
+check "and add to the cart" "200" "$(request POST /api/cart/items "{\"productId\":$HEAL_PRODUCT,\"quantity\":1}")"
+check "and check out" "201" "$(request POST /api/orders)"
+HEAL_ORDER="$(jget "d['id']")"
+check "and the saga still confirms the order" "CONFIRMED" "$(wait_for_order_status "$HEAL_ORDER")"
+
+HEALED=false
+for _ in $(seq 1 90); do
+    if [ "$(k8s_ready gateway-service)" = "2/2" ] && [ "$(k8s_ready catalog-service | cut -d/ -f1)" -ge 2 ] 2>/dev/null; then
+        HEALED=true; break
+    fi
+    sleep 2
+done
+check "the deleted pods were REPLACED: gateway $(k8s_ready gateway-service), catalog $(k8s_ready catalog-service) ready" \
+    "true" "$HEALED"
+check "by new pods, not the deleted ones" "0" \
+    "$(kube get pods -o name | grep -c -e "$GATEWAY_VICTIM" -e "$CATALOG_VICTIM")"
+
+# --- A rolling update no caller notices -----------------------------------------------------------
+# `rollout restart` changes the pod template (an annotation), which is exactly what a new image
+# would do: the Deployment makes a new ReplicaSet and swaps pods one at a time - start a new one,
+# wait for its READINESS probe, then stop an old one (maxSurge 1, maxUnavailable 0). Meanwhile a
+# loop calls the API through the Ingress and counts every answer that is not 200.
+REVISION_BEFORE="$(kube get deployment gateway-service -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')"
+ROLLOUT_LOG="$(mktemp)"
+(
+    while :; do
+        curl -s -o /dev/null -w '%{http_code}\n' --max-time 5 "$BASE_URL/api/products" >> "$ROLLOUT_LOG"
+        sleep 0.1
+    done
+) &
+ROLLOUT_LOAD_PID=$!
+sleep 2
+kube rollout restart deployment/gateway-service >/dev/null
+kube rollout status deployment/gateway-service --timeout=300s >/dev/null 2>&1
+ROLLED=$?
+sleep 3
+kill "$ROLLOUT_LOAD_PID" 2>/dev/null; wait "$ROLLOUT_LOAD_PID" 2>/dev/null || true
+ROLLOUT_REQUESTS="$(wc -l < "$ROLLOUT_LOG" | tr -d ' ')"
+ROLLOUT_FAILURES="$(grep -vc '^200$' "$ROLLOUT_LOG")"
+rm -f "$ROLLOUT_LOG"
+check "the gateway rolled out to a new revision" "True" \
+    "$([ "$ROLLED" = 0 ] && [ "$(kube get deployment gateway-service -o jsonpath='{.metadata.annotations.deployment\.kubernetes\.io/revision}')" -gt "${REVISION_BEFORE:-0}" ] && echo True || echo False)"
+check "and not one of $ROLLOUT_REQUESTS requests during it failed" "0" "$ROLLOUT_FAILURES"
+fi
 
 # --------------------------------------------------------------------------------------------
 # Summary

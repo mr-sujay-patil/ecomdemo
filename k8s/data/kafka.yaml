@@ -1,0 +1,100 @@
+# Kafka: one broker in KRaft mode (no ZooKeeper), as in compose. A StatefulSet for the same reason
+# the databases are: a topic is a durable log, and the consumer groups' offsets live on this disk.
+#
+# The listener set is smaller than compose's. Compose had a HOST listener on localhost:29092 for a
+# client on the laptop; inside the cluster every client is a pod, and they all reach the broker as
+# `kafka:9092` through the Service below. The broker ADVERTISES that name, which is what a client
+# connects to after its first request - advertise a name clients cannot resolve and they connect
+# once and then fail.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  selector:
+    app.kubernetes.io/name: kafka
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  labels:
+    app.kubernetes.io/name: kafka
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kafka
+    spec:
+      securityContext:
+        fsGroup: 1000          # the image runs as uid 1000; the volume must be writable by it
+      containers:
+        - name: kafka
+          image: apache/kafka:4.2.1
+          env:
+            - { name: KAFKA_NODE_ID, value: "1" }
+            - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
+            - { name: CLUSTER_ID, value: "ecomdemo-kraft-cluster" }
+            - { name: KAFKA_LISTENERS, value: "INTERNAL://:9092,CONTROLLER://:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "INTERNAL://kafka:9092" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "INTERNAL" }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
+            # One broker is also the whole controller quorum, so it votes for itself.
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093" }
+            - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false" }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: "1" }
+            - { name: KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR, value: "1" }
+            - { name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: "0" }
+            - { name: KAFKA_LOG_DIRS, value: "/var/lib/kafka/data" }
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx512m -Xms512m" }
+          ports:
+            - name: kafka
+              containerPort: 9092
+          # A TCP check, not compose's `kafka-cluster.sh cluster-id`. That script starts a SECOND JVM,
+          # which inherits KAFKA_HEAP_OPTS - another 512 MB beside the broker's - and could not start
+          # within the probe's timeout: the first deployment of this file sat not-Ready for five
+          # minutes with the broker running perfectly. It mattered more than it looks, because a
+          # Service routes only to READY pods: every init container waiting for kafka:9092 waited
+          # too. In KRaft mode the broker opens 9092 only once it has joined the quorum and been
+          # unfenced ("Awaiting socket connections"), so an open port is a fair readiness signal.
+          readinessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 200m
+              memory: 768Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

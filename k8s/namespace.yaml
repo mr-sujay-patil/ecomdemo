@@ -1,0 +1,7 @@
+# Everything of ours lives in one namespace, so `kubectl -n ecomdemo get all` is the whole system and
+# `kubectl delete namespace ecomdemo` removes it (Traefik and metrics-server have namespaces of their
+# own, installed by Helm).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecomdemo

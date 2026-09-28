@@ -59,6 +59,7 @@ application-local.yaml
 # scripts/smoke-test.sh remembers the id of the product it left behind for the next run here.
 # Local, per-machine and disposable, so it stays out of Git.
 .smoke-state
+.smoke-state-k8s
 
 # ---- Logs and temporary files ----
 *.log
