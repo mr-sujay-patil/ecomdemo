@@ -1,19 +1,30 @@
 @startuml
-set separator none
-title JWT and token handling
+title <size:24>JWT and token handling</size>
 
+set separator none
 top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
 
 !include <C4/C4>
 !include <C4/C4_Context>
 !include <C4/C4_Component>
 
-Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
-  Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
-  Component(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "JWT and token handling", $techn="Module", $descr="", $tags="", $link="")
+System_Boundary("EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+    Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
+    Component(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "JWT and token handling", $techn="Module", $descr="", $tags="", $link="")
+  }
+
 }
 
 Rel(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)
+hide stereotypes
 @enduml
