@@ -148,9 +148,9 @@ public class ProductSearchIndex {
             throw notConfigured();
         }
         SearchRequest.Builder request = SearchRequest.builder()
-                .query(properties.queryPrefix() + query)
+                .query(properties.effectiveQueryPrefix() + query)
                 .topK(limit)
-                .similarityThreshold(properties.minSimilarity());
+                .similarityThreshold(properties.effectiveMinSimilarity());
         filters.expression().ifPresent(request::filterExpression);
 
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -183,7 +183,7 @@ public class ProductSearchIndex {
      * in an embedding is a word like any other, close to other numbers in spelling, not in value.
      */
     Document toDocument(IndexedProduct product) {
-        StringBuilder text = new StringBuilder(properties.documentPrefix()).append(product.name());
+        StringBuilder text = new StringBuilder(properties.effectiveDocumentPrefix()).append(product.name());
         if (product.description() != null && !product.description().isBlank()) {
             text.append(". ").append(product.description());
         }

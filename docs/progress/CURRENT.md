@@ -35,13 +35,15 @@
 - [x] Spring Batch backfill + endpoint
 - [x] `GET /api/products/search` with metadata filters
 - [x] Tests (unit, IT with a deterministic fake embedding model, e2e through Kafka)
-- [ ] Smoke section "Semantic search"
+- [x] Smoke section "Semantic search"
 - [ ] Testing protocol, test report, README, decisions, RECENT rotation, tracker 🔵
 
 ## Next action
-Code + tests committed (catalog ITs green incl. EmbeddingSyncIT through a real Kafka). Next: compose /
-k8s / .env.example config (AI_EMBEDDING_PROVIDER etc.), measure a real model (host Ollama,
-nomic-embed-text) to set SEARCH_MIN_SIMILARITY and decide the nomic prefixes, then the smoke section.
+Measured nomic-embed-text for real (throwaway container `ecomdemo-ollama-test` on ecomdemo_default, volume
+`ecomdemo-ollama-test`; REMOVE both at the end): per-model defaults (ollama 0.5 + nomic prefixes, openai 0.3
+unmeasured). Smoke "Semantic search" passes with the real model (16 checks). Next: full `./mvnw clean
+verify`, cold compose smoke with no model (expect the new SKIP), real-model run (pull llama3.2 into the
+test container too, both share OLLAMA_BASE_URL), k8s run, then test report / README / decisions / RECENT.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

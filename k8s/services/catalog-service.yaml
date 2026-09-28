@@ -21,6 +21,9 @@ data:
   # Phase 27. No language model in the cluster: generate-description answers 503 "not configured".
   # To switch one on, set this to openai and add OPENAI_API_KEY to catalog-service-secrets.
   AI_CHAT_PROVIDER: "none"
+  # Phase 28. No embedding model either: search and the backfill answer 503 "not configured", and
+  # product changes are still announced on catalog.product-changed for when one is switched on.
+  AI_EMBEDDING_PROVIDER: "none"
 ---
 apiVersion: apps/v1
 kind: Deployment

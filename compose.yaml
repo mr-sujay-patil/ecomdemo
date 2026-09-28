@@ -528,6 +528,14 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2}
       AI_TIMEOUT: ${AI_TIMEOUT:-30s}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Phase 28: the embedding model for semantic search, chosen independently of the chat model.
+      AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-none}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      # Overrides of the model's own defaults (application.properties); empty means "use them".
+      SEARCH_MIN_SIMILARITY: ${SEARCH_MIN_SIMILARITY:-}
+      SEARCH_DOCUMENT_PREFIX: ${SEARCH_DOCUMENT_PREFIX:-}
+      SEARCH_QUERY_PREFIX: ${SEARCH_QUERY_PREFIX:-}
       # Ollama runs on the HOST, not in compose (it wants the GPU and several GB of model files),
       # and a container reaches the host through host.docker.internal - see extra_hosts.
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}

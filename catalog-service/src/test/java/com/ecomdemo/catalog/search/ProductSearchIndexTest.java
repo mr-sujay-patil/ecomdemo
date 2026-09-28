@@ -29,7 +29,7 @@ class ProductSearchIndexTest {
     }
 
     private static SearchProperties properties(String documentPrefix) {
-        return new SearchProperties(0.5, 5, 20, documentPrefix, "");
+        return new SearchProperties("ollama", 0.5, documentPrefix, "", null, 5, 20);
     }
 
     @Test
