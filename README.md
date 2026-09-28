@@ -8,7 +8,7 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
-**Phase 22: Resilience — catalog-service can fail without taking the application with it.**
+**Phase 23: Distributed Tracing — one checkout, one trace, across every service it touches.**
 
 | Service | Owns | Port |
 |---|---|---|
@@ -19,21 +19,27 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 | `customer-service` | accounts — the only place a password is checked or a token issued | 8083 |
 | `notification-service` | notifications. Nobody calls it; it reacts to a topic | 8085 |
 
-A database each; seventeen containers. Clients use **8080 only**; 8084 is for looking at the
+A database each; eighteen containers. Clients use **8080 only**; 8084 is for looking at the
 application's own actuator.
 
-**What Phase 22 changed.** Every call from `ecomdemo-app` to catalog-service now goes through a
-timeout, a bulkhead, a circuit breaker and (for reads) a retry. Stop catalog-service and:
+**What Phase 23 changed.** Every service now records **traces** with OpenTelemetry and sends them to
+**Tempo**. Place an order and Grafana shows it as one tree of timed steps: the gateway, the application,
+inventory-service's reservation, and then, through the outbox and Kafka, notification-service
+consuming the event. Every log line carries the `traceId`, and Grafana links logs and traces both ways.
 
-- adding a product to a cart fails in **about a second** with a clear **503** and a `Retry-After`,
-  instead of a 500 — or, if catalog-service hangs rather than dies, a request that never returns;
-- after five failed calls the breaker **opens**, and refusals take **milliseconds** because they stop
-  touching the network at all;
-- **checkout still works**, because a cart holds a snapshot of each product and its price;
-- when catalog-service comes back, the application **recovers on its own**.
+- The trace survives **the outbox**: the event's row stores the checkout's `traceparent`, and the relay
+  restores it before sending, so the Kafka half joins the same trace.
+- **Sampling is decided once, at the gateway**, and every service behind it follows that decision
+  (10% by default, 100% in compose).
+- Health checks, metric scrapes, Spring Security's internals and the outbox relay's idle tick are
+  **not** traced: they buried the real traffic.
 
-See [Resilience](#resilience) below, `./scripts/failure-demo.sh` to watch it happen, and the
-**EcomDemo Resilience** dashboard in Grafana.
+See [Distributed tracing](#distributed-tracing) below. Tempo's API is on **3200**; Prometheus is on
+**19090** on the host (Windows reserves a port range around 9090).
+
+Still true from Phase 22: every call from `ecomdemo-app` to catalog-service goes through a timeout,
+bulkhead, circuit breaker and (for reads) retry. Stop catalog-service and add-to-cart fails fast with a
+503 while checkout still works. See [Resilience](#resilience).
 
 Still true from Phase 20, and worth knowing:
 
@@ -47,7 +53,7 @@ Still true from Phase 20, and worth knowing:
 - Tokens are **HS256 with a shared key**: only customer-service issues them by convention, not by
   constraint. Asymmetric keys and a JWKS endpoint are the honest fix.
 
-See [`docs/test-reports/phase-22.md`](docs/test-reports/phase-22.md).
+See [`docs/test-reports/phase-23.md`](docs/test-reports/phase-23.md).
 
 <details>
 <summary>Phase 14: Batch Processing</summary>
@@ -2352,6 +2358,114 @@ calls by outcome (`ignored` = refused by the bulkhead), retries, bulkhead permit
 shoppers were served. `DashboardMetricsTest` checks every series the dashboard queries against the
 meters Resilience4j actually registers.
 
+## Distributed tracing
+
+Phase 23. One checkout touches five services: the gateway, the application, inventory-service over
+HTTP, catalog-service and notification-service over Kafka. Metrics say *how many* checkouts were slow;
+logs say what each service did, one service at a time. A **trace** shows one checkout end to end,
+across all of them, as a tree of timed steps.
+
+### Traces, spans, and W3C Trace Context
+
+A **span** is one timed piece of work: "the gateway handled POST /api/orders", "the app called
+inventory's reserve endpoint", "notification-service processed an `orders.placed` event". Every span
+has a **trace id**, shared by the whole request, a **span id** of its own, and the span id of its
+**parent**. Tempo puts spans with the same trace id together and uses the parent ids to build the tree.
+
+The ids travel between services in one HTTP or Kafka header, defined by the **W3C Trace Context**
+standard:
+
+```
+traceparent: 00-<32-hex trace id>-<16-hex parent span id>-<flags>
+```
+
+Each service reads the header, makes its own spans children of the caller's, and writes a new header
+on everything it sends. Send a request with your own `traceparent` and the gateway **continues** your
+trace instead of starting one; the smoke test relies on this to know which trace to look up.
+
+### How it is wired
+
+| Piece | What it does | Where |
+|---|---|---|
+| **Micrometer Observation** | Spring's HTTP server and client, Kafka and `@Scheduled` all record *observations*. The same observation becomes a metric (Phase 15) and, now, a span. | built in |
+| **`spring-boot-starter-opentelemetry`** | Bridges those observations to the OpenTelemetry SDK, which propagates `traceparent` and exports finished spans in batches over **OTLP**. In all six services. | each `pom.xml` |
+| **Shared settings** | Sampling, Kafka observations, and the log fields, in ONE file each service imports, so six services cannot drift into six sampling rates. | `common/src/main/resources/ecomdemo-observability.properties` |
+| **Tempo 3.0.3** | Stores traces and answers queries. Services send to `tempo:4318`; its API is on host port **3200**. | `compose.yaml`, `docker/tempo/tempo.yaml` |
+| **Grafana** | A Tempo datasource, linked both ways with Loki. | `docker/grafana/provisioning/datasources/` |
+
+The export endpoint is set by compose, not in code
+(`MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT`). Without it, Boot creates no exporter: the
+tests and a plain `./mvnw spring-boot:run` trace nothing and never try to reach a Tempo that is not
+there.
+
+### Across Kafka, and across the outbox
+
+Over HTTP, propagation is automatic. Kafka needed two things:
+
+- **Kafka observations are switched on** (`spring.kafka.template.observation-enabled` and
+  `...listener.observation-enabled`). They are off by default in Spring Kafka, and without them a
+  message carries no `traceparent`.
+- **The outbox breaks the thread.** Phase 18's outbox deliberately does not send the event on the
+  request's thread: the order and the event commit together, and a relay publishes later on a
+  scheduler thread, where there is no current span. So the trace context is written down **inside the
+  transaction**, like the payload: migration `V17` adds `outbox_event.trace_parent`, and
+  `OutboxTracing` stores the current `traceparent` there and restores it before the relay sends. The
+  database row does the job of the header.
+
+The relay's own once-a-second tick is **not** traced. Otherwise each tick would be a trace of its own,
+around the clock, recording that nothing happened. `OutboxObservationConfig` drops only that one
+method. The cleanup sweep and the nightly sales report are still observed, so their run time and
+failures stay in Prometheus.
+
+### Sampling
+
+Recording every request costs memory, network and storage in every service. `TRACING_SAMPLING_PROBABILITY`
+is the fraction of **new** traces kept: **0.1** by default, **1.0** in compose, so a demo on a laptop
+records every request and the smoke test's checkout always exists.
+
+The decision is made **once, at the edge**. The sampler is *parent-based*: a request that arrives with a
+`traceparent` follows that header's *sampled* flag, and only a request without one gets a fresh coin
+toss. The gateway tosses the coin, and every service behind it obeys. If each service tossed its own, a
+10% rate would keep 10% of each service's spans, and almost never all of one trace.
+
+### What is not traced, and why
+
+Measured in Tempo before each rule was written. Each rule drops the metric along with the span:
+
+- **`/actuator/**`**: Docker's health checks every 10 s and Prometheus's scrapes every 15 s buried the
+  real traffic in one-span traces. `TracingConfig` (servlet, in `common`; reactive, in the gateway).
+- **Spring Security's own observations**: seven spans per request per service, about half a checkout's
+  trace, answering no question anyone asks. A 401 or 403 still shows, as the HTTP span's status.
+- **The outbox relay's tick**: see above.
+
+### Logs and traces, linked both ways
+
+Every service logs ECS JSON with a `traceId` field, Alloy stores it in Loki as `trace_id`, and Grafana
+links the two:
+
+- **Loki → Tempo**: a log line's `traceId` is a *View trace* link (a derived field).
+- **Tempo → Loki**: a span's *Logs for this span* finds every line with that trace id, across all
+  services, within a minute of the span.
+
+The gateway needed one more setting. It runs on WebFlux, where a request moves between Netty
+threads and the current span lives in Reactor's `Context`, not in the thread-local MDC that a log line
+reads. With `spring.reactor.context-propagation: auto` the span is copied back on every operator; before
+it, the ERROR line Boot writes for a 5xx had no trace id.
+
+### Watch it
+
+```bash
+docker compose up --build --wait
+TRACE=$(python3 -c "import secrets; print(secrets.token_hex(16))")
+curl -s http://localhost:8080/api/products -H "traceparent: 00-$TRACE-$(python3 -c "import secrets; print(secrets.token_hex(8))")-01" >/dev/null
+sleep 6                                           # spans are exported in 5 s batches
+curl -s http://localhost:3200/api/v2/traces/$TRACE | head -c 300; echo
+```
+
+Or open Grafana at **http://localhost:3000**, go to *Explore → Tempo → Search*, and place an order.
+Its trace shows the gateway, the application, inventory-service, then, a second later, the outbox
+relay, the Kafka send and notification-service's consumer.
+
 ## Code quality
 
 Two tools, answering two different questions. **JaCoCo** measures which lines the tests actually
@@ -3165,6 +3279,15 @@ cost a container start each time.
 
 ## Known gaps (closed by later phases)
 
+- **Traces are kept on one disk, for as long as it lasts.** Tempo runs as a single binary with local
+  storage and no retention setting, which is right for a laptop and wrong for anything shared.
+- **Nothing turns traces into metrics.** Tempo's metrics-generator can derive request rates, error
+  rates and a service graph from spans; it is not switched on.
+- **The gateway still writes no request log.** Its lines now carry a `traceId`, but the only lines it
+  writes during a request are errors. The trace itself covers the gateway's side of each request.
+- **The "logs link to traces" rule is checked for the gateway by hand only.** The smoke test finds a
+  checkout's trace id in the logs of at least three services; that the gateway's error line has one
+  was verified by stopping catalog-service once (see `docs/test-reports/phase-23.md`).
 - **Two stat panels on the overview dashboard mislead.** `Orders placed / min` and
   `Failed checkouts` reduce an *instantaneous* rate with `lastNotNull`, while `Revenue` and
   `Average order value` beside them aggregate over the *selected range* — so one row of four panels

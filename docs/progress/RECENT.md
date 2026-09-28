@@ -12,6 +12,31 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 23: Distributed Tracing (tag: phase-23-complete, PR #TBD)
+**What exists now:** all six services trace with OpenTelemetry and export OTLP to **Tempo 3.0.3**
+(18 containers). One checkout = ONE trace: gateway -> app -> inventory (HTTP), inventory -> catalog
+and app -> outbox relay -> Kafka -> notification (async). ECS logs carry `traceId`; Grafana links
+Loki <-> Tempo both ways. Smoke **327 / 0 / 0** cold on the WSL2 workstation.
+**Key code:** `common/.../tracing/TracingConfig` (servlet: no `/actuator` observations) and
+`gateway/TracingConfig` (reactive twin); `ecomdemo-app/.../messaging/internal/OutboxTracing` (stores
+and restores the `traceparent` through `outbox_event.trace_parent`, V17) and
+`OutboxObservationConfig` (drops ONLY the relay's `@Scheduled` tick).
+**Config & infrastructure:** `common/src/main/resources/ecomdemo-observability.properties`, imported by
+every service (sampling, Kafka observations, ECS fields, `spring.security` observations off).
+Compose sets `MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://tempo:4318/v1/traces` and
+`TRACING_SAMPLING_PROBABILITY=1.0` (code default 0.1, parent-based). Tempo API on host **3200**.
+**Prometheus is on host port 19090** (user's decision; Windows reserves 9014-9113).
+The gateway has `spring.reactor.context-propagation: auto`.
+**Tests:** OutboxTracingTest (real OTel SDK), OutboxObservationConfigTest; smoke section "Distributed
+tracing" (14 checks: own `traceparent` -> Tempo trace with >=4 services, gateway continues the caller's
+span, relay + consumer spans, unsampled leaves no trace, Loki finds the trace id, Grafana datasources).
+**Gotchas:** no endpoint set = no exporter (tests trace nothing). Kafka observations are OFF by default
+in Spring Kafka. Each service flushes spans on its own 5 s timer - poll for every hop you assert.
+`management.observations.enable.<prefix>` matches NAMES only (all `@Scheduled` share one). OTel sets
+traceparent flags `03`, not `01` - read the sampled bit. `ModularityTest` regenerates `docs/modules/*`.
+**Follow-ups (not done):** Tempo metrics-generator (RED metrics, service graph); retention/object
+storage; the gateway writes no request log; a smoke check for the gateway's `traceId` (verified by hand).
+
 ## Phase 22: Resilience (tag: phase-22-complete, PR #35)
 **What exists now:** every `ecomdemo-app` → catalog-service call goes through
 Retry(CircuitBreaker(Bulkhead(HTTP call with a timeout))). catalog-service down: add-to-cart is a 503
@@ -36,27 +61,3 @@ A VM pause made one `verify` take 86 min.
 **Follow-ups (not done):** cold-start poison-message partition stall (seen once in 3 cold runs); the
 gateway has no breaker on its own `/api/products` route; notification-service at 97 % of its 320M cap;
 resilience for the inventory calls (checkout's real dependency); Phase 21 recorded no decisions.
-
-## Phase 21: API Gateway (tag: phase-21-complete, PR #33)
-**What exists now:** SIX deployables, seventeen containers. `gateway-service` (Spring Cloud Gateway
-5.0.3, train 2025.1.3, reactive/Netty) owns host port **8080** and routes to all five services; the
-app moved to **8084** (white-box checks only). JWT validated at the edge, Redis rate limiter (50/s,
-burst 100, per caller), CORS, correlation-ID filter. The app's three proxies are gone, so a login's
-plaintext password never passes through `ecomdemo-app`. Smoke **295 / 0**; **1387 MiB of 3916**.
-Verified and tagged 2026-09-26 at `f7d5021` (on the Mac).
-**Key code:** `gateway-service/.../gateway/` - `GatewaySecurityConfig`, `GatewayJwtConfig`,
-`RateLimitConfig`, `CorrelationIdWebFilter`, `ServiceIdentityFilter` (mints a SERVICE token for
-anonymously-permitted paths, ordered AFTER security, never replaces a caller's token), `ApiErrors`.
-**Config & infrastructure:** `GATEWAY_PORT=8080`, `APP_PORT=8084` in `.env`; routes in
-`gateway-service/src/main/resources/application.yml`; the smoke script has `BASE_URL` (gateway) and
-`APP_URL` (app, for actuator/api-docs).
-**Tests:** EdgeSecurityIT (edge decisions, NO upstreams), gateway 7 unit + 15 ITs; smoke burst check
-(one curl, one connection, 300 requests, 40 in flight -> 429s).
-**Gotchas:** springdoc types in a scanned `@Configuration` break a service that omits the optional dep;
-Maven exclusions are per DECLARATION (a `test-jar` declaration inherited none -> Tomcat at test scope);
-`@AutoConfigureWebTestClient` is for MOCK slices; a burst check slower than the refill rate tests the
-client, not the limiter. The gateway's actuator answers under the same paths as the app's - point
-white-box checks at `APP_URL`.
-**Follow-ups (not done):** catalog-service has no springdoc; only `ecomdemo-app` logs structured, so a
-correlation ID dies at the hop; the gateway does no request logging; HS256 shared secret; Phase 19
-dashboard defect; a failed compensating release leaks a reservation.
