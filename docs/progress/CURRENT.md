@@ -56,8 +56,8 @@ STOPPED at PR #46, waiting for the user. Do NOT merge unless the user says `appr
 (`gh pr merge 46 --merge`). On `merged, continue`: merge verification (git checks, CI on main, `verify`,
 cold compose smoke on a COPY). NOTE: the user's `.env` enables Ollama; unless they have pulled
 `qwen2.5:7b` the assistant section FAILS - ask them to pull it, or run the smoke with
-`ASSISTANT_OLLAMA_MODEL=llama3.2` exported (llama3.2 usually passes the smoke's retried checks, but
-record which). Then tag `phase-29-complete`, then Phase 30 (Gatling). Throwaway Ollama removed; compose
+`ASSISTANT_OLLAMA_MODEL=llama3.2` exported (NOT yet tried with llama3.2 - record the result
+and which model). Then tag `phase-29-complete`, then Phase 30 (Gatling). Throwaway Ollama removed; compose
 (user's .env) and kind are running.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
