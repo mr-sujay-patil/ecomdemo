@@ -149,6 +149,33 @@ class EdgeSecurityIT extends GatewayTest {
                 .expectStatus().is5xxServerError();
     }
 
+    /**
+     * Phase 29. The assistant reads the caller's own cart and orders, so only a customer may use it:
+     * an administrator has neither, and anonymous has no token to forward.
+     */
+    @Test
+    @DisplayName("the shopping assistant is for customers only")
+    void theAssistantIsForCustomersOnly() {
+        web.post().uri("/api/assistant/chat")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"message\":\"hello\"}")
+                .exchange()
+                .expectStatus().isUnauthorized();
+        web.post().uri("/api/assistant/chat")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithRoles("boss", "ADMIN"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"message\":\"hello\"}")
+                .exchange()
+                .expectStatus().isForbidden();
+        // 5xx: let through, to a route whose upstream is closed in this test.
+        web.post().uri("/api/assistant/chat")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithRoles("shopper", "CUSTOMER"))
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"message\":\"hello\"}")
+                .exchange()
+                .expectStatus().is5xxServerError();
+    }
+
     @Test
     @DisplayName("login is reachable without a token, or nobody could ever get one")
     void loginIsAnonymous() {

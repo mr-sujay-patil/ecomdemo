@@ -69,7 +69,8 @@ public abstract class GatewayTest {
     static void pointEveryRouteAtAClosedPort(DynamicPropertyRegistry properties) {
         String nowhere = "http://localhost:" + CLOSED_PORT;
         for (String upstream : new String[] {
-                "CATALOG_BASE_URL", "CUSTOMER_BASE_URL", "INVENTORY_BASE_URL", "APP_BASE_URL"}) {
+                "CATALOG_BASE_URL", "CUSTOMER_BASE_URL", "INVENTORY_BASE_URL", "APP_BASE_URL",
+                "ASSISTANT_BASE_URL"}) {
             properties.add(upstream, () -> nowhere);
         }
     }

@@ -62,6 +62,9 @@ public class GatewaySecurityConfig {
 
                         .pathMatchers("/api/admin/**").hasRole("ADMIN")
                         .pathMatchers("/api/cart/**", "/api/orders/**").hasRole("CUSTOMER")
+                        // Phase 29. Customers only: everything the assistant can look up or propose is
+                        // the caller's own cart and orders, and an administrator has neither.
+                        .pathMatchers("/api/assistant/**").hasRole("CUSTOMER")
 
                         // The gateway's OWN health and metrics. Kubernetes and Prometheus have no
                         // token, and Phase 25 will probe this container like any other.
