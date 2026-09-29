@@ -8,6 +8,7 @@
 * `c.e.j.CurrentUser` (in JWT and token handling)
 * `c.e.m.OutboxWriter` (in Messaging)
 * `c.e.m.CheckoutMetrics` (in Metrics)
+* `c.e.j.ServiceTokenProvider` (in JWT and token handling)
 * `c.e.o.ProcessedEvents` (in Outbox)
 |Aggregate roots
 |* `c.e.o.Order`
