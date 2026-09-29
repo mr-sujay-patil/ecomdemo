@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-29
 - **Phase:** 31 — Security Scanning (OWASP Dependency-Check + Trivy)
 - **Branch:** feature/phase-31-security-scanning (cut from `main` at `387d755`)
-- **Step:** IMPLEMENTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO (key in .env; GitHub secret NOT set yet - ask)
+- **PR:** #48 https://github.com/mr-sujay-patil/ecomdemo/pull/48
+- **Waiting for user:** YES - review of the Phase 31 PR
 
 ## Merge verification before this phase — PASSED
 - Phase 30: PR #47 merged as `387d755` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
@@ -28,20 +28,19 @@
   overriding Boot-managed versions (tomcat 11.0.25, jackson 3.1.6 / 2.21.6); all 8 images clean.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] Dependency-Check in CI (fail on high severity) - configured (`d5c6f37`); BLOCKED on NVD_API_KEY (user)
+- [x] Dependency-Check in CI (fail on high severity) - `d5c6f37`; secret NVD_API_KEY set from .env; 2 false positives suppressed (`cd3f02a`)
 - [x] Trivy image scans in CI (`d5c6f37`; local run of the exact steps: 8/8 clean)
-- [ ] Every finding fixed or suppressed with a justification
+- [x] Every finding fixed or suppressed with a justification (Tomcat/Jackson fixed `5430dd0`; Kotlin/pgvector suppressed)
 - [x] An OWASP API Top 10 review in `docs/security.md`. API5 found AND fixed (user said fix it): `4671fc1`, catalog writes ADMIN|SERVICE, inventory ADMIN|SERVICE; re-probed on rebuilt compose: all 403, reads 200
-- [ ] Done when: CI blocks vulnerable builds (prove it with a deliberately vulnerable dependency on a
-  throwaway run), and the security document is complete
-- [ ] Testing protocol, test report (scan results), README, decisions, RECENT, tracker 🔵, PR
+- [x] Done when: CI blocked commons-text 1.9 on PR #48 (run 36555557687 red, revert 36556218892 green); security.md complete
+- [x] Testing: verify 620/0/0/0; compose cold 404/0/0; k8s 360/0/7; report, README, decisions (7), RECENT (Phase 29 archived), tracker 🔵, PR #48
 
 ## Next action
-Local Dependency-Check run in progress (NVD download into ~/.cache/dependency-check, key read from
-.env as NVD_API_KEY - never print it). Then: fix/suppress ODC findings; ask the user to add the
-GitHub secret NVD_API_KEY (or permission to `gh secret set` it from .env); prove CI blocks (commit
-a known-vulnerable dependency, both scans red, revert with a NEW commit); testing protocol; report;
-README; decisions; RECENT; tracker; PR. Probe account `sec-probe` exists in the compose customer DB.
+STOPPED at PR #48 (opened as a draft for the CI demonstration, now ready), waiting for the user. Do
+NOT merge unless the user says `approved, merge it` (`gh pr merge 48 --merge`). On `merged, continue`:
+merge verification (git checks, CI on main incl. both scans, `verify`, cold compose smoke on a COPY),
+tag `phase-31-complete`, then Phase 32 per ROADMAP. Note: commit 386cacb "placeholder" is the revert
+of 9065a72 (mistaken --amend, explained in 9484507 and the test report).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
