@@ -8,6 +8,23 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 31: Security Scanning — CI now blocks known-vulnerable dependencies and images.** Two new CI
+jobs fail a pull request on any HIGH or CRITICAL finding:
+- **OWASP Dependency-Check** checks every Maven dependency against the NVD.
+- **Trivy** checks all eight built images, including the Alpine packages and the JRE, and writes a
+  CycloneDX **SBOM** for each.
+
+Publishing waits for both. The first scans found three CRITICAL Tomcat CVEs and a HIGH
+jackson-databind CVE in every image; they were fixed by raising Spring Boot's managed versions by one
+patch release. Two Dependency-Check results were false positives, suppressed with evidence and an
+expiry date.
+
+An **OWASP API Security Top 10** review ([`docs/security.md`](docs/security.md)) found that
+catalog-service and inventory-service trusted the gateway for roles: a customer's token sent
+straight to their ports could write stock. Both now check roles themselves. See
+[Security scanning](#security-scanning) and
+[`docs/test-reports/phase-31.md`](docs/test-reports/phase-31.md).
+
 **Phase 30: Performance Testing — load tests found the saga's ceiling, and it was lifted.**
 Gatling simulations in `performance-tests/` drive the stack through the gateway: **browse**,
 **checkout** (placing an order and waiting until the saga CONFIRMS it) and a **mixed** 80/20, each
@@ -3114,6 +3131,49 @@ The comparisons:
 
 Nothing here was run on a separate load machine. Gatling shares the CPU with the stack, so the
 numbers are for comparing runs, not for promising capacity.
+
+## Security scanning
+
+Every pull request runs two scanners, and a HIGH or CRITICAL finding (CVSS 7.0 or more) fails it:
+
+| CI job | Tool | Looks at |
+|---|---|---|
+| `dependency-scan` | OWASP Dependency-Check 13 | every Maven dependency the services ship, matched against the NVD |
+| `image-scan` | Trivy 0.74 (pinned by digest) | the eight built images: Alpine packages, the JRE, the jars as packaged |
+
+`publish` needs both, so a vulnerable image never reaches GHCR. Each run uploads the
+Dependency-Check report and a **CycloneDX SBOM** per image, a list of every component inside. When
+the next big CVE is announced, "are we affected?" becomes a search.
+
+```bash
+NVD_API_KEY=... ./mvnw org.owasp:dependency-check-maven:aggregate    # target/dependency-check-report.html
+docker build --build-arg MODULE=catalog-service -t scan/catalog-service:ci .
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 \
+    image --severity HIGH,CRITICAL scan/catalog-service:ci
+```
+
+The NVD key is free (https://nvd.nist.gov/developers/request-an-api-key). CI reads it from the
+`NVD_API_KEY` repository secret.
+
+**Fix first, suppress only with evidence.** A finding is fixed by upgrading. For a version Spring
+Boot manages, that means overriding its property in the root pom, as was done here for Tomcat and
+Jackson. A suppression is only for a finding that provably does not apply. It lives in
+`dependency-check-suppressions.xml` or `.trivyignore.yaml` with a written reason **and an expiry
+date**, after which the build fails again.
+
+The first run found:
+
+| Finding | Action |
+|---|---|
+| 3 CRITICAL CVEs in Tomcat 11.0.24, 1 HIGH in jackson-databind 3.1.5 / 2.21.5 (every image) | fixed: 11.0.25, 3.1.6, 2.21.6 |
+| CVE-2026-53914 (9.8) on the Kotlin runtime jars | suppressed: the CVE is in Kotlin's *build cache*, matched through a product-wide CPE |
+| CVE-2026-18022 (8.8) on the pgvector Java client | suppressed: the CVE is in the PostgreSQL *extension*, which runs the fixed 0.8.6 with an HNSW index |
+
+**The OWASP API Security Top 10** is reviewed item by item in [`docs/security.md`](docs/security.md).
+The one real gap it found (API5, Broken Function Level Authorization) is fixed. catalog-service and
+inventory-service used to accept any valid token and leave roles to the gateway. A customer's token
+sent straight to the published port 8082 could therefore set stock. Now each service repeats the
+gateway's rule: product writes and stock need ADMIN or the SERVICE identity.
 
 ## Code quality
 

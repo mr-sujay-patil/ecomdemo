@@ -3,6 +3,7 @@ package com.ecomdemo.inventory;
 import com.ecomdemo.jwt.ApiErrorAccessDeniedHandler;
 import com.ecomdemo.jwt.ApiErrorAuthenticationEntryPoint;
 import com.ecomdemo.jwt.JwtAuthorities;
+import com.ecomdemo.jwt.ServiceTokens;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,18 +23,17 @@ import org.springframework.security.web.SecurityFilterChain;
  * every call from the application came back {@code 401} and the product listing turned it into a
  * {@code 500}.
  *
- * <p><strong>Authentication, not authorisation.</strong> Every business endpoint requires a valid
- * token and nothing more. That is a deliberate and load-bearing limitation: the application calls
- * this service with its <em>own</em> identity (see {@code ServiceTokens}), so the token arriving
- * here says {@code ecomdemo-app}, never {@code alice}, and this service genuinely cannot tell an
- * administrator's stock edit from a shopper's. Deciding that only an administrator may set a stock
- * level stays where the human's token is — at the edge, in the service that owns the endpoint they
- * called.
+ * <p><strong>Authorisation, not only authentication (Phase 31).</strong> Until the security review
+ * this chain required a valid token and nothing more, leaving "only an administrator may set a stock
+ * level" to the edge, and the note here admitted that was safe only while the port was unreachable.
+ * It is published in compose, and the review proved the gap on the running stack: a CUSTOMER's
+ * token sent straight to {@code PUT /api/inventory/{id}} was accepted (docs/security.md, API5).
  *
- * <p>That arrangement is safe only while this service is unreachable from outside the compose
- * network. Its port is published for the smoke test, which makes "unreachable" a claim about a
- * laptop rather than a control. Recorded as a known gap in {@code docs/decisions.md}; the fix is a
- * gateway in front and no published port, which is a later phase.
+ * <p>The fix needs no new information, because no shopper ever has a reason to call this service:
+ * the gateway refuses {@code /api/inventory/**} to anyone but an ADMIN, and every other caller
+ * (the application's checkout, catalog's stock lookups) sends its own SERVICE token. So every
+ * business path now requires ADMIN or SERVICE, and a CUSTOMER gets 403 here as well as at the edge.
+ * {@code InventorySecurityTest} proves it.
  */
 @Configuration
 public class SecurityConfig {
@@ -57,7 +57,7 @@ public class SecurityConfig {
                         // configurable and a literal silently stops matching when it moves.
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .anyRequest().authenticated())
+                        .anyRequest().hasAnyRole("ADMIN", ServiceTokens.ROLE))
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))
                         // The resource server's own entry point, for a token that is present but bad.

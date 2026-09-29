@@ -119,6 +119,140 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------------------------
+  # Dependency scan (Phase 31): OWASP Dependency-Check against the NVD
+  # -------------------------------------------------------------------------------------------
+  # Every jar the services depend on, matched against the National Vulnerability Database.
+  # CVSS 7 or more (HIGH, CRITICAL) fails the job; the configuration and why are in the root pom.
+  # Runs beside `build`, not after it: the two are independent, and a PR should hear about both
+  # at once.
+  dependency-scan:
+    name: Dependency scan (OWASP Dependency-Check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      # The NVD's API refuses anonymous bulk downloads, so the job needs a key. It is free
+      # (https://nvd.nist.gov/developers/request-an-api-key) and lives in the repository's
+      # secrets, never in this file. Failing here with instructions beats failing forty lines
+      # into Maven output with "Invalid API Key".
+      - name: Require the NVD API key
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -z "$NVD_API_KEY" ]; then
+            echo "::error::Secret NVD_API_KEY is not set. Request a free key at https://nvd.nist.gov/developers/request-an-api-key and add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      # The vulnerability database is ~300k CVEs. Downloading it on every run takes many minutes
+      # and leans on a public service; cached, a run only fetches what changed since. Caches are
+      # immutable, so the key is unique per run (a fresh copy is saved each time) and restore-keys
+      # picks up the newest earlier one to update from.
+      - name: Restore the NVD data
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/dependency-check
+          key: nvd-${{ github.run_id }}
+          restore-keys: nvd-
+
+      # `package` first, with tests skipped (the build job runs them): the aggregate goal needs
+      # the reactor's own modules (common, outbox) resolved as jars.
+      - name: Scan
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: >
+          ./mvnw -B -q -DskipTests package
+          org.owasp:dependency-check-maven:aggregate
+          -DdataDirectory=$HOME/.cache/dependency-check
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-check-report
+          path: target/dependency-check-report.*
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------------------------
+  # Image scan (Phase 31): Trivy against every image this repository builds
+  # -------------------------------------------------------------------------------------------
+  # Dependency-Check sees the Maven dependencies. The IMAGE is what actually runs: the Alpine
+  # packages and the JRE from the base image, plus the jars as they were packaged. Trivy scans
+  # that, with a second, independent advisory database (GitHub's and the distributions' own).
+  image-scan:
+    name: Image scan (Trivy)
+    runs-on: ubuntu-latest
+    env:
+      # Pinned by DIGEST, not only by tag: a tag can be moved to different content, a digest
+      # cannot. The scanner is exactly the tool an attacker would want to replace.
+      TRIVY_IMAGE: aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+      MODULES: >-
+        ecomdemo-app catalog-service customer-service inventory-service
+        payment-service notification-service assistant-service gateway-service
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      # One job, all eight images, built one after another: the Dockerfile's build stage is the
+      # whole reactor and does not depend on MODULE, so it runs ONCE and the other seven reuse it
+      # from the local layer cache. A matrix of eight jobs would compile the project eight times.
+      - name: Build every service image
+        run: |
+          for module in $MODULES; do
+            docker build --quiet --build-arg MODULE="$module" -t "scan/$module:ci" . > /dev/null
+            echo "built scan/$module:ci"
+          done
+
+      - name: Restore the Trivy database
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/trivy
+          key: trivy-${{ github.run_id }}
+          restore-keys: trivy-
+
+      # HIGH and CRITICAL fail the job, fixable or not: an unfixable finding still has to be
+      # looked at and written into .trivyignore.yaml with a statement and an expiry. The SBOM
+      # (CycloneDX) is written for every image whatever the result - the list of what is inside
+      # is worth having most on the day a new CVE is announced.
+      - name: Scan every image
+        run: |
+          mkdir -p trivy-reports
+          status=0
+          for module in $MODULES; do
+            echo "::group::$module"
+            run() {
+              docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+                -v "$PWD:/work" -w /work \
+                "$TRIVY_IMAGE" image --quiet "$@" "scan/$module:ci"
+            }
+            run --format cyclonedx --output "trivy-reports/$module.cdx.json"
+            run --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml \
+                --exit-code 1 --format table || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Upload the SBOMs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sbom-cyclonedx
+          path: trivy-reports/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # -------------------------------------------------------------------------------------------
   # Publish the image
   # -------------------------------------------------------------------------------------------
   publish:
@@ -127,7 +261,7 @@ jobs:
     # `needs` is the gate that makes this meaningful: no image is ever published from a commit
     # whose tests did not pass. Without it the two jobs would run in parallel and a red build
     # would still publish.
-    needs: build
+    needs: [build, dependency-scan, image-scan]
     # Only on a push to main. A pull_request run must not publish: its code has not been reviewed
     # or merged, and on a fork it is not even trusted.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'

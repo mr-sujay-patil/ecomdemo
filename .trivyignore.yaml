@@ -1,0 +1,21 @@
+# Trivy suppressions for the image scan (Phase 31).
+#
+# Same rule as dependency-check-suppressions.xml: fix first (a newer base image, or an overridden
+# dependency version in the root pom). An entry here is a written decision, and every one has
+#
+#   statement   why it is not a risk here, or why it cannot be fixed yet
+#   expired_at  after this date the finding fails the build again and must be looked at afresh
+#
+# Example:
+#
+#   vulnerabilities:
+#     - id: CVE-YYYY-NNNNN
+#       paths:
+#         - "app/BOOT-INF/lib/some-library-1.2.3.jar"
+#       statement: >-
+#         Only reachable through feature X, which this project never enables (see docs/security.md).
+#       expired_at: 2026-12-31
+#
+# docs/security.md lists every finding and what was done about it.
+
+vulnerabilities: []

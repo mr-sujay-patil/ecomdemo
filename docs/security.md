@@ -1,0 +1,270 @@
+# Security (Phase 31)
+
+Two things live here:
+
+1. **What CI checks.** Every dependency and every image is scanned for known vulnerabilities, and a
+   HIGH or CRITICAL finding fails the build.
+2. **An OWASP API Security Top 10 (2023) review of this system.** It was checked against the code
+   and, where it mattered, against the running stack.
+
+## 1. Scanning in CI
+
+| Job | Tool | Looks at | Fails on | Output |
+|---|---|---|---|---|
+| `dependency-scan` | OWASP Dependency-Check 13.0.0 | every Maven dependency of the services (test scope excluded), against the **NVD** | CVSS >= 7.0 | `dependency-check-report` artifact (HTML, JSON) |
+| `image-scan` | Trivy 0.74.0 (image pinned by digest) | all 8 service images: Alpine packages, the JRE, the packaged jars, against GitHub's and the distributions' advisories | HIGH or CRITICAL, fixable or not | `sbom-cyclonedx` artifact: one CycloneDX SBOM per image |
+
+`publish` needs **both** scans as well as the tests, so no image reaches GHCR while either scan
+is red.
+
+**Why two scanners.** They see different things. Dependency-Check reads the Maven dependency tree
+and matches it to the NVD via CPE names. Trivy reads what is actually *inside the image*, including
+the operating system packages and the JRE, which no Maven tool can see. It uses a different
+advisory database. Each can miss what the other catches.
+
+**Run them locally:**
+
+    NVD_API_KEY=... ./mvnw org.owasp:dependency-check-maven:aggregate    # report: target/dependency-check-report.html
+    docker build --build-arg MODULE=catalog-service -t scan/catalog-service:ci .
+    docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:0.74.0 \
+        image --severity HIGH,CRITICAL scan/catalog-service:ci
+
+The NVD API key is free (https://nvd.nist.gov/developers/request-an-api-key). CI reads it from the
+`NVD_API_KEY` repository secret and never from a file.
+
+### Suppression policy
+
+**Fix first.** That means a newer version, or overriding the version Spring Boot manages through
+its property in the root pom. Suppress only:
+
+- a **false positive** (the CPE matched a different product), or
+- a vulnerability in code this project provably does not reach.
+
+Every suppression records **why** and **until when**:
+
+- `dependency-check-suppressions.xml`: `<notes>` and `until=`
+- `.trivyignore.yaml`: `statement` and `expired_at`
+
+After the date the finding fails the build again, so a suppression can't quietly become permanent.
+Today there are two Dependency-Check suppressions, both false positives (below), and none for
+Trivy.
+
+### Findings and what was done
+
+| Finding | Where | Severity | Found by | Action |
+|---|---|---|---|---|
+| CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 | `tomcat-embed-core` 11.0.24 (7 images) | CRITICAL | Trivy | **Fixed**: `tomcat.version` 11.0.25 |
+| CVE-2026-68497 | `tools.jackson.core:jackson-databind` 3.1.5 (8 images) | HIGH | Trivy | **Fixed**: `jackson-bom.version` 3.1.6 |
+| CVE-2026-68497 | `com.fasterxml.jackson.core:jackson-databind` 2.21.5 (7 images) | HIGH | Trivy | **Fixed**: `jackson-2-bom.version` 2.21.6 |
+| CVE-2026-53914 (9.8) | `kotlin-stdlib` 2.3.21, `kotlin-stdlib-common` 1.9.10, `kotlin-reflect` 2.3.21 | CRITICAL | Dependency-Check | **Suppressed, false positive**: the CVE is in Kotlin's *build cache* (compiler tooling), and the CPE covers the whole product, so every Kotlin jar matches. Only the runtime libraries ship here (via OkHttp and the OpenAI client); Trivy doesn't flag them. Expires 2027-03-31 |
+| CVE-2026-18022 (8.8) | `com.pgvector:pgvector` 0.1.6 (Java client) | HIGH | Dependency-Check | **Suppressed, false positive**: the CVE is in the PostgreSQL *extension's* IVFFlat build, on 32-bit only. The jar has no index code, and the running extension was checked: 0.8.6 (fixed), HNSW index, 64-bit. Expires 2027-03-31 |
+
+All three overrides are for versions Spring Boot 4.1.1 (the newest release) manages. Each is one
+patch release in the same line, and each should be removed when a Boot release catches up. The
+comment in the root pom says so.
+
+After the fixes, **all 8 images scan clean** at HIGH/CRITICAL, and the Alpine base had no
+HIGH/CRITICAL findings to begin with. **Dependency-Check** covered 142 dependencies and passes
+with the two suppressions above.
+
+**Below the gate (MEDIUM, recorded, not failing the build)**, from Dependency-Check. These are
+revisited when the libraries update:
+
+| Finding | Where | CVSS |
+|---|---|---|
+| CVE-2026-89044 | `netty-transport` 4.2.17 | 6.5 |
+| CVE-2020-29582 | `kotlin-stdlib-common` 1.9.10 (the CPE range matches the whole product; the bug was fixed in 1.4.21) | 5.3 |
+| CVE-2026-54285 | `opentelemetry-api` 1.62.0 | 5.3 |
+| CVE-2026-39882, -40894, -41178, -44967, -54285 | `opentelemetry-proto` 1.10.0-alpha | 5.3 |
+| CVE-2026-41115 | `kafka-clients` 4.2.1 | 4.3 |
+
+## 2. OWASP API Security Top 10 (2023) review
+
+Status key:
+
+- ✅ **addressed**: in place, with where
+- ⚠️ **gap**: a real weakness, with a recommended fix
+- 🟡 **accepted**: a known limit of a learning project, written down
+
+### API1 Broken Object Level Authorization ✅
+
+Can a user reach *another user's* object by changing an id?
+
+- **Orders:** `GET /api/orders/{id}` and `/{id}/status` check ownership in the app, and answer 403
+  for another customer's order. The smoke test proves it with two customers.
+- **Cart:** the cart has no id in its URL. It's always the caller's, taken from the token.
+- **Profile:** `GET /api/customers/me` has no id parameter.
+- **Assistant:** it calls downstream services with the **caller's own** token (Phase 29), so it
+  can't see more than the customer could. It even reports 403 and 404 identically, so the
+  customer can't learn which order ids exist.
+
+### API2 Broken Authentication 🟡 / ⚠️
+
+- ✅ Passwords are stored with **BCrypt** (8-72 characters, as BCrypt reads at most 72 bytes).
+- ✅ JWTs are **HS256**, the algorithm is fixed on the verifying side, issuer is checked, they
+  last 15 minutes, and a secret shorter than 256 bits fails startup (`JwtKeyConfig`).
+- 🟡 **One shared HMAC secret.** Every service that can verify a token can also *mint* one. The
+  fix is asymmetric signing (RS256/ES256), where only customer-service holds the private key. It
+  has been carried since Phase 21.
+- 🟡 **No refresh tokens and no revocation.** A stolen token works until it expires, up to 15
+  minutes.
+- ⚠️ **Login throttling is only the general rate limit** (50 requests/s per client IP, burst 100).
+  That's roughly 4 million password guesses a day from one address. Recommended: a much stricter
+  limit on `POST /api/auth/login` per username and per IP, plus a lockout or backoff after
+  repeated failures.
+
+### API3 Broken Object Property Level Authorization ✅
+
+Can a client read or write a *field* it shouldn't?
+
+- Requests are **records with only the fields a client may set.** `RegisterRequest` has no
+  `role`, so a client can't register itself as ADMIN (no mass assignment). `ProductRequest` has
+  no `id`.
+- Responses are separate records. `CustomerResponse` has no password hash.
+- Errors are `ApiError` (status, message, path). Stack traces are never included, which is Spring
+  Boot's default, and nothing overrides it.
+
+### API4 Unrestricted Resource Consumption 🟡 / ⚠️
+
+- ✅ A gateway **rate limit** on every route: per user (authenticated) or per IP (anonymous),
+  50/s with a burst of 100.
+- ✅ **Upload limit:** 16 MB on the CSV import.
+- ✅ **Assistant limits:** input capped at 1 000 characters, at most 5 tool calls per message,
+  and a model timeout.
+- 🟡 **Timeouts and circuit breakers:** on the app's catalog calls, but not on inventory calls or
+  the gateway's `/api/products` route (both carried since Phase 22).
+- ⚠️ `GET /api/products` returns the **whole catalogue**, unpaginated. That's harmless at 40
+  products, but it grows without limit. Recommended: pagination with a maximum page size.
+- ⚠️ **No load shedding at checkout.** Phase 30 showed an overload waiting 10 s per request for a
+  database connection instead of failing fast. Recommended: a concurrency limit that answers 503
+  with `Retry-After`.
+- 🟡 **No per-user budget for AI calls,** which cost money on a paid provider. This is a
+  follow-up from Phase 29.
+
+### API5 Broken Function Level Authorization ✅ (found and fixed in this phase)
+
+Can a user call a function meant for a different role?
+
+**At the gateway:** it always was enforced.
+
+- `/api/admin/**`, `/api/inventory/**` and product writes need ADMIN.
+- Cart, orders and the assistant need CUSTOMER.
+- `anyExchange().authenticated()` is the fallback.
+- `EdgeSecurityIT` covers these rules.
+
+**Behind the gateway:** not everywhere, until this phase.
+
+- ecomdemo-app and payment-service already checked roles themselves.
+- **catalog-service and inventory-service only required *a* valid token.** They relied on the
+  gateway for the role, a decision from Phase 21, when the edge was meant to be the only way in.
+
+The review tested that on the running compose stack, with a **CUSTOMER** token sent straight to
+the service ports and no data changed:
+
+| Request (CUSTOMER token, bypassing the gateway) | Before | After the fix |
+|---|---|---|
+| `GET /api/inventory/1` on :8080 (the gateway) | 403 | 403 |
+| `GET /api/inventory/1` on :8082 (inventory-service) | **200** | 403 |
+| `PUT /api/inventory/1` same level on :8082 | **200**, the write is accepted | 403 |
+| `POST /api/products` (empty body) on :8081 (catalog-service) | **400**: past authorization, stopped only by validation | 403 |
+| `DELETE /api/products/999999` on :8081 | **404**: past authorization; an existing id would be deleted | 403 |
+| `POST /api/admin/batch/product-import` on :8084 (app) | 403 | 403 |
+
+How far it reached depended on how the stack was run:
+
+- **Kubernetes:** these services are `ClusterIP` only, so an attacker needed to be inside the
+  cluster already.
+- **compose:** every service port is published on `0.0.0.0` (see API8), so anyone who could reach
+  the machine could do it.
+
+**The fix** is defence in depth: each service now repeats the gateway's rule for its own paths.
+
+- **catalog-service:** any valid token may read. Writes and the embedding backfill need ADMIN or
+  SERVICE. The SERVICE identity is the app's batch import, and the gateway's own token for
+  anonymous browsing, which is read-only because the gateway refuses anonymous writes first.
+- **inventory-service:** every path needs ADMIN or SERVICE. No shopper has a reason to call it at
+  all; checkout and catalog call it with their SERVICE token.
+- **Tests:**
+  - `InventorySecurityTest`: a CUSTOMER gets 403 on read, write and reserve; an ADMIN may write.
+  - `ProductApiIT`: a CUSTOMER may read but gets 403 on create, delete and the backfill; an ADMIN
+    and the SERVICE identity may write.
+
+🟡 **What remains:** a SERVICE token is powerful, and with the shared HMAC secret (API2) any
+service can mint one. Scoped service identities (which service may call what) come with
+asymmetric signing.
+
+### API6 Unrestricted Access to Sensitive Business Flows 🟡
+
+- Nothing limits **how many orders** one account places, or how fast beyond the general rate
+  limit. A bot could buy up a scarce product (scalping).
+- Nothing limits **how many accounts** one client registers.
+
+Both are business decisions, such as a per-customer quantity limit or a CAPTCHA on registration.
+Recorded, not built.
+
+### API7 Server-Side Request Forgery ✅
+
+No endpoint fetches a URL a client supplies. Every outbound address comes from configuration:
+service base URLs, `OLLAMA_BASE_URL`, the OpenAI endpoint. The assistant's tools call fixed
+internal paths with the product name or order id as a *parameter*, never as a URL.
+
+### API8 Security Misconfiguration ⚠️
+
+- ⚠️ **compose publishes every port on all interfaces:** the eight services, the six PostgreSQL
+  databases (with default passwords), Redis and Kafka (no authentication). That's convenient for
+  learning, and it's what made the API5 gap reachable. Recommended: bind to `127.0.0.1`, or keep
+  only the gateway, Grafana and Prometheus published. (The services now check roles themselves,
+  API5, so a published port is no longer a way around authorization, but the databases, Redis
+  and Kafka still have no such second check.)
+- ⚠️ **The gateway's `/actuator/prometheus` is public.** Metrics reveal route names, error rates
+  and JVM details. Recommended: scrape it on an internal port, or require a token.
+- ✅ **CSRF off** is deliberate. The API uses bearer tokens, not cookies, so a browser can't be
+  tricked into sending credentials. The README's security section explains it.
+- ✅ **CORS:** an explicit origin list, methods and headers, and no credentials.
+- ✅ **Least privilege in CI:** `contents: read` by default, `packages: write` only in `publish`.
+- ✅ **Containers:** non-root user, minimal JRE Alpine image, scanned.
+
+### API9 Improper Inventory Management 🟡
+
+- ✅ **One entry point.** The gateway's route list is the inventory of what is public. notification
+  has no route on purpose, as it has no API.
+- ✅ **SBOMs:** every image's contents are recorded as a CycloneDX SBOM on every CI run.
+- 🟡 **OpenAPI** exists for the app only. catalog-service has no springdoc (a carried gap).
+- 🟡 **No API versioning** (`/api/v1`). There's one client and one version.
+- 🟡 **Swagger UI** is served by the app on its own port, fine for development. A production
+  profile should switch it off.
+
+### API10 Unsafe Consumption of APIs ✅ / 🟡
+
+- **Service-to-service:** responses are read into typed records, never passed through. The app's
+  catalog calls have timeouts, retries and a circuit breaker (Phase 22); inventory calls don't yet
+  (see API4).
+- **Language models** are treated as untrusted input:
+  - Catalog's generated descriptions are validated, and an unusable answer is refused (Phase 27).
+  - The assistant's writes need the customer's confirmation.
+  - `OrderClaimGuard` replaces answers that claim order data nobody looked up.
+  - Tool calls are bounded (Phase 29).
+
+## 3. Concepts
+
+- **CVE and CVSS.** A CVE is an identifier for one publicly known vulnerability. CVSS scores its
+  severity from 0 to 10:
+
+  | Score | Severity |
+  |---|---|
+  | 0.1-3.9 | LOW |
+  | 4.0-6.9 | MEDIUM |
+  | 7.0-8.9 | HIGH |
+  | 9.0-10 | CRITICAL |
+
+  CI fails at 7.0. The score describes the vulnerability in general; whether it matters *here*
+  depends on whether the vulnerable code is reachable. That judgement is what a suppression's
+  statement records.
+- **Supply chain and SBOMs.** Most of the code in an image wasn't written here. An SBOM (Software
+  Bill of Materials) lists every component and version. When a new CVE is announced, the question
+  "are we affected?" becomes a search instead of an investigation. The scanners, too, are part of
+  the supply chain, which is why Trivy is pinned by digest.
+- **Shift left.** Find problems as early as possible, on the pull request rather than in
+  production. The scans run on every PR, and a red scan blocks both the merge and the publish.
+- **The OWASP API Top 10.** The ten most common ways APIs are broken, as ranked by OWASP (2023).
+  Section 2 is this system checked against each one.

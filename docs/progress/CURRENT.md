@@ -3,60 +3,44 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-29
-- **Phase:** 30 — Performance Testing (Gatling)
-- **Branch:** feature/phase-30-gatling (cut from `main` at `9b0912f`)
+- **Phase:** 31 — Security Scanning (OWASP Dependency-Check + Trivy)
+- **Branch:** feature/phase-31-security-scanning (cut from `main` at `387d755`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #47 https://github.com/mr-sujay-patil/ecomdemo/pull/47
-- **Waiting for user:** YES - review of the Phase 30 PR
+- **PR:** #48 https://github.com/mr-sujay-patil/ecomdemo/pull/48
+- **Waiting for user:** YES - review of the Phase 31 PR
 
 ## Merge verification before this phase — PASSED
-- Phase 29: PR #46 merged as `9b0912f` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
-  locally and on GitHub. CI on main green (run 36477434643). `verify` on main 610/0/0/0. Cold compose
-  (down -v, --build, `.smoke-state` removed) smoke on a COPY 404/0/0 with the user's `.env` (Ollama;
-  assistant model qwen2.5:7b, confirmed inside the container). `phase-29-complete` already existed on
-  `9b0912f` (pushed by an earlier session, whose results were not recorded; re-run in full here).
+- Phase 30: PR #47 merged as `387d755` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
+  locally and on GitHub. CI on main green (run 36539654692). `verify` on main 616/0/0/0. Cold compose
+  (down -v, --build, `.smoke-state` removed) smoke on a COPY 404/0/0 (user's `.env`). Tagged
+  `phase-30-complete`.
 
-## Design (decided; decisions.md entries to write)
-- Module `performance-tests/` (Gatling 3.15.1 Java DSL, gatling-maven-plugin 4.21.12), OWN pom with no
-  Spring Boot parent (Boot's dependency management would override Gatling's Netty/Jackson), NOT in the
-  root reactor (Docker images and `verify` stay Gatling-free). CI compiles it: `-f performance-tests/pom.xml
-  test-compile`. Run: `./mvnw -f performance-tests/pom.xml gatling:test -Dgatling.simulationClass=...`.
-- Target = the GATEWAY (8080), like a real client. Rate limit is per USER (50/s, burst 100) and per IP
-  for anonymous -> browse runs AUTHENTICATED with a pool of pre-registered users (anonymous load from
-  one host shares one IP bucket; that is a finding, shown once, not the thing measured).
-- Data setup in the simulation's `before()` with java.net.http (idempotent): register `perf-user-N`
-  (409 = exists), admin creates `Perf Product N` if missing and PUTs stock very high; prices small
-  (payment declines above 10000). Tokens fetched once in `before()` and fed -> login/BCrypt measured
-  separately, not hidden inside every browse.
-- Simulations: Browse (list, detail, search), Checkout (add to cart, place, poll status to
-  CONFIRMED/CANCELLED), Mixed (weighted). Profile by `-Dprofile=ramp|steady|spike` (+ rate/duration
-  knobs), assertions on failure rate and p95/p99.
-- Comparisons via env knobs with today's defaults (compose): catalog cache on/off
-  (`spring.cache.type`), Hikari pool sizes; `scripts/perf-compare.sh` restarts with each setting and
-  collects Gatling's stats.json into a table. Findings + bottleneck fix in `docs/performance.md`.
-- Load generator shares the host with the stack (24 cores, 30 GB): numbers are relative, not absolute.
+## Design (decided)
+- Dependency-Check 13.0.0 in root pluginManagement (not bound to a phase): failBuildOnCVSS 7,
+  skipTestScope, suppression file with notes+until, OSS Index/Node/RetireJS/.NET analyzers off,
+  NVD key from env `NVD_API_KEY`. CI job `dependency-scan`: fails fast if the secret is missing,
+  NVD data cached (unique key + restore-keys), `package -DskipTests` then `aggregate`.
+- CI job `image-scan`: builds all 8 images in ONE job (build stage reused), Trivy 0.74.0 pinned by
+  DIGEST via docker, HIGH/CRITICAL fail (ignore-unfixed NOT used), `.trivyignore.yaml` with
+  statement+expired_at, CycloneDX SBOM per image uploaded. `publish` needs both scans.
+- Scan findings (Trivy): Tomcat 11.0.24 3x CRITICAL, jackson-databind 3.1.5/2.21.5 HIGH -> fixed by
+  overriding Boot-managed versions (tomcat 11.0.25, jackson 3.1.6 / 2.21.6); all 8 images clean.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [x] Browse, checkout, and mixed simulations (Gatling Java DSL) - `475b819`, harness checked (browse 5/s, checkout 3/s: 0 KO)
-- [x] Ramp, steady, and spike load profiles (`PERF_PROFILE`; runner `scripts/perf-test.sh`, results TSV)
-- [x] Comparisons with and without the cache and with different pool sizes (`scripts/perf-compare.sh`, compose knobs)
-- [x] Findings in `docs/performance.md` (raw runs: `docs/test-reports/phase-30-perf-results.tsv`)
-- [x] Done when: bottleneck = outbox relay (`8204022`): steady 50/s settle p95 25.9 s -> 3.0 s
-- [x] Testing protocol: verify 616/0/0/0; compose cold smoke 404/0/0; k8s 360/0/7; Gatling acceptance 0 KO; report, README, decisions (7), RECENT (Phase 28 archived), tracker 🔵, PR #47
-
-## Key results (details in docs/performance.md)
-- Outbox fix: checkout steady 50/s settle p50/p95 13.0/25.9 s -> 2.5/3.0 s; ramp to 100/s 594 -> 0
-  unconfirmed. Cache off: same latency (gateway-bound) but +2.5 cores backend/DB. Pool 2 collapses,
-  5/10/30 equal. Mixed spike (3000 in 10 s) 0 KO; accidental 300 checkouts/s = pool exhaustion.
-- Simulation bug found+fixed (`3b8ede8`): mixed gave both scenarios the full spike.
+- [x] Dependency-Check in CI (fail on high severity) - `d5c6f37`; secret NVD_API_KEY set from .env; 2 false positives suppressed (`cd3f02a`)
+- [x] Trivy image scans in CI (`d5c6f37`; local run of the exact steps: 8/8 clean)
+- [x] Every finding fixed or suppressed with a justification (Tomcat/Jackson fixed `5430dd0`; Kotlin/pgvector suppressed)
+- [x] An OWASP API Top 10 review in `docs/security.md`. API5 found AND fixed (user said fix it): `4671fc1`, catalog writes ADMIN|SERVICE, inventory ADMIN|SERVICE; re-probed on rebuilt compose: all 403, reads 200
+- [x] Done when: CI blocked commons-text 1.9 on PR #48 (run 36555557687 red, revert 36556218892 green); security.md complete
+- [x] Testing: verify 620/0/0/0; compose cold 404/0/0; k8s 360/0/7; report, README, decisions (7), RECENT (Phase 29 archived), tracker 🔵, PR #48
 
 ## Next action
-STOPPED at PR #47, waiting for the user. Do NOT merge unless the user says `approved, merge it`
-(`gh pr merge 47 --merge`). On `merged, continue`: merge verification (git checks, CI on main,
-`verify`, cold compose smoke on a COPY), tag `phase-30-complete`, then Phase 31 per ROADMAP.
-Stack state: compose (user's .env) and kind are running with the Phase 30 build; perf users and
-products exist in the compose DBs.
+STOPPED at PR #48 (opened as a draft for the CI demonstration, now ready), waiting for the user. Do
+NOT merge unless the user says `approved, merge it` (`gh pr merge 48 --merge`). On `merged, continue`:
+merge verification (git checks, CI on main incl. both scans, `verify`, cold compose smoke on a COPY),
+tag `phase-31-complete`, then Phase 32 per ROADMAP. Note: commit 386cacb "placeholder" is the revert
+of 9065a72 (mistaken --amend, explained in 9484507 and the test report).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

@@ -2,11 +2,15 @@ package com.ecomdemo.inventory;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.jwt.ServiceTokenProvider;
+import com.ecomdemo.shared.TokenClaims;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import java.time.Instant;
+import java.util.List;
 import javax.crypto.SecretKey;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,6 +19,10 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -98,6 +106,61 @@ class InventorySecurityTest {
                 // was understood; 401 or 403 would mean it never arrived. What the stock rules
                 // then decide belongs to the tests that own them.
                 .andExpect(status().isConflict());
+    }
+
+    /**
+     * The Phase 31 regression. A CUSTOMER's token is perfectly valid - signed by us, not expired -
+     * and until the security review that was all this chain asked for, so a shopper who reached
+     * this port directly could set stock levels. No shopper has a reason to call this service at
+     * all, so every path refuses them: reads, the admin write and the saga's reservation alike.
+     */
+    @Test
+    @DisplayName("a CUSTOMER's valid token is refused on every path (Phase 31, OWASP API5)")
+    void refusesACustomer() throws Exception {
+        String customer = userToken("shopper", 7, "CUSTOMER");
+
+        mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + customer))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/api/inventory/1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + customer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":1000}"))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/inventory/1/reserve")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + customer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"units\":1,\"productName\":\"Anything\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("an ADMIN's token may read and set a stock level (the gateway's /api/inventory rule)")
+    void acceptsAnAdmin() throws Exception {
+        String admin = userToken("boss", 1, "ADMIN");
+
+        mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + admin))
+                .andExpect(status().isOk());
+        mvc.perform(put("/api/inventory/1")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + admin)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"quantity\":0}"))
+                .andExpect(status().isOk());
+    }
+
+    /** A user's token, shaped like the ones customer-service issues. */
+    private String userToken(String username, long userId, String... roles) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.issuer())
+                .subject(username)
+                .issuedAt(now)
+                .expiresAt(now.plus(java.time.Duration.ofMinutes(15)))
+                .claim(TokenClaims.USER_ID, userId)
+                .claim(TokenClaims.ROLES, List.of(roles))
+                .build();
+        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
+                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
     }
 
     @Test
