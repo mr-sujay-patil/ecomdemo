@@ -128,6 +128,10 @@ jobs:
   dependency-scan:
     name: Dependency scan (OWASP Dependency-Check)
     runs-on: ubuntu-latest
+    # With a warm cache (see nvd-data.yml) this job takes a minute or two. The limit is for a cold
+    # start on a slow NVD day: a stalled download fails here, visibly, instead of holding the PR
+    # for GitHub's default six hours - which is what happened on the first main run after Phase 31.
+    timeout-minutes: 60
     steps:
       - name: Check out the code
         uses: actions/checkout@v7
@@ -152,25 +156,53 @@ jobs:
             exit 1
           fi
 
-      # The vulnerability database is ~300k CVEs. Downloading it on every run takes many minutes
-      # and leans on a public service; cached, a run only fetches what changed since. Caches are
-      # immutable, so the key is unique per run (a fresh copy is saved each time) and restore-keys
-      # picks up the newest earlier one to update from.
+      # The vulnerability database is ~400k CVEs (~240 MB stored). nvd-data.yml keeps a copy
+      # warm on main, where every branch can restore it (a cache saved by a PR is visible to
+      # that PR only). Restore and save are separate steps so that saving is a decision, not a
+      # side effect that silently skips when the scan fails or the job is cancelled.
       - name: Restore the NVD data
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/dependency-check
-          key: nvd-${{ github.run_id }}
+          key: nvd-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: nvd-
 
-      # `package` first, with tests skipped (the build job runs them): the aggregate goal needs
-      # the reactor's own modules (common, outbox) resolved as jars.
+      # Bring the data up to date, and only that. Kept apart from the scan for two reasons:
+      # a vulnerable dependency (the scan failing, as it should) no longer throws the update
+      # away, and the log shows download progress ("Downloaded 120,000/398,912 (30%)") - the
+      # scan used to run with -q, so a slow NVD and a stuck one looked identical.
+      - name: Update the NVD data
+        id: update
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: >
+          ./mvnw -B -ntp -N
+          org.owasp:dependency-check-maven:update-only
+          -DdataDirectory=$HOME/.cache/dependency-check
+
+      # Saved from main only: pull requests restore main's copy, and a 240 MB copy per PR run
+      # would crowd the repository's 10 GB cache allowance for nothing.
+      - name: Save the NVD data
+        if: steps.update.outcome == 'success' && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/dependency-check
+          key: nvd-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # `package` first, quietly and with tests skipped (the build job runs them): the aggregate
+      # goal needs the reactor's own modules (common, outbox) resolved as jars. The scan itself
+      # is not quiet - its findings are the point of the log. autoUpdate=false: the step above
+      # has just updated the data.
+      - name: Package
+        run: ./mvnw -B -q -DskipTests package
+
       - name: Scan
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         run: >
-          ./mvnw -B -q -DskipTests package
+          ./mvnw -B -ntp
           org.owasp:dependency-check-maven:aggregate
+          -DautoUpdate=false
           -DdataDirectory=$HOME/.cache/dependency-check
 
       - name: Upload the report

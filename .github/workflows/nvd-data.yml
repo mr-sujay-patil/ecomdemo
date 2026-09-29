@@ -1,0 +1,89 @@
+# Keeps OWASP Dependency-Check's copy of the National Vulnerability Database warm (Phase 31
+# follow-up).
+#
+# WHY A WORKFLOW OF ITS OWN. The full NVD is ~400 000 records (~240 MB once stored). Downloading it
+# took 26 minutes on one CI run and stalled for 80+ on another: the NVD's API is slow and
+# throttled on bad days, and a pull request should not wait on that. So the download happens HERE,
+# on a schedule, and every scan starts from this cache and only fetches what changed since.
+#
+# WHY ON main. GitHub scopes caches by branch: a cache saved on main can be restored by main AND
+# by every pull request, while a cache saved by a pull request is visible to that pull request
+# only. That is why the first main run after merging PR #48 found no cache at all, even though
+# the PR had just downloaded everything. Scheduled and manual runs always run on the default
+# branch, so what this saves is visible everywhere.
+#
+# Run it by hand (Actions > NVD data > Run workflow) to seed the cache right away.
+
+name: NVD data
+
+on:
+  schedule:
+    # Daily at 03:17 UTC. Not on the hour: scheduled workflows queue up at :00 across GitHub.
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two updates at once would each save their own copy for nothing.
+concurrency:
+  group: nvd-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update the NVD data
+    runs-on: ubuntu-latest
+    # A full first download has taken 26 minutes; two hours covers a slow NVD day. A stall past
+    # that fails here, visibly, instead of holding a runner for GitHub's default six hours.
+    timeout-minutes: 120
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Require the NVD API key
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          if [ -z "$NVD_API_KEY" ]; then
+            echo "::error::Secret NVD_API_KEY is not set. Request a free key at https://nvd.nist.gov/developers/request-an-api-key and add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      # Restore and save are separate steps (not the all-in-one actions/cache), so saving is a
+      # decision made below instead of a side effect that silently does not happen when a job
+      # fails or is cancelled.
+      - name: Restore the NVD data
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/dependency-check
+          key: nvd-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nvd-
+
+      # `update-only` downloads and stores the data and scans nothing. No `-q`: the plugin logs
+      # "Downloaded 120,000/398,912 (30%)" as it goes, which is how a slow NVD is told apart from
+      # a stuck one.
+      - name: Update
+        id: update
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: >
+          ./mvnw -B -ntp -N
+          org.owasp:dependency-check-maven:update-only
+          -DdataDirectory=$HOME/.cache/dependency-check
+
+      # Only a COMPLETE update is saved. A half-downloaded database saved as the newest cache
+      # would be the one every later run starts from.
+      - name: Save the NVD data
+        if: steps.update.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/dependency-check
+          key: nvd-${{ github.run_id }}-${{ github.run_attempt }}
