@@ -42,17 +42,27 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class InventoryService {
 
+    /** Why a reservation was refused for an order the saga deadline had already closed. */
+    static final String CLOSED_BEFORE_RESERVATION =
+            "The order was closed before its stock could be reserved";
+
     private final ProductStockRepository stock;
     private final StockReservationRepository reservations;
     private final StockChangePublisher stockChanges;
+    private final ClosedOrderRepository closedOrders;
+    private final OrderLocks orderLocks;
 
     public InventoryService(
             ProductStockRepository stock,
             StockReservationRepository reservations,
-            StockChangePublisher stockChanges) {
+            StockChangePublisher stockChanges,
+            ClosedOrderRepository closedOrders,
+            OrderLocks orderLocks) {
         this.stock = stock;
         this.reservations = reservations;
         this.stockChanges = stockChanges;
+        this.closedOrders = closedOrders;
+        this.orderLocks = orderLocks;
     }
 
     /** How many of one product are available. Zero if it has no stock row. */
@@ -212,6 +222,14 @@ public class InventoryService {
      */
     @Transactional
     public ReservationResult reserveForOrder(Long orderId, List<ReservationLine> lines) {
+        // Phase 32: an order the saga deadline has closed gets nothing, however late its
+        // OrderCreated arrives. The lock makes "is it closed?" and "reserve" one step with respect
+        // to closeOrder - see OrderLocks.
+        orderLocks.lock(orderId);
+        if (closedOrders.existsById(orderId)) {
+            return ReservationResult.rejected(CLOSED_BEFORE_RESERVATION);
+        }
+
         Map<Long, ReservationLine> byProduct = new LinkedHashMap<>();
         for (ReservationLine line : lines) {
             byProduct.merge(
@@ -276,6 +294,29 @@ public class InventoryService {
             stockChanges.publish(reservation.getProductId());
         }
         return held.size();
+    }
+
+    /**
+     * Closes an order for good: gives back everything it holds and refuses any reservation for it
+     * from now on. The saga deadline's request (Phase 32), made when the order service has decided
+     * to cancel an order whose saga never finished.
+     *
+     * <p>Compensation plus a fence. {@link #releaseForOrder} alone would give back what is held
+     * NOW, but the order's OrderCreated may still be on its way - late, or replayed from the
+     * dead-letter topic - and would reserve stock again for an order that is already cancelled.
+     * The {@code closed_order} row stops that; the order lock stops it racing a reservation that is
+     * in progress at this very moment.
+     *
+     * <p>Idempotent: a second call releases nothing more and reports the order as already closed.
+     */
+    @Transactional
+    public CloseResult closeOrder(Long orderId, String reason) {
+        orderLocks.lock(orderId);
+        boolean alreadyClosed = closedOrders.existsById(orderId);
+        if (!alreadyClosed) {
+            closedOrders.save(new ClosedOrder(orderId, reason));
+        }
+        return new CloseResult(releaseForOrder(orderId), alreadyClosed);
     }
 
     /** Forgets a product's stock entirely, for when the catalogue deletes the product. */

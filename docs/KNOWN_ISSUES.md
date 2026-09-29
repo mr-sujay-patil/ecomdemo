@@ -78,8 +78,8 @@ catalog spec contains `ProductWrite`, and payment and notification expose no doc
 
 | ID | Issue | Phase | Status |
 |---|---|---|---|
-| KI-012 | An order whose saga event is dead-lettered stays PENDING forever | Phase 32 | In progress |
-| KI-013 | No reconciliation of `stock_reservation` against orders | Phase 32 | In progress |
+| KI-012 | An order whose saga event is dead-lettered stays PENDING forever | Phase 32 | Fixed in Phase 32 (saga deadline) |
+| KI-013 | No reconciliation of `stock_reservation` against orders | Phase 32 | Fixed in Phase 32 (close + fence) |
 | KI-014 | No login throttling or lockout (BCrypt cost is the only brake) | Phase 33 | Open |
 | KI-015 | Symmetric JWT signing (HS256): every verifier can also mint tokens; one shared SERVICE role | Phase 33 | Open |
 
@@ -107,6 +107,8 @@ catalog spec contains `ProductWrite`, and payment and notification expose no doc
 | KI-028 | Most of the fast suite runs on H2 | The PostgreSQL-specific paths are covered by the integration tests |
 | KI-029 | The system issues plain JWTs; no OAuth2 or OIDC flows | Out of scope for a learning project |
 | KI-030 | Flyway has no undo | Community edition; roll forward with a new migration |
+| KI-037 | An order whose **StockRejected** is dead-lettered is cancelled by the saga deadline with the void's reason, not the stock message | The rejection is recorded nowhere the reconciler can ask; the outcome (CANCELLED, nothing held) is right, only the wording differs (Phase 32) |
+| KI-038 | The saga deadline sweep runs in every app instance, making duplicate settle/close calls | Safe: both calls are idempotent and the decision is a conditional UPDATE; the app runs one replica (Phase 32) |
 
 ## Needs check (not re-verified against the current code)
 

@@ -1,5 +1,6 @@
 package com.ecomdemo.metrics;
 
+import com.ecomdemo.order.internal.saga.SagaMetrics;
 import com.ecomdemo.support.ProjectRoot;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -199,6 +200,8 @@ class DashboardMetricsTest {
     private static Set<String> knownSeries() {
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         new CheckoutMetrics(registry);
+        // Phase 32: the saga deadline's gauge and counter, from the class the application runs.
+        new SagaMetrics(registry);
         // The resilience series, from the same Micrometer binders Resilience4j's Boot module
         // registers - so a Resilience4j upgrade that renamed one fails here, not on a blank panel.
         CircuitBreakerRegistry breakers = CircuitBreakerRegistry.ofDefaults();
@@ -266,7 +269,8 @@ class DashboardMetricsTest {
                 || name.startsWith("hikaricp_")
                 || name.startsWith("process_cpu")
                 || name.startsWith("system_cpu")
-                || name.startsWith("resilience4j_");
+                || name.startsWith("resilience4j_")
+                || name.startsWith("saga_");
     }
 
     private static String datasourceUid() throws IOException {

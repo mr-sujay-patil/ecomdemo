@@ -5,6 +5,7 @@ import com.ecomdemo.order.OrderStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -62,4 +63,23 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
             @Param("to") OrderStatus to,
             @Param("reason") String reason,
             @Param("at") Instant at);
+
+    /**
+     * The oldest PENDING orders placed before {@code cutoff}: the saga deadline's work list
+     * (Phase 32). Ids only - the reconciler loads each order when it gets to it, so a long list does
+     * not hold a batch of entities that other transactions are changing.
+     */
+    @Query("""
+            select o.id from Order o
+             where o.status = com.ecomdemo.order.OrderStatus.PENDING and o.placedAt < :cutoff
+             order by o.placedAt
+            """)
+    List<Long> findPendingPlacedBefore(@Param("cutoff") Instant cutoff, Pageable page);
+
+    /** How many PENDING orders were placed before {@code cutoff}: the overdue gauge. */
+    @Query("""
+            select count(o) from Order o
+             where o.status = com.ecomdemo.order.OrderStatus.PENDING and o.placedAt < :cutoff
+            """)
+    long countPendingPlacedBefore(@Param("cutoff") Instant cutoff);
 }

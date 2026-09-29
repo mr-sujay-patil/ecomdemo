@@ -280,4 +280,82 @@ class InventorySagaTest {
             assertThat(reservationStatuses(orderId)).isEmpty();
         }
     }
+
+    /** Phase 32: the saga deadline gives an order's stock back and fences it. */
+    @Nested
+    @DisplayName("closing an order for the saga deadline")
+    class ClosingAnOrder {
+
+        @Test
+        @DisplayName("gives back everything the order holds")
+        void releasesWhatIsHeld() {
+            handler.onOrderCreated(order(orderId, line(mouse, 3), line(keyboard, 1)));
+
+            assertThat(inventory.closeOrder(orderId, "deadline").released()).isEqualTo(2);
+
+            assertThat(inventory.quantityFor(mouse)).isEqualTo(5);
+            assertThat(inventory.quantityFor(keyboard)).isEqualTo(2);
+            assertThat(reservationStatuses(orderId)).containsExactly("RELEASED", "RELEASED");
+        }
+
+        @Test
+        @DisplayName("is idempotent: a second close releases nothing and says so")
+        void closingTwice() {
+            handler.onOrderCreated(order(orderId, line(mouse, 3)));
+
+            inventory.closeOrder(orderId, "deadline");
+            var second = inventory.closeOrder(orderId, "deadline");
+
+            assertThat(second.released()).isZero();
+            assertThat(second.alreadyClosed()).isTrue();
+            assertThat(inventory.quantityFor(mouse)).as("5, never 8").isEqualTo(5);
+        }
+
+        @Test
+        @DisplayName("THE FENCE: an OrderCreated arriving after the close reserves nothing")
+        void aLateOrderCreatedIsRejected() throws Exception {
+            inventory.closeOrder(orderId, "deadline");   // its OrderCreated was dead-lettered
+
+            handler.onOrderCreated(order(orderId, line(mouse, 3)));   // ...and is replayed
+
+            assertThat(inventory.quantityFor(mouse)).isEqualTo(5);
+            assertThat(reservationStatuses(orderId)).isEmpty();
+            OutboxEvent row = outboxRowsFor(orderId).get(0);
+            assertThat(row.getEventType()).isEqualTo("StockRejectedEvent");
+            assertThat(read(row, StockRejectedEvent.class).reason())
+                    .isEqualTo("The order was closed before its stock could be reserved");
+        }
+
+        @Test
+        @DisplayName("never leaves stock held for a closed order, however a close and a reservation interleave")
+        void closeRacingAReservation() throws Exception {
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                for (int round = 0; round < 20; round++) {
+                    long racedOrder = IDS.incrementAndGet();
+                    CountDownLatch start = new CountDownLatch(1);
+                    var reserve = pool.submit(() -> {
+                        start.await();
+                        handler.onOrderCreated(order(racedOrder, line(mouse, 1)));
+                        return null;
+                    });
+                    var close = pool.submit(() -> {
+                        start.await();
+                        inventory.closeOrder(racedOrder, "deadline");
+                        return null;
+                    });
+                    start.countDown();
+                    reserve.get(30, TimeUnit.SECONDS);
+                    close.get(30, TimeUnit.SECONDS);
+
+                    assertThat(reservationStatuses(racedOrder))
+                            .as("round %d: nothing may stay RESERVED for a closed order", round)
+                            .doesNotContain("RESERVED");
+                }
+            } finally {
+                pool.shutdownNow();
+            }
+            assertThat(inventory.quantityFor(mouse)).as("every unit came back").isEqualTo(5);
+        }
+    }
 }

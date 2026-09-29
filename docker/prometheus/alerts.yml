@@ -49,3 +49,41 @@ groups:
             optimistic-locking retries. Customers are being told to try again. Look at which
             products are contended - a single very popular item is the usual cause - and at
             whether the retry budget (OrderService.MAX_ATTEMPTS) is still the right size.
+
+  # Phase 32: the saga deadline. Two rules, each a situation a person can act on.
+  - name: ecomdemo-saga
+    rules:
+      - alert: SagaOrdersStuck
+        # saga_orders_overdue is the number of PENDING orders older than the deadline, as the last
+        # sweep left them. A sweep resolves every overdue order whose participants answer, so a
+        # value that STAYS above zero means reconciliation cannot decide: payment-service or
+        # inventory-service is not answering, and every sweep defers. `max` rather than `sum`
+        # because every instance of the application reports the same database's count.
+        expr: max(saga_orders_overdue) > 0
+        # Several sweeps (10 s apart) and more than one deadline (1 m) must go by first. An order
+        # that is merely overdue for one sweep is being handled; one overdue for 10 minutes is not.
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Orders are stuck PENDING past the saga deadline"
+          description: >-
+            {{ $value }} order(s) have been PENDING for longer than the saga deadline and the
+            reconciler cannot decide them. Their shoppers see "pending" and their stock is held.
+            Check that payment-service and inventory-service are up and reachable from the
+            application (the app log says which one "could not settle" or "could not close").
+
+      - alert: SagaDeadlineResolvingOrders
+        # Every order the DEADLINE confirms or cancels is a saga that did not finish on its own: a
+        # message was lost or dead-lettered. One is an incident to look at; it is not an outage, so
+        # this is a warning with a short window and no `for` beyond the evaluation itself.
+        expr: sum(increase(saga_reconciliations_total{outcome=~"confirmed|cancelled"}[15m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "The saga deadline had to decide orders the saga did not finish"
+          description: >-
+            {{ $value }} order(s) in the last 15 minutes were confirmed or cancelled by the saga
+            deadline rather than by the saga itself. Some saga event was lost or dead-lettered: see
+            GET /api/admin/dead-letters for what is waiting, and why.

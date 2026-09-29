@@ -55,7 +55,10 @@ class OpenApiDocumentationTest {
             "/api/orders/{id}/status",
             "/api/admin/batch/product-import",
             "/api/admin/batch/executions/{id}",
-            "/api/admin/batch/executions/{id}/restart");
+            "/api/admin/batch/executions/{id}/restart",
+            "/api/admin/dead-letters",
+            "/api/admin/dead-letters/{topic}/{partition}/{offset}/replay",
+            "/api/admin/dead-letters/replays");
 
     @Autowired
     private MockMvcTester mvc;
@@ -235,6 +238,9 @@ class OpenApiDocumentationTest {
         assertThat(requiresAuth("/api/orders/{id}/status", "get")).as("reading an order's status").isTrue();
         assertThat(requiresAuth("/api/admin/batch/product-import", "post"))
                 .as("an administrator's import")
+                .isTrue();
+        assertThat(requiresAuth("/api/admin/dead-letters/{topic}/{partition}/{offset}/replay", "post"))
+                .as("an administrator's dead-letter replay (Phase 32)")
                 .isTrue();
     }
 

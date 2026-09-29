@@ -37,6 +37,9 @@ data:
   CATALOG_BASE_URL: "http://catalog-service:8081"
   CUSTOMER_BASE_URL: "http://customer-service:8083"
   INVENTORY_BASE_URL: "http://inventory-service:8082"
+  # Phase 32: the saga deadline settles overdue orders with payment-service.
+  PAYMENT_BASE_URL: "http://payment-service:8086"
+  ORDER_SAGA_DEADLINE: "1m"
   JAVA_OPTS: "-XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
 ---
 # Where an uploaded CSV is staged and the nightly report is written (BATCH_DIR). A claim of its own

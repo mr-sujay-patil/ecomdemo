@@ -46,7 +46,7 @@ import org.springframework.test.context.event.RecordApplicationEvents;
  */
 @DataJpaTest
 @TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
-@Import({InventoryService.class, StockChangePublisher.class})
+@Import({InventoryService.class, StockChangePublisher.class, OrderLocks.class})
 @RecordApplicationEvents
 @DisplayName("InventoryService")
 class InventoryServiceTest {

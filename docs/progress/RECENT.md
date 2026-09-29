@@ -12,6 +12,33 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 32: Saga Timeouts and Reconciliation (tag: phase-32-complete, PR #51)
+**What exists now:** the order service owns the saga's clock. `SagaDeadlineSweeper` (@Scheduled, every
+`ecomdemo.saga.sweep-interval` 10s) reconciles orders PENDING longer than `ecomdemo.saga.deadline` (1m,
+env `ORDER_SAGA_DEADLINE`): payment `settle` → COMPLETED confirms; FAILED/VOIDED → inventory `close`
+→ cancel; no answer → DEFERRED (stays PENDING). Admin DLT list/replay with audit. Two alerts.
+**Key code:** app `order.internal.saga`: `SagaReconciler`, `SagaDeadlineSweeper`, `OrderDecisions`
+(confirm/cancel shared with `OrderSagaHandler`), `SagaParticipants` + `HttpSagaParticipants` (own
+RestClients, 1s/5s timeouts), `SagaProperties`, `SagaMetrics` (public, for DashboardMetricsTest). New
+module `deadletter` (`DeadLetterService`, `/api/admin/dead-letters`, V20 `dead_letter_replay`).
+payment: `POST /internal/saga/orders/{id}/settle` (SERVICE only, 2nd security chain `@Order(1)`),
+status VOIDED (V2). inventory: `POST /api/inventory/orders/{id}/close`, `closed_order` (V4),
+`OrderLocks` (pg_advisory_xact_lock per order) taken by `reserveForOrder` and `closeOrder`.
+**Config & infrastructure:** app env `PAYMENT_BASE_URL` (compose + k8s), `ORDER_SAGA_DEADLINE`. Meters
+`saga_orders_overdue`, `saga_reconciliations_total{outcome=confirmed|cancelled|deferred|already_decided}`.
+Alerts `SagaOrdersStuck` (10m), `SagaDeadlineResolvingOrders` (fires ~15m after any smoke run).
+**Tests:** 651 (505 unit, 146 IT). +`SagaReconcilerTest`, `SagaDeadlineIT` (FakeSagaParticipants can
+LOSE_ORDER_CREATED / LOSE_STOCK_RESERVED / LOSE_PAYMENT_REPLY, PAYMENT_UNREACHABLE; its `Settlement`
+is @Primary `SagaParticipants`), `DeadLetterIT`, payment/inventory settle/close/fence/race tests.
+Smoke section "Saga deadline and dead letters" (stops payment, forges a DLT with kafka CLI, resets
+the payment-service group offset): compose 429/0/0, kind 385/0/7.
+**Gotchas:** `it`/`test` profiles set `ecomdemo.saga.sweep-enabled=false`; tests call
+`sweep(Instant)`. `FlywayMigrationTest` and the smoke test PIN the app's migration list: add each new
+V there. A `@DataJpaTest` importing `InventoryService` needs `OrderLocks` too. Advisory locks are
+PostgreSQL-only: inventory's close/reserve can't run on H2.
+**Follow-ups (not done):** KI-037 (a dead-lettered StockRejected is cancelled with the void's reason);
+KI-038 (sweep in every instance, safe); KI-001 Swagger/OpenAPI fix next; restore cart on cancel (KI-019).
+
 ## Phase 31: Security Scanning (tag: phase-31-complete, PR #48)
 **What exists now:** CI jobs `dependency-scan` (OWASP Dependency-Check 13.0.0, NVD, CVSS >= 7 fails,
 test scope skipped) and `image-scan` (all 8 images built in one job, Trivy 0.74.0 by digest,
@@ -36,33 +63,3 @@ docker socket mount (delete via a container).
 **Follow-ups (not done):** login throttling per username; asymmetric JWT + scoped service identities;
 bind compose ports to 127.0.0.1; gateway `/actuator/prometheus` not public; pagination on
 `GET /api/products`; Trivy config/IaC scanning of Dockerfile and k8s manifests; Dependabot/Renovate.
-
-## Phase 30: Performance Testing (tag: phase-30-complete, PR #47)
-**What exists now:** Gatling load tests in `performance-tests/` (own pom, NO Boot parent, NOT in the
-reactor; CI only test-compiles it): Browse, Checkout (cart -> order -> poll status to CONFIRMED),
-Mixed (80/20) x ramp/steady/spike, all through the gateway. The outbox relay now drains while
-batches are full (checkout ceiling was ~41 orders/s; now no knee up to 100/s).
-**Key code:** `com.ecomdemo.perf` (test sources): `PerfConfig` (PERF_* env), `LoadProfile`
-(`injection(share)` scales rate AND spike), `Scenarios`, `TestData` (setup via java.net.http:
-perf-user-1..200, `Perf Product 1..20` stock 1 000 000, 429 retry), `SettleTimes` (201 ->
-CONFIRMED percentiles, printed in `after()`). `outbox/internal/OutboxRelay` loop +
-`OutboxProperties.maxBatchesPerTick` (5th record component).
-**Config & infrastructure:** `ecomdemo.outbox.max-batches-per-tick=20` (app properties; default 20
-everywhere). compose knobs, defaults = today: `CATALOG_CACHE_TYPE` (redis|none),
-`CATALOG_DB_POOL_SIZE`, `APP_DB_POOL_SIZE` (env `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE`, no
-underscore inside MAXIMUMPOOLSIZE). Run: `scripts/perf-test.sh <browse|checkout|mixed>
-[ramp|steady|spike]`, `scripts/perf-compare.sh <cache|app-pool>`; results
-`performance-tests/target/perf-results.tsv`, reports `performance-tests/target/gatling/`.
-**Tests:** 616 (+6): `OutboxRelayTest` 5, `OutboxPropertiesTest` +1. No smoke additions (by spec).
-Compose cold 404/0/0, k8s 360/0/7. Findings: `docs/performance.md`; raw runs
-`docs/test-reports/phase-30-perf-results.tsv`.
-**Gotchas:** Gatling 3.15 writes no stats.json (the script parses index.html's table); the plugin forks
-the JVM, so `-D` doesn't reach simulations (use env). Gatling group stats are CUMULATED request time,
-not duration. Anonymous requests from one host share one rate-limit bucket (50/s). JWTs last 15 min,
-so runs must stay shorter. `placeOnce()` holds a DB connection across the inventory HTTP call: pool 2
-collapses. At high read rates the GATEWAY is the first CPU limit. Gatling shares the host: numbers
-are relative.
-**Follow-ups (not done):** stock check outside the checkout transaction; checkout load shedding
-(503 + Retry-After before the pool queues); pipelined outbox sends; shorter poll-delay (~1.5 s settle
-floor = 3 hops); push instead of poll for order status; gateway cost per request (rate-limit Redis
-call + JWT) and replicas; separate load machine; soak test.

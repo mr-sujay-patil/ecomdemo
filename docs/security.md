@@ -166,6 +166,12 @@ Can a user call a function meant for a different role?
 **Behind the gateway:** not everywhere, until this phase.
 
 - ecomdemo-app and payment-service already checked roles themselves.
+- *Phase 32:* payment-service gained its first endpoint, `POST /internal/saga/orders/{id}/settle`,
+  which the saga deadline uses. It needs a SERVICE token (401 without one, 403 with a shopper's), it
+  sits on its own security chain so `/api/**` stays deny-all, and the gateway does not route
+  `/internal`. Settling can void an unpaid order but never charges one. inventory-service's new
+  `POST /api/inventory/orders/{id}/close` is covered by its existing ADMIN-or-SERVICE rule, and the
+  dead-letter replay API is under `/api/admin/**` (ADMIN at the gateway and in the app).
 - **catalog-service and inventory-service only required *a* valid token.** They relied on the
   gateway for the role, a decision from Phase 21, when the edge was meant to be the only way in.
 

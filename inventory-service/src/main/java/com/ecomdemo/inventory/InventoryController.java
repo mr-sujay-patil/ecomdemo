@@ -120,6 +120,18 @@ class InventoryController {
         return new StockResponse(productId, inventory.quantityFor(productId));
     }
 
+    /**
+     * Closes an order: gives back everything it holds and refuses it any reservation from now on
+     * (Phase 32). The order service's saga deadline calls this before it cancels an order whose
+     * saga did not finish. Idempotent, so the caller may simply retry.
+     */
+    @PostMapping("/orders/{orderId}/close")
+    CloseResult closeOrder(@PathVariable Long orderId, @Valid @RequestBody CloseOrderRequest request) {
+        return inventory.closeOrder(orderId, request.reason());
+    }
+
+    record CloseOrderRequest(@jakarta.validation.constraints.NotBlank String reason) {}
+
     /** Forgets a product's stock, when the catalogue deletes the product. See {@link #setLevel} for
      * why this no longer carries {@code @PreAuthorize("hasRole('ADMIN')")}. */
     @DeleteMapping("/{productId}")

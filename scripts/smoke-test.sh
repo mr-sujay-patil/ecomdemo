@@ -151,7 +151,15 @@ restore_catalog() {
         ctr_start "${CATALOG_CONTAINER:-ecomdemo-catalog-service}" >/dev/null 2>&1 || true
     fi
 }
-trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka; restore_catalog; rm -rf "$CTR_REPLICAS_DIR"' EXIT
+# And for payment-service, which the saga deadline section stops (Phase 32).
+PAYMENT_WAS_STOPPED=false
+restore_payment() {
+    if [ "$PAYMENT_WAS_STOPPED" = true ]; then
+        printf '\033[33mrestoring the payment-service container, which this script had stopped\033[0m\n' >&2
+        ctr_start "${PAYMENT_CONTAINER:-ecomdemo-payment-service}" >/dev/null 2>&1 || true
+    fi
+}
+trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka; restore_catalog; restore_payment; rm -rf "$CTR_REPLICAS_DIR"' EXIT
 
 PASSED=0
 FAILED=0
@@ -982,8 +990,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V19, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok,18:ok,19:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V20, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok,18:ok,19:ok,20:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -1091,7 +1099,7 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V19, all successful" \
+    skip "flyway_schema_history shows V1-V20, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
@@ -3287,6 +3295,154 @@ for product_id in "$SAGA_OK_PRODUCT" "$SAGA_FAIL_PRODUCT" "$SAGA_LAST_PRODUCT"; 
 done
 as_customer
 pass "the saga probe products are cleaned up"
+
+# --------------------------------------------------------------------------------------------
+# Saga deadline and dead letters (Phase 32)
+# --------------------------------------------------------------------------------------------
+# The scripted failure scenario for "no order stays PENDING for ever". One order's StockReserved is
+# DEAD-LETTERED on purpose - exactly what SagaListenerErrors does after three failed attempts: the
+# record is copied to inventory.stock-reserved-dlt with the recoverer's headers, and payment-service's
+# consumer offset is moved past it. Stock is then held for an order nobody will ever pay for, which is
+# the Phase 24 gap. The saga deadline must find it, ask payment-service (which VOIDS it), ask
+# inventory-service to close it (stock back, fence up), and CANCEL it - within the deadline plus a
+# sweep. Then the dead letter is replayed through the admin API, and must change nothing: payment
+# refuses to charge a voided order.
+#
+# payment-service is stopped for the length of the forgery, because a consumer group's offsets can
+# only be moved while the group is empty. It is restarted on the way out whatever happens.
+section "Saga deadline and dead letters"
+
+SAGA_DEADLINE_SECONDS="${SAGA_DEADLINE_SECONDS:-60}"
+PAYMENT_CONTAINER="${PAYMENT_CONTAINER:-ecomdemo-payment-service}"
+
+scrape
+check "the stuck-order gauge is exposed" "True" \
+    "$([ "$(metric saga_orders_overdue)" != "MISSING" ] && echo True || echo False)"
+check "and the reconciliation counter, by outcome" "True" \
+    "$([ "$(metric saga_reconciliations_total outcome=cancelled)" != "MISSING" ] && echo True || echo False)"
+
+as_anonymous
+check "payment-service's settlement endpoint wants a token (401)" "401" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PAYMENT_URL/internal/saga/orders/1/settle" \
+        -H 'Content-Type: application/json' -d '{"amount":1.00}')"
+check "and a SERVICE one: a shopper's token is refused (403)" "403" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PAYMENT_URL/internal/saga/orders/1/settle" \
+        -H "Authorization: Bearer $CUSTOMER_TOKEN" -H 'Content-Type: application/json' -d '{"amount":1.00}')"
+check "the dead-letter admin API is an administrator's (403 for a shopper)" "403" \
+    "$(as_customer; request GET /api/admin/dead-letters)"
+
+if command -v docker >/dev/null 2>&1 \
+    && ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1 \
+    && ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1 \
+    && ctr_exec "$PAYMENT_CONTAINER" true >/dev/null 2>&1; then
+
+    DLT_PRODUCT="$(saga_product "Saga Dead Letter Probe" 10.00 5)"
+    scrape
+    CANCELLED_BEFORE="$(metric saga_reconciliations_total outcome=cancelled)"
+
+    PAYMENT_WAS_STOPPED=true
+    ctr_stop "$PAYMENT_CONTAINER" >/dev/null
+
+    as_customer
+    empty_cart
+    request POST /api/cart/items "{\"productId\":$DLT_PRODUCT,\"quantity\":2}" >/dev/null
+    check "checkout with payment-service down is accepted (201)" "201" "$(request POST /api/orders)"
+    DLT_ORDER="$(jget "d['id']")"
+
+    HELD=""
+    for _ in $(seq 1 60); do
+        HELD="$(inventory_psql_query "SELECT status || '|' || quantity FROM stock_reservation WHERE order_id = $DLT_ORDER;")"
+        [ "$HELD" = "RESERVED|2" ] && break
+        sleep 1
+    done
+    check "inventory reserved the stock and announced StockReserved" "RESERVED|2" "$HELD"
+
+    # Find the order's StockReserved on the topic (the relay publishes it within about a second).
+    RESERVED_RECORD=""
+    for _ in 1 2 3 4 5; do
+        RESERVED_RECORD="$(kafka kafka-console-consumer.sh --topic inventory.stock-reserved --from-beginning \
+            --property print.key=true --property key.separator='|' --timeout-ms 10000 \
+            | grep "^${DLT_ORDER}|" | tail -1)"
+        [ -n "$RESERVED_RECORD" ] && break
+        sleep 2
+    done
+    check "the order's StockReserved is on inventory.stock-reserved" "True" \
+        "$([ -n "$RESERVED_RECORD" ] && echo True || echo False)"
+
+    # DEAD-LETTER IT: the record, with the recoverer's headers, to the DLT...
+    DLT_BEFORE="$(topic_message_count inventory.stock-reserved-dlt)"
+    printf 'kafka_dlt-original-topic:inventory.stock-reserved,kafka_dlt-exception-message:dead-lettered by the smoke test\t%s\n' \
+        "$RESERVED_RECORD" \
+        | ctr_exec -i "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 --topic inventory.stock-reserved-dlt \
+            --property parse.key=true --property key.separator='|' --property parse.headers=true >/dev/null 2>&1
+    check "the StockReserved is now in inventory.stock-reserved-dlt" "1" \
+        "$(delta "$DLT_BEFORE" "$(topic_message_count inventory.stock-reserved-dlt)")"
+    # ...and payment-service's group moved past it, as if its listener had given up on it.
+    RESET=""
+    for _ in $(seq 1 30); do
+        RESET="$(kafka kafka-consumer-groups.sh --group payment-service --topic inventory.stock-reserved \
+            --reset-offsets --to-latest --execute 2>&1 || true)"
+        printf '%s' "$RESET" | grep -q "NEW-OFFSET" && break
+        sleep 2
+    done
+    check "and payment-service's consumer skips it (offset moved to the end)" "True" \
+        "$(printf '%s' "$RESET" | grep -q "NEW-OFFSET" && echo True || echo False)"
+
+    ctr_start "$PAYMENT_CONTAINER" >/dev/null
+    PAYMENT_WAS_STOPPED=false
+    for _ in $(seq 1 90); do
+        # Silent: while the container starts, the connection is refused or reset, which is expected.
+        [ "$(curl -s -o /dev/null -w '%{http_code}' "$PAYMENT_URL/actuator/health/readiness" 2>/dev/null)" = "200" ] && break
+        sleep 1
+    done
+
+    # THE PHASE'S CLAIM: resolved within the deadline (plus one sweep and the restart's slack).
+    as_customer
+    DLT_STARTED="$(date +%s)"
+    DLT_STATUS="$(wait_for_order_status "$DLT_ORDER" $((SAGA_DEADLINE_SECONDS + 90)))"
+    check "the saga deadline resolves the dead-lettered order: CANCELLED" "CANCELLED" "$DLT_STATUS"
+    request GET "/api/orders/$DLT_ORDER/status" >/dev/null
+    check "and says why: payment was never attempted before the deadline" "True" \
+        "$(jget "'before the order' in d['reason'] and 'deadline' in d['reason']")"
+    printf '    (decided %ss after payment-service returned; deadline %ss)\n' \
+        "$(( $(date +%s) - DLT_STARTED ))" "$SAGA_DEADLINE_SECONDS"
+    check "payment-service recorded a VOIDED payment - nothing was charged" "VOIDED" \
+        "$(payment_psql_query "SELECT status FROM payment WHERE order_id = $DLT_ORDER;")"
+    check "inventory released the reservation" "RELEASED|2" \
+        "$(inventory_psql_query "SELECT status || '|' || quantity FROM stock_reservation WHERE order_id = $DLT_ORDER;")"
+    check "and fenced the order against a late reservation" "1" \
+        "$(inventory_psql_query "SELECT count(*) FROM closed_order WHERE order_id = $DLT_ORDER;" | tr -d ' ')"
+    check "the stock is back: the catalogue converges on 5" "5" "$(wait_for_stock "$DLT_PRODUCT" 5)"
+    scrape
+    check "the reconciliation was counted (saga_reconciliations_total{outcome=cancelled} +1 or more)" "True" \
+        "$(python3 -c "print(float('$(metric saga_reconciliations_total outcome=cancelled)') - float('$CANCELLED_BEFORE') >= 1)")"
+
+    # REPLAY the dead letter through the admin API: it must change nothing.
+    as_admin
+    check "an administrator can list the dead letters (200)" "200" "$(request GET /api/admin/dead-letters)"
+    DLT_ADDRESS="$(jget "next(('%s/%s/%s' % (r['topic'], r['partition'], r['offset'])) for r in reversed(d) if r['key'] == '$DLT_ORDER' and r['topic'] == 'inventory.stock-reserved-dlt')")"
+    check "the dead-lettered StockReserved is listed, with where it came from" "inventory.stock-reserved" \
+        "$(jget "next(r['originalTopic'] for r in reversed(d) if r['key'] == '$DLT_ORDER')")"
+    check "replaying it is accepted (200)" "200" "$(request POST "/api/admin/dead-letters/$DLT_ADDRESS/replay")"
+    check "the replay is recorded against the administrator" "$ADMIN_USER" "$(jget "d['replayedBy']")"
+    check "a second replay of the same record is refused (409)" "409" \
+        "$(request POST "/api/admin/dead-letters/$DLT_ADDRESS/replay")"
+    # payment-service consumes the replayed StockReserved within a second or two; give it five.
+    sleep 5
+    check "the replayed StockReserved charged nothing: still one payment, VOIDED" "1|VOIDED" \
+        "$(payment_psql_query "SELECT count(*) || '|' || max(status) FROM payment WHERE order_id = $DLT_ORDER;")"
+    as_customer
+    check "and the order is still CANCELLED" "CANCELLED" \
+        "$(request GET "/api/orders/$DLT_ORDER/status" >/dev/null; jget "d['status']")"
+    check "with the stock still 5" "5" "$(wait_for_stock "$DLT_PRODUCT" 5)"
+
+    as_admin
+    request DELETE "/api/products/$DLT_PRODUCT" >/dev/null
+    as_customer
+else
+    skip "the dead-letter scenario" "needs the Kafka, payment-service and payment-db containers"
+fi
 
 # --------------------------------------------------------------------------------------------
 # LLM integration (Phase 27)
