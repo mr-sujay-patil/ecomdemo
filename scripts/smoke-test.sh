@@ -990,8 +990,8 @@ if HISTORY="$(psql_query \
     "SELECT version || ':' || CASE WHEN success THEN 'ok' ELSE 'FAILED' END \
      FROM flyway_schema_history WHERE version IS NOT NULL \
      ORDER BY installed_rank;" | tr -d '\r' | paste -sd, -)"; then
-    check "flyway_schema_history shows V1-V19, all successful" \
-        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok,18:ok,19:ok" "$HISTORY"
+    check "flyway_schema_history shows V1-V20, all successful" \
+        "1:ok,2:ok,3:ok,4:ok,5:ok,6:ok,7:ok,8:ok,9:ok,10:ok,11:ok,12:ok,13:ok,14:ok,15:ok,16:ok,17:ok,18:ok,19:ok,20:ok" "$HISTORY"
 
     PENDING="$(psql_query \
         "SELECT count(*) FROM flyway_schema_history WHERE success = false;" | tr -d '\r ')"
@@ -1099,7 +1099,7 @@ if HISTORY="$(psql_query \
             JOIN information_schema.constraint_column_usage c ON c.constraint_name = t.constraint_name \
             WHERE t.table_name = 'processed_event' AND t.constraint_type = 'PRIMARY KEY';" | tr -d '\r ')"
 else
-    skip "flyway_schema_history shows V1-V19, all successful" \
+    skip "flyway_schema_history shows V1-V20, all successful" \
         "no psql on PATH and no running container named '$POSTGRES_CONTAINER'"
     skip "no migration is recorded as failed" "same as above"
     skip "V14 dropped product - the catalogue belongs to catalog-service now" "same as above"
@@ -3392,7 +3392,8 @@ if command -v docker >/dev/null 2>&1 \
     ctr_start "$PAYMENT_CONTAINER" >/dev/null
     PAYMENT_WAS_STOPPED=false
     for _ in $(seq 1 90); do
-        [ "$(curl -sS -o /dev/null -w '%{http_code}' "$PAYMENT_URL/actuator/health/readiness")" = "200" ] && break
+        # Silent: while the container starts, the connection is refused or reset, which is expected.
+        [ "$(curl -s -o /dev/null -w '%{http_code}' "$PAYMENT_URL/actuator/health/readiness" 2>/dev/null)" = "200" ] && break
         sleep 1
     done
 
