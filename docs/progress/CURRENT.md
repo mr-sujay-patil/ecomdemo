@@ -3,50 +3,41 @@
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-09-29
-- **Phase:** 31 — Security Scanning (OWASP Dependency-Check + Trivy)
-- **Branch:** feature/phase-31-security-scanning (cut from `main` at `387d755`)
-- **Step:** VERIFYING
+- **Phase:** 32 — Saga Timeouts and Reconciliation
+- **Branch:** feature/phase-32-saga-timeouts (cut from `main` at `1f3fa7c`)
+- **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #48 merged (`2a3d74a`); follow-up #49 https://github.com/mr-sujay-patil/ecomdemo/pull/49
-- **Waiting for user:** YES - review of follow-up PR #49
+- **PR:** none yet
+- **Waiting for user:** NO
 
-## Merge verification before this phase — PASSED
-- Phase 30: PR #47 merged as `387d755` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
-  locally and on GitHub. CI on main green (run 36539654692). `verify` on main 616/0/0/0. Cold compose
-  (down -v, --build, `.smoke-state` removed) smoke on a COPY 404/0/0 (user's `.env`). Tagged
-  `phase-30-complete`.
-
-## Design (decided)
-- Dependency-Check 13.0.0 in root pluginManagement (not bound to a phase): failBuildOnCVSS 7,
-  skipTestScope, suppression file with notes+until, OSS Index/Node/RetireJS/.NET analyzers off,
-  NVD key from env `NVD_API_KEY`. CI job `dependency-scan`: fails fast if the secret is missing,
-  NVD data cached (unique key + restore-keys), `package -DskipTests` then `aggregate`.
-- CI job `image-scan`: builds all 8 images in ONE job (build stage reused), Trivy 0.74.0 pinned by
-  DIGEST via docker, HIGH/CRITICAL fail (ignore-unfixed NOT used), `.trivyignore.yaml` with
-  statement+expired_at, CycloneDX SBOM per image uploaded. `publish` needs both scans.
-- Scan findings (Trivy): Tomcat 11.0.24 3x CRITICAL, jackson-databind 3.1.5/2.21.5 HIGH -> fixed by
-  overriding Boot-managed versions (tomcat 11.0.25, jackson 3.1.6 / 2.21.6); all 8 images clean.
+## Merge verification before this phase — PARTIAL (user-approved exception)
+- Phase 31: PR #48 `2a3d74a` + follow-up #49 `1f3fa7c`, both merge commits. 0 missing commits, 0 diffs,
+  branch alive locally and on GitHub. `verify` on main 620/0/0/0 and cold compose smoke 404/0/0 (at
+  `2a3d74a`; #49 changed only CI workflows and docs). CI on main: Build + Trivy green (run 36574990023).
+- **KNOWN BLOCKER:** CI's Dependency-Check job on main was CANCELLED, not passed: no NVD cache on main
+  and the NVD API was very slow on 2026-09-29 (first full download hit the 60-min limit at ~25%).
+  Publish to GHCR was therefore skipped. The user chose (2026-09-29) to start Phase 32 anyway and
+  run the NVD workflow later. `phase-31-complete` is deliberately NOT tagged until it is green.
+- To clear it: `gh run list --workflow nvd-data.yml` (scheduled daily 03:17 UTC; or
+  `gh workflow run nvd-data.yml`); when it succeeds, rerun main's CI (`gh run rerun 36574990023`);
+  when every job is green, `git tag -a phase-31-complete 1f3fa7c` and push it; tracker row 31 → ✅
+  on the current phase branch.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [x] Dependency-Check in CI (fail on high severity) - `d5c6f37`; secret NVD_API_KEY set from .env; 2 false positives suppressed (`cd3f02a`)
-- [x] Trivy image scans in CI (`d5c6f37`; local run of the exact steps: 8/8 clean)
-- [x] Every finding fixed or suppressed with a justification (Tomcat/Jackson fixed `5430dd0`; Kotlin/pgvector suppressed)
-- [x] An OWASP API Top 10 review in `docs/security.md`. API5 found AND fixed (user said fix it): `4671fc1`, catalog writes ADMIN|SERVICE, inventory ADMIN|SERVICE; re-probed on rebuilt compose: all 403, reads 200
-- [x] Done when: CI blocked commons-text 1.9 on PR #48 (run 36555557687 red, revert 36556218892 green); security.md complete
-- [x] Testing: verify 620/0/0/0; compose cold 404/0/0; k8s 360/0/7; report, README, decisions (7), RECENT (Phase 29 archived), tracker 🔵, PR #48
+- [ ] A saga deadline: an order still PENDING after a configurable time is resolved
+- [ ] Reconciliation: ask inventory and payment what happened before cancelling (confirm a slow
+      success; a cancellation releases reserved stock)
+- [ ] See and replay dead-lettered saga events (`*-dlt`), with an audit trail
+- [ ] Metrics and an alert for stuck and timed-out orders
+- [ ] Done when: a dead-lettered saga ends CONFIRMED or CANCELLED (stock released) within the
+      deadline — automated test + scripted failure scenario
+- [ ] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-Phase 31 merge verification is INCOMPLETE: git checks PASS (PR #48 = `2a3d74a`), `verify` on main
-620/0/0/0, cold compose smoke 404/0/0, CI build + Trivy on main green, but dependency-scan on main
-stalled (no cache on main; 80+ min, then a rerun 29+ min) and was cancelled on the user's
-instruction. Fix = follow-up PR #49 (nvd-data.yml + split dependency-scan steps, timeout, no -q).
-STOPPED waiting for the user to review #49. Do NOT merge without `approved, merge it`.
-After #49 merges: run the `NVD data` workflow once (`gh workflow run nvd-data.yml`) to seed main's
-cache, then re-verify main (CI all green incl. both scans, `verify`, cold smoke on a COPY), tag
-`phase-31-complete`. THEN Phase 32 (user APPROVED phases 32 + 33; drafts in the session were at
-/tmp/claude-1000/drafts - if lost, rewrite from the approved scope: 32 = saga timeouts +
-reconciliation + DLT replay + stuck-order metric; 33 = asymmetric JWT/JWKS + scoped service identity
-+ login throttling). Housekeeping commit on the phase-32 branch adds both phase files + tracker rows.
+Housekeeping commit done (phase files 32 + 33, tracker rows, this checkpoint). Next: design the
+saga deadline and reconciliation (read `ecomdemo-app/.../order/internal/saga/` and the inventory
+and payment saga handlers first), then implement checklist item 1. The Phase 31 blocker above is
+independent: clear it whenever the NVD workflow has succeeded.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
@@ -57,7 +48,7 @@ reconciliation + DLT replay + stuck-order metric; 33 = asymmetric JWT/JWKS + sco
 - Repo-local git identity `sujaysp <47919226+sujaysp@users.noreply.github.com>` (matches history).
 
 ## ⚠️ Carried, not fixed (oldest first)
-- A saga whose event is dead-lettered leaves the order PENDING; no timeout or reconciliation yet.
+- A saga whose event is dead-lettered leaves the order PENDING (THIS PHASE fixes it).
 - The CSV import is a distributed write with no shared transaction (restartable, idempotent).
 - **HS256 with a shared secret** — every service can mint as well as verify.
 - `ecomdemo-app` is not yet named `order-service`.
@@ -69,3 +60,6 @@ reconciliation + DLT replay + stuck-order metric; 33 = asymmetric JWT/JWKS + sco
 - k8s: the app must stay at 1 replica (no leader election); observability not in the cluster.
 - Phase 27/28: OpenAI chat and embeddings untested against a real key (none here); Ollama verified for real.
 - In this Claude shell `grep` is a broken Claude Code wrapper function: use `command grep`.
+- OpenAPI/Swagger was never adapted to the split (found 2026-09-29): only the app (8084) serves
+  `/v3/api-docs`; catalog/customer/inventory/assistant answer 401, payment/notification 403; the
+  gateway does not aggregate; `OpenApiConfig` still describes the monolith. Not scheduled yet.
