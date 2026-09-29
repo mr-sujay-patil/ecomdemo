@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-29
 - **Phase:** 30 — Performance Testing (Gatling)
 - **Branch:** feature/phase-30-gatling (cut from `main` at `9b0912f`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -17,8 +17,25 @@
   assistant model qwen2.5:7b, confirmed inside the container). `phase-29-complete` already existed on
   `9b0912f` (pushed by an earlier session, whose results were not recorded; re-run in full here).
 
-## Design
-(to be decided in IMPLEMENTING; record decisions here, then in `docs/decisions.md`)
+## Design (decided; decisions.md entries to write)
+- Module `performance-tests/` (Gatling 3.15.1 Java DSL, gatling-maven-plugin 4.21.12), OWN pom with no
+  Spring Boot parent (Boot's dependency management would override Gatling's Netty/Jackson), NOT in the
+  root reactor (Docker images and `verify` stay Gatling-free). CI compiles it: `-f performance-tests/pom.xml
+  test-compile`. Run: `./mvnw -f performance-tests/pom.xml gatling:test -Dgatling.simulationClass=...`.
+- Target = the GATEWAY (8080), like a real client. Rate limit is per USER (50/s, burst 100) and per IP
+  for anonymous -> browse runs AUTHENTICATED with a pool of pre-registered users (anonymous load from
+  one host shares one IP bucket; that is a finding, shown once, not the thing measured).
+- Data setup in the simulation's `before()` with java.net.http (idempotent): register `perf-user-N`
+  (409 = exists), admin creates `Perf Product N` if missing and PUTs stock very high; prices small
+  (payment declines above 10000). Tokens fetched once in `before()` and fed -> login/BCrypt measured
+  separately, not hidden inside every browse.
+- Simulations: Browse (list, detail, search), Checkout (add to cart, place, poll status to
+  CONFIRMED/CANCELLED), Mixed (weighted). Profile by `-Dprofile=ramp|steady|spike` (+ rate/duration
+  knobs), assertions on failure rate and p95/p99.
+- Comparisons via env knobs with today's defaults (compose): catalog cache on/off
+  (`spring.cache.type`), Hikari pool sizes; `scripts/perf-compare.sh` restarts with each setting and
+  collects Gatling's stats.json into a table. Findings + bottleneck fix in `docs/performance.md`.
+- Load generator shares the host with the stack (24 cores, 30 GB): numbers are relative, not absolute.
 
 ## Checklist (from the phase file's "What you'll implement")
 - [ ] Browse, checkout, and mixed simulations (Gatling Java DSL)
@@ -29,8 +46,8 @@
 - [ ] Testing protocol, test report (Gatling results), README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-Explore how the stack is load-tested today (gateway rate limits, auth, seed data, Hikari/Tomcat/virtual
-thread settings, cache switch), then decide the module layout for Gatling and write the Design section.
+Scaffold `performance-tests/` (pom, Setup/Config helpers, BrowseSimulation) and run a first ramp against
+the running compose stack to confirm the harness works. Then Checkout, Mixed, profiles, comparisons.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
