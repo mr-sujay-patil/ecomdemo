@@ -18,6 +18,7 @@ ecomdemo/
 └── docs/
     ├── ROADMAP.md                     # this file: overview + progress tracker
     ├── decisions.md                   # long-lived decision log
+    ├── KNOWN_ISSUES.md                # known defects and gaps; defects are fixed on fix/ki-XXX branches
     ├── process/
     │   ├── execution-protocol.md      # lifecycle, commands, stop points, resume sequence
     │   ├── git-workflow.md            # mandatory Git rules + commands + verification

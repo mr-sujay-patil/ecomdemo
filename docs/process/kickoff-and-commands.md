@@ -23,6 +23,8 @@ Begin.
 | `plan first` | Shows a plan for the next phase and waits for approval |
 | `status` | Reports where things stand, without changing anything |
 | `continue` | Resumes from the Git state and `CURRENT.md` (use after `/clear`, a restart, or a crash) |
+| `fix KI-XXX` | Fixes a known defect from `docs/KNOWN_ISSUES.md` on its own branch and PR, between phases |
+| `issues` | Summarizes the open known issues, without changing anything |
 | `stop` | Saves a checkpoint and stops |
 | `done` | Confirms that a manual step it asked for is complete |
 
