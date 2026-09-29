@@ -131,6 +131,13 @@ class InventorySecurityTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"units\":1,\"productName\":\"Anything\"}"))
                 .andExpect(status().isForbidden());
+
+        // Phase 32: closing an order releases its stock, so a shopper must not be able to do it.
+        mvc.perform(post("/api/inventory/orders/1/close")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + customer)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"reason\":\"mine now\"}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

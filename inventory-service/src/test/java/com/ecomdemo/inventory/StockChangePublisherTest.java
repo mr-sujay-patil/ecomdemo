@@ -39,7 +39,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @DataJpaTest
 @TestPropertySource(properties = "spring.jpa.hibernate.ddl-auto=create-drop")
-@Import({InventoryService.class, StockChangePublisher.class})
+@Import({InventoryService.class, StockChangePublisher.class, OrderLocks.class})
 /*
  * NOT_SUPPORTED, and without it this whole file is a lie.
  *
