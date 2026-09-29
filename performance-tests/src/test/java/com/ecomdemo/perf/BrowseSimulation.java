@@ -12,7 +12,7 @@ public class BrowseSimulation extends Simulation {
 
     {
         Scenarios scenarios = new Scenarios();
-        setUp(scenarios.browse().injectOpen(LoadProfile.current().injection(PerfConfig.RATE)))
+        setUp(scenarios.browse().injectOpen(LoadProfile.current().injection()))
                 .protocols(scenarios.protocol())
                 .assertions(Scenarios.assertions());
     }

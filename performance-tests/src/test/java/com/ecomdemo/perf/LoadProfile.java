@@ -35,7 +35,19 @@ enum LoadProfile {
         return valueOf(PerfConfig.PROFILE.toUpperCase());
     }
 
-    List<OpenInjectionStep> injection(double rate) {
+    /** The whole of the configured load: {@link PerfConfig#RATE} and {@link PerfConfig#SPIKE_USERS}. */
+    List<OpenInjectionStep> injection() {
+        return injection(1.0);
+    }
+
+    /**
+     * A SHARE of the configured load, for a simulation that splits it between scenarios. Both the
+     * rate and the spike are scaled: before this existed, the mixed simulation scaled the rate but
+     * handed every scenario the full spike, so "20 % checkout" became 3 000 checkouts in 10 s.
+     */
+    List<OpenInjectionStep> injection(double share) {
+        double rate = PerfConfig.RATE * share;
+        int spikeUsers = (int) Math.round(PerfConfig.SPIKE_USERS * share);
         Duration duration = PerfConfig.DURATION;
         return switch (this) {
             case RAMP -> List.of(rampUsersPerSec(1).to(rate).during(duration));
@@ -47,7 +59,7 @@ enum LoadProfile {
                     // stressPeakUsers spreads the burst along a smooth step (a Heaviside curve)
                     // rather than firing every session in the same millisecond, which would test
                     // the load generator's own socket handling more than the application.
-                    stressPeakUsers(PerfConfig.SPIKE_USERS).during(Duration.ofSeconds(10)),
+                    stressPeakUsers(spikeUsers).during(Duration.ofSeconds(10)),
                     constantUsersPerSec(rate).during(Duration.ofSeconds(60)));
         };
     }

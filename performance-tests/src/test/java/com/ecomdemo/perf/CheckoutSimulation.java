@@ -14,7 +14,7 @@ public class CheckoutSimulation extends Simulation {
         Scenarios scenarios = new Scenarios();
         var assertions = new ArrayList<>(Scenarios.assertions());
         assertions.add(Scenarios.checkoutAssertion());
-        setUp(scenarios.checkout().injectOpen(LoadProfile.current().injection(PerfConfig.RATE)))
+        setUp(scenarios.checkout().injectOpen(LoadProfile.current().injection()))
                 .protocols(scenarios.protocol())
                 .assertions(assertions);
     }
