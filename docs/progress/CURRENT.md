@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-29
 - **Phase:** 32 — Saga Timeouts and Reconciliation
 - **Branch:** feature/phase-32-saga-timeouts (cut from `main` at `1f3fa7c`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES (review of the Phase 32 PR)
 
 ## Merge verification before this phase — PASSED
 - Phase 31: PR #48 `2a3d74a` + follow-up #49 `1f3fa7c`, both merge commits. 0 missing commits, 0 diffs,
@@ -26,9 +26,9 @@
       success; a cancellation releases reserved stock)
 - [x] See and replay dead-lettered saga events (`*-dlt`), with an audit trail
 - [x] Metrics and an alert for stuck and timed-out orders
-- [ ] Done when: a dead-lettered saga ends CONFIRMED or CANCELLED (stock released) within the
+- [x] Done when: a dead-lettered saga ends CONFIRMED or CANCELLED (stock released) within the
       deadline — automated test + scripted failure scenario
-- [ ] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
+- [x] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
 
 ## Design (agreed in session 2026-09-29; see also docs/architecture/saga.md)
 - Order service owns the clock: `SagaDeadlineSweeper` (@Scheduled, `ecomdemo.saga.deadline` PT1M,
@@ -48,14 +48,11 @@
   payment → CANCELLED + stock back within deadline; replay → still CANCELLED, no charge.
 
 ## Next action
-All checklist code is committed (payment `fe855ac`, inventory `fe677a9`, order `09071d9`, dead letters
-`308a57d`, alerts `76a3d6d`, smoke `8a…` see git log). Docs written: README saga section, saga.md,
-decisions, security.md, KNOWN_ISSUES (KI-012/013 fixed, KI-037/038 accepted), RECENT rotated (Phase 30
-archived; Phase 32 summary still to write). NOW: full `./mvnw clean verify` (run detached: the tool's
-10-min limit killed the first attempt), then COLD compose stack + `scripts/smoke-test.sh`, test report
-`docs/test-reports/phase-32.md`, RECENT summary, tracker 🔵, PR.
-Also pending: update the stale "saga timeout would do - a follow-up" comment in
-`outbox/.../SagaListenerErrors.java` (after the build, not during it).
+Phase 32 PR is open (see `gh pr list`). STOP: wait for the user's review. Verified before the PR:
+`./mvnw clean verify` 651 tests (505 unit, 146 IT) 0 failed; cold compose smoke 429/0/0; kind smoke
+385/0/7 (`docs/test-reports/phase-32.md`). On `merged, continue` (or `approved, merge it`): merge
+verification, tag `phase-32-complete`, then fix KI-001 (Swagger/OpenAPI) on `fix/ki-001-openapi-docs`
+before Phase 33, as agreed in PR #50. If the PR number is not #51, correct it in `RECENT.md`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

@@ -8,6 +8,23 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 32: Saga Timeouts and Reconciliation — no order stays PENDING for ever.** Until now, a saga
+message that could not be processed was dead-lettered and its order waited for ever, sometimes
+with stock held. Now the order service owns the saga's clock. Every 10 s it finds orders PENDING
+past a deadline (1 minute) and **reconciles** each one:
+- payment-service is asked to *settle* the order. It reports the payment, or VOIDS it so nothing
+  can be charged later.
+- A completed payment confirms the order.
+- Anything else closes the order in inventory-service (stock back, late reservations refused) and
+  cancels it.
+- A service that does not answer is an *unknown outcome*. The order is left alone and asked about
+  again, never guessed.
+
+Administrators can list and replay dead-lettered saga events (`/api/admin/dead-letters`), and every
+replay is audited. Prometheus alerts on stuck orders and on orders the deadline had to decide. See
+[When a message is lost](#when-a-message-is-lost-the-saga-deadline-phase-32) and
+[`docs/test-reports/phase-32.md`](docs/test-reports/phase-32.md).
+
 **Phase 31: Security Scanning — CI now blocks known-vulnerable dependencies and images.** Two new CI
 jobs fail a pull request on any HIGH or CRITICAL finding:
 - **OWASP Dependency-Check** checks every Maven dependency against the NVD.
