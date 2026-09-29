@@ -94,7 +94,7 @@ catalog spec contains `ProductWrite`, and payment and notification expose no doc
 | KI-020 | Hybrid (keyword + semantic) search | README (Phase 28) |
 | KI-021 | A per-user budget for AI calls | `security.md` API4 |
 | KI-022 | Performance: stock check outside the checkout transaction, pipelined outbox sends, shorter poll delay, push order status (SSE), gateway cost per request and replicas, a soak test, a separate load machine | `performance.md` |
-| KI-023 | Trivy config/IaC scanning of the Dockerfile and k8s manifests; Dependabot or Renovate | `RECENT.md` (Phase 31) |
+| KI-023 | Trivy config/IaC scanning of the Dockerfile and k8s manifests; Dependabot for Docker base images and compose images (Maven and GitHub Actions are already covered, `.github/dependabot.yml`) | `RECENT.md` (Phase 31) |
 | KI-024 | Tempo retention and object storage; span metrics (traces to metrics) | README "Known gaps" |
 
 ## Accepted limits
