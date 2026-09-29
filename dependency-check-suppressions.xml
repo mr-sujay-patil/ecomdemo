@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  OWASP Dependency-Check suppressions (Phase 31).
+
+  A suppression is a DECISION, so each one records why and until when:
+
+    <notes>      why this finding is not a risk here, or why it cannot be fixed yet
+    until=       an expiry date; after it, the finding fails the build again and has to be
+                 looked at afresh. There are no permanent suppressions.
+
+  Fix first (upgrade, or override the managed version in the root pom); suppress only a false
+  positive (the CPE matched the wrong product) or a vulnerability in code this project provably
+  does not reach. docs/security.md lists every finding and what was done about it.
+
+  Empty until a finding needs one.
+-->
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+</suppressions>

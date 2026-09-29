@@ -80,3 +80,6 @@ desktop.ini
 # Python bytecode (scripts/assistant-eval.py)
 __pycache__/
 *.pyc
+
+# Trivy output from the image scan (Phase 31): SBOMs and tables, written by CI and local runs
+trivy-reports/
