@@ -44,7 +44,8 @@ import org.springframework.util.backoff.FixedBackOff;
  * queue for a person.
  *
  * <p>The order stays PENDING when that happens, and that is honest: the saga could not finish.
- * Finding such orders is what a saga timeout would do - a follow-up, recorded in the test report.
+ * Since Phase 32 the order service's saga deadline finds such orders and reconciles them, and an
+ * administrator can list and replay the dead letter ({@code /api/admin/dead-letters}).
  */
 @Component
 public class SagaListenerErrors implements DisposableBean {

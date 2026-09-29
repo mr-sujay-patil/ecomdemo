@@ -98,13 +98,13 @@ class FlywayMigrationTest {
     }
 
     @Test
-    @DisplayName("V1 to V19 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V20 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -157,7 +157,8 @@ class FlywayMigrationTest {
                 "drop users notifications and processed events",
                 "outbox event trace parent",
                 "processed event for saga replies",
-                "order saga states");
+                "order saga states",
+                "dead letter replay");
     }
 
     @Test
@@ -381,6 +382,23 @@ class FlywayMigrationTest {
                                 + "WHERE upper(index_name) = 'IDX_OUTBOX_EVENT_PUBLISHED_AT'",
                         Integer.class))
                 .isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("V20 records dead-letter replays, and a record's position can be replayed only once")
+    void deadLetterReplayIsAnAuditTrailWithOneReplayPerRecord() {
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        String insert = "INSERT INTO dead_letter_replay "
+                + "(dlt_topic, dlt_partition, dlt_offset, original_topic, record_key, replayed_by, replayed_at) "
+                + "VALUES ('flyway-test-dlt', 0, 7, 'flyway-test', '1', 'admin', CURRENT_TIMESTAMP)";
+        try {
+            assertThat(jdbc.update(insert)).isEqualTo(1);
+            assertThatThrownBy(() -> jdbc.update(insert))
+                    .as("uq_dead_letter_replay_record: the same DLT position twice")
+                    .isInstanceOf(DuplicateKeyException.class);
+        } finally {
+            jdbc.update("DELETE FROM dead_letter_replay WHERE dlt_topic = 'flyway-test-dlt'");
+        }
     }
 
     private static String nullabilityOf(JdbcTemplate jdbc, String table, String column) {
