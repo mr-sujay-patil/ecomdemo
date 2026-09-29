@@ -10,18 +10,15 @@
 - **PR:** none yet
 - **Waiting for user:** NO
 
-## Merge verification before this phase — PARTIAL (user-approved exception)
+## Merge verification before this phase — PASSED
 - Phase 31: PR #48 `2a3d74a` + follow-up #49 `1f3fa7c`, both merge commits. 0 missing commits, 0 diffs,
   branch alive locally and on GitHub. `verify` on main 620/0/0/0 and cold compose smoke 404/0/0 (at
-  `2a3d74a`; #49 changed only CI workflows and docs). CI on main: Build + Trivy green (run 36574990023).
-- **KNOWN BLOCKER:** CI's Dependency-Check job on main was CANCELLED, not passed: no NVD cache on main
-  and the NVD API was very slow on 2026-09-29 (first full download hit the 60-min limit at ~25%).
-  Publish to GHCR was therefore skipped. The user chose (2026-09-29) to start Phase 32 anyway and
-  run the NVD workflow later. `phase-31-complete` is deliberately NOT tagged until it is green.
-- To clear it: `gh run list --workflow nvd-data.yml` (scheduled daily 03:17 UTC; or
-  `gh workflow run nvd-data.yml`); when it succeeds, rerun main's CI (`gh run rerun 36574990023`);
-  when every job is green, `git tag -a phase-31-complete 1f3fa7c` and push it; tracker row 31 → ✅
-  on the current phase branch.
+  `2a3d74a`; #49 changed only CI workflows and docs).
+- CI on main ALL GREEN: run 36574990023 (rerun, 2026-09-29 18:26-18:51 UTC) - Build, Trivy,
+  Dependency-Check (NVD 399,318/399,318 downloaded, cache `nvd-36574990023-4` saved, 141 deps,
+  only MEDIUM findings max CVSS 6.5 < 7, 2 known suppressions) and Publish to GHCR.
+- Phase 32 was started before this passed (user's choice); tagged `phase-31-complete` on `1f3fa7c`
+  once it did.
 
 ## Checklist (from the phase file's "What you'll implement")
 - [ ] A saga deadline: an order still PENDING after a configurable time is resolved
@@ -34,7 +31,7 @@
 - [ ] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-Housekeeping commit done (phase files 32 + 33, tracker rows, this checkpoint). Next: design the
+Housekeeping done (phase files 32 + 33, tracker rows, this checkpoint; Phase 31 tagged). Next: design the
 saga deadline and reconciliation (read `ecomdemo-app/.../order/internal/saga/` and the inventory
 and payment saga handlers first), then implement checklist item 1. The Phase 31 blocker above is
 independent: clear it whenever the NVD workflow has succeeded.

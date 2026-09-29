@@ -6,7 +6,7 @@
 | **Technology** | Scheduled reconciliation + Kafka dead-letter handling |
 | **Branch** | `feature/phase-32-saga-timeouts` |
 | **PR title** | `Phase 32: Saga Timeouts` |
-| **Requires** | Phase 31 merged into `main` (the user allowed starting before the `phase-31-complete` tag; see `docs/progress/CURRENT.md`) |
+| **Requires** | `phase-31-complete` tag exists on `main` |
 | **Completion tag** | `phase-32-complete` |
 
 > Claude Code: implement **only** this file's scope. Follow `docs/process/execution-protocol.md` for the lifecycle, `docs/process/testing-protocol.md` before raising the PR, and `docs/process/git-workflow.md` for every Git action.
