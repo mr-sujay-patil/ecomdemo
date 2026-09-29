@@ -38,16 +38,18 @@
 - Load generator shares the host with the stack (24 cores, 30 GB): numbers are relative, not absolute.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] Browse, checkout, and mixed simulations (Gatling Java DSL)
-- [ ] Ramp, steady, and spike load profiles
+- [x] Browse, checkout, and mixed simulations (Gatling Java DSL) - `475b819`, harness checked (browse 5/s, checkout 3/s: 0 KO)
+- [x] Ramp, steady, and spike load profiles (`PERF_PROFILE`; runner `scripts/perf-test.sh`, results TSV)
 - [ ] Comparisons with and without the cache and with different pool sizes
 - [ ] Findings in `docs/performance.md`
 - [ ] Done when: at least one bottleneck found, fixed, and documented (before/after numbers)
 - [ ] Testing protocol, test report (Gatling results), README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-Scaffold `performance-tests/` (pom, Setup/Config helpers, BrowseSimulation) and run a first ramp against
-the running compose stack to confirm the harness works. Then Checkout, Mixed, profiles, comparisons.
+Explore: ramp browse and checkout to find the knee (watch Grafana/Prometheus: Hikari pending, CPU per
+container, Kafka lag). Early clue: orders take ~1.5 s to settle even at 3/s (fixed delay in the saga?
+check outbox poll interval). Then cache on/off and pool-size knobs (compose env with today's defaults)
++ `scripts/perf-compare.sh`. Keep raw results in performance-tests/target/perf-results.tsv.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
