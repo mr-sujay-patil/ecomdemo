@@ -8,7 +8,7 @@
 - **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES (review of the `chore/fix-track` PR)
+- **Waiting for user:** YES (review of the `chore/fix-track` PR #50)
 
 ## Merge verification before this phase — PASSED
 - Phase 31: PR #48 `2a3d74a` + follow-up #49 `1f3fa7c`, both merge commits. 0 missing commits, 0 diffs,
@@ -32,7 +32,7 @@
 
 ## Next action
 ⏸️ PAUSED for a process change the user approved (2026-09-29): a defect "fix track" and
-`docs/KNOWN_ISSUES.md`, raised as its own PR from `chore/fix-track` (cut from `main`). A brief detour
+`docs/KNOWN_ISSUES.md`, raised as PR #50 from `chore/fix-track` (cut from `main`). A brief detour
 that added "Phase 33: API docs" was reverted (`7828fae`); that work is now known issue KI-001, to be fixed
 after Phase 32 merges. Resume here once the chore PR is merged (no need to merge `main` into this branch).
 Housekeeping done (phase files 32 + 33, tracker rows, this checkpoint; Phase 31 tagged). Next: design the
