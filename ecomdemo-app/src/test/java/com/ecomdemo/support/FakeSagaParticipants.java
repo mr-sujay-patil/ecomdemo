@@ -179,20 +179,23 @@ public class FakeSagaParticipants {
             return order.lines().stream().anyMatch(line -> products.contains(line.productId()));
         }
 
-        private synchronized String reserveAll(OrderCreatedEvent order) {
-            if (CLOSED.contains(order.orderId())) {
-                return "The order was closed before its stock could be reserved";
-            }
-            try {
+        /** One lock for reserving, releasing and closing - the real service's order lock. */
+        private String reserveAll(OrderCreatedEvent order) {
+            synchronized (FakeSagaParticipants.class) {
+                if (CLOSED.contains(order.orderId())) {
+                    return "The order was closed before its stock could be reserved";
+                }
+                try {
+                    order.lines().forEach(line ->
+                            inventory.requireAvailable(line.productId(), line.productName(), line.quantity()));
+                } catch (InsufficientStockException e) {
+                    return e.getMessage();
+                }
                 order.lines().forEach(line ->
-                        inventory.requireAvailable(line.productId(), line.productName(), line.quantity()));
-            } catch (InsufficientStockException e) {
-                return e.getMessage();
+                        inventory.reserve(line.productId(), line.productName(), line.quantity()));
+                RESERVED.put(order.orderId(), order.lines());
+                return null;
             }
-            order.lines().forEach(line ->
-                    inventory.reserve(line.productId(), line.productName(), line.quantity()));
-            RESERVED.put(order.orderId(), order.lines());
-            return null;
         }
 
         /** @return the new payment, or null if the order already had one (a void, or a replay) */

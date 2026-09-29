@@ -21,8 +21,8 @@
   once it did.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] A saga deadline: an order still PENDING after a configurable time is resolved
-- [ ] Reconciliation: ask inventory and payment what happened before cancelling (confirm a slow
+- [x] A saga deadline: an order still PENDING after a configurable time is resolved
+- [x] Reconciliation: ask inventory and payment what happened before cancelling (confirm a slow
       success; a cancellation releases reserved stock)
 - [ ] See and replay dead-lettered saga events (`*-dlt`), with an audit trail
 - [ ] Metrics and an alert for stuck and timed-out orders
@@ -36,7 +36,7 @@
 - Ask-and-fence, payment first: payment-service `POST /internal/saga/orders/{id}/settle` (SERVICE
   only, own security chain; `/api/**` stays deny-all) returns the existing payment, or records a
   VOIDED one (+ PaymentFailed via outbox) so a late StockReserved can never charge.
-  COMPLETED → confirm. FAILED/VOIDED → inventory `POST /api/inventory/orders/{id}/release` (releases
+  COMPLETED → confirm. FAILED/VOIDED → inventory `POST /api/inventory/orders/{id}/close` (releases
   RESERVED + writes a `closed_order` fence so a late/replayed OrderCreated is rejected) → cancel.
   Payment or inventory unreachable = unknown outcome → leave PENDING, retry next sweep.
 - Reconciliation clients: app-local `SagaParticipants` with timeouts (KI-004 stays separate).
@@ -48,8 +48,10 @@
   payment → CANCELLED + stock back within deadline; replay → still CANCELLED, no charge.
 
 ## Next action
-Task 1: payment-service settle endpoint (VOIDED status migration V2, `PaymentService.settle`,
-`/internal/saga/**` chain, tests). Then inventory (task 2), app (3, 4), alerts/smoke (5), docs (6).
+Done: payment settle (`fe855ac`), inventory close (`fe677a9`), app sweeper/reconciler/metrics
+(`09071d9`, `SagaReconcilerTest` + `SagaDeadlineIT` green). In progress: task 4, dead-letter
+list/replay (`deadletter` module, V20 `dead_letter_replay`, `DeadLetterIT`). Then alerts +
+compose/k8s env + smoke section (5), docs + PR (6).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

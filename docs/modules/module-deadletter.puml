@@ -1,0 +1,30 @@
+@startuml
+title <size:24>Dead letters</size>
+
+set separator none
+top to bottom direction
+
+<style>
+  root {
+    BackgroundColor: #ffffff
+    FontColor: #444444
+  }
+</style>
+
+!include <C4/C4>
+!include <C4/C4_Context>
+!include <C4/C4_Component>
+
+System_Boundary("EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+  Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+    Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
+    Component(EcomdemoApplication.EcomdemoApplication.Deadletters, "Dead letters", $techn="Module", $descr="", $tags="", $link="")
+  }
+
+}
+
+Rel(EcomdemoApplication.EcomdemoApplication.Deadletters, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
+
+SHOW_LEGEND(true)
+hide stereotypes
+@enduml
