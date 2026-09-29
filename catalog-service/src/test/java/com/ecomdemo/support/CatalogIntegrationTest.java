@@ -2,7 +2,11 @@ package com.ecomdemo.support;
 
 import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.jwt.ServiceTokenProvider;
+import com.ecomdemo.shared.TokenClaims;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -10,6 +14,10 @@ import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRe
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jwt.JwsHeader;
+import org.springframework.security.oauth2.jwt.JwtClaimsSet;
+import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.util.DefaultUriBuilderFactory;
@@ -81,6 +89,30 @@ public abstract class CatalogIntegrationTest {
                 jwtProperties,
                 "ecomdemo-app")
                 .token();
+        return withToken(token);
+    }
+
+    /**
+     * A caller carrying a USER's token, shaped like the ones customer-service issues - which is
+     * what arrives here when the gateway relays a shopper's or an administrator's request.
+     */
+    protected TestRestTemplate asUser(String username, long userId, String... roles) {
+        Instant now = Instant.now();
+        JwtClaimsSet claims = JwtClaimsSet.builder()
+                .issuer(jwtProperties.issuer())
+                .subject(username)
+                .issuedAt(now)
+                .expiresAt(now.plus(Duration.ofMinutes(15)))
+                .claim(TokenClaims.USER_ID, userId)
+                .claim(TokenClaims.ROLES, List.of(roles))
+                .build();
+        String token = new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
+                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .getTokenValue();
+        return withToken(token);
+    }
+
+    private TestRestTemplate withToken(String token) {
         // Built from a bare TestRestTemplate rather than through RestTemplateBuilder, which is not
         // on this module's classpath: catalog-service uses RestClient to call inventory-service and
         // has no reason to carry the RestTemplate starter into production just to shape a test.

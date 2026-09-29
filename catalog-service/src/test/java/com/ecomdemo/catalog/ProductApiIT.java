@@ -42,7 +42,8 @@ class ProductApiIT extends CatalogIntegrationTest {
 
     @BeforeEach
     void signIn() {
-        // One caller: this service cannot distinguish an administrator from a shopper.
+        // The application's SERVICE identity, which may write (as may a relayed ADMIN token; see
+        // anAdminCanWrite). A CUSTOMER may not - aCustomerCannotWrite.
         admin = asService();
     }
 
@@ -176,6 +177,53 @@ class ProductApiIT extends CatalogIntegrationTest {
                 new ProductRequest("IT Forbidden Item", "1.00", new BigDecimal("1.00"), 1, "IT");
         assertThat(anonymous.postForEntity("/api/products", body, ApiError.class).getStatusCode())
                 .isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    /**
+     * Phase 31, OWASP API5. The comment above describes how this service used to be: it only asked
+     * "is there a token?", which was fine while the gateway was the only way in. The security review
+     * sent a CUSTOMER's token straight to this port and got past authorisation for a create and a
+     * delete. Since then the gateway's rules are repeated here: reads for any valid token, writes
+     * for ADMIN or SERVICE.
+     */
+    @Test
+    @DisplayName("a CUSTOMER may read but not write, even when calling this service directly")
+    void aCustomerCannotWrite() {
+        TestRestTemplate customer = asUser("shopper", 7, "CUSTOMER");
+
+        assertThat(customer.getForEntity("/api/products", ProductResponse[].class).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        ProductRequest body =
+                new ProductRequest("IT Customer Write", "1.00", new BigDecimal("1.00"), 1, "IT");
+        assertThat(customer.postForEntity("/api/products", body, ApiError.class).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+
+        ProductResponse existing = create("IT Not Yours To Delete", "2.00", 1, "IT");
+        assertThat(customer.exchange("/api/products/" + existing.id(), HttpMethod.DELETE, null, ApiError.class)
+                        .getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(rest.getForEntity("/api/products/" + existing.id(), ProductResponse.class).getStatusCode())
+                .as("the product is still there")
+                .isEqualTo(HttpStatus.OK);
+
+        assertThat(customer.getForEntity("/api/products/embeddings/1", ApiError.class).getStatusCode())
+                .as("a backfill's progress is operations data, ADMIN only at the gateway and here")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    @DisplayName("an ADMIN's relayed token may write, as it may at the gateway")
+    void anAdminCanWrite() {
+        TestRestTemplate admin = asUser("boss", 1, "ADMIN");
+        ProductRequest body =
+                new ProductRequest("IT Admin Write", "1.00", new BigDecimal("3.00"), 1, "IT");
+
+        ResponseEntity<ProductResponse> created = admin.postForEntity("/api/products", body, ProductResponse.class);
+
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(created.getBody()).isNotNull();
+        createdIds.add(created.getBody().id());
     }
 
 }

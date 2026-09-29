@@ -3,6 +3,7 @@ package com.ecomdemo.catalog;
 import com.ecomdemo.jwt.ApiErrorAccessDeniedHandler;
 import com.ecomdemo.jwt.ApiErrorAuthenticationEntryPoint;
 import com.ecomdemo.jwt.JwtAuthorities;
+import com.ecomdemo.jwt.ServiceTokens;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,12 +23,18 @@ import org.springframework.security.web.SecurityFilterChain;
  * health probe is the one path that fallback leaves open, and every call came back {@code 401}.
  * {@code CatalogSecurityTest} is this service's copy of the test that found it.
  *
- * <p><strong>Authentication, not authorisation</strong>, and the reasoning is the same as
- * inventory's. The application calls this service with its <em>own</em> identity, so the token
- * arriving here says {@code ecomdemo-app}, never {@code alice}. This service cannot tell an
- * administrator creating a product from a shopper reading one. "Only an ADMIN may create a product"
- * therefore stays at the edge, on the application's own {@code /api/products} — which is also where
- * the human's token actually is.
+ * <p><strong>Authorisation here too, not only at the gateway (Phase 31).</strong> This chain used
+ * to ask only "is the caller authenticated?", leaving "may they WRITE?" to the gateway. The security
+ * review then showed what that costs when the gateway is not the only way in: a CUSTOMER's token
+ * sent straight to this service's port got past authorisation for {@code POST} and
+ * {@code DELETE /api/products} (compose publishes the port; see docs/security.md, API5). The edge
+ * stays the first check; this is the second, so one misconfigured port is not the whole defence.
+ *
+ * <p>Since Phase 21 the token arriving here IS the caller's: the gateway relays a user's token
+ * untouched and gives anonymous browsing its own SERVICE identity, and the application's batch
+ * import writes with its SERVICE token. So the rule can be the gateway's own: reads for any valid
+ * token, writes and the embedding backfill for ADMIN or SERVICE. {@code CatalogSecurityTest}
+ * proves a CUSTOMER gets 403.
  *
  * <p>Note what that means for reads: the public product listing is public on the APPLICATION, not
  * here. Every path on this service needs a token, including the GETs, because the only caller is
@@ -55,6 +62,14 @@ public class SecurityConfig {
                         // configurable and a literal silently stops matching when it moves.
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                        // Operations data about a backfill run: the gateway's ADMIN rule, mirrored.
+                        // Placed before the GET rule because the first match wins.
+                        .requestMatchers("/api/products/embeddings/**").hasAnyRole("ADMIN", ServiceTokens.ROLE)
+                        // Reading the catalogue: any valid token (a shopper's, or the gateway's
+                        // SERVICE identity for anonymous browsing).
+                        .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**").authenticated()
+                        // Everything else under /api/products changes the catalogue.
+                        .requestMatchers("/api/products", "/api/products/**").hasAnyRole("ADMIN", ServiceTokens.ROLE)
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))
