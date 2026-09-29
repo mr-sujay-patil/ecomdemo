@@ -8,6 +8,17 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 30: Performance Testing — load tests found the saga's ceiling, and it was lifted.**
+Gatling simulations in `performance-tests/` drive the stack through the gateway: **browse**,
+**checkout** (placing an order and waiting until the saga CONFIRMS it) and a **mixed** 80/20, each
+as a **ramp**, **steady** or **spike** load (`scripts/perf-test.sh checkout ramp`). The checkout ramp
+found a knee at ~40 orders/s. The cause was the transactional outbox relay, which published one
+batch and then slept a second, however much was waiting. It now drains while batches come back
+full: at 50 orders/s, time to CONFIRMED went from p95 25.9 s to 3.0 s. `scripts/perf-compare.sh`
+reruns a load with the catalogue cache off or other connection-pool sizes. See
+[Performance testing](#performance-testing), [`docs/performance.md`](docs/performance.md) and
+[`docs/test-reports/phase-30.md`](docs/test-reports/phase-30.md).
+
 **Phase 29: AI Shopping Assistant — a chat grounded in the store's own data.**
 `POST /api/assistant/chat` (a new **assistant-service**) answers product questions by calling the
 catalogue's semantic search as a **tool**, answers policy questions from the store's Markdown policies
@@ -294,7 +305,9 @@ Top level, outside the modules:
 ├── .env.example        # every variable, documented; .env itself is gitignored
 ├── docker/             # prometheus, grafana and alloy configuration, bind-mounted
 ├── docs/               # roadmap, phase specs, process docs, decisions, progress, test reports
-├── scripts/            # smoke-test.sh (313 checks), failure-demo.sh, sonar-setup.sh
+├── scripts/            # smoke-test.sh (313 checks), failure-demo.sh, sonar-setup.sh,
+│                       # perf-test.sh and perf-compare.sh (Phase 30)
+├── performance-tests/  # Gatling load tests (Phase 30). Its OWN pom, outside the reactor
 └── .github/workflows/  # build + test every PR; publish the image on merge to main
 ```
 
@@ -3042,6 +3055,65 @@ memory in a real Redis, the tool limits and the guard. `AssistantApiIT` (18), `A
 `OrderClaimGuardTest`, `RetrievalPropertiesTest`. The smoke test's **Shopping assistant** section asks
 a product question and has customer B ask about customer A's order, printing every answer; a
 **SKIP** with setup steps without models.
+
+## Performance testing
+
+A load test answers the question unit tests can't: what happens when many people use the system at
+once. The simulations live in `performance-tests/` (Gatling, Java DSL) and talk to the gateway like
+any client:
+
+```bash
+docker compose up -d
+scripts/perf-test.sh browse steady                  # 20 sessions/s for 60 s (the defaults)
+PERF_RATE=100 scripts/perf-test.sh checkout ramp    # climb from 1 to 100 checkouts a second
+PERF_RATE=100 PERF_SPIKE_USERS=3000 scripts/perf-test.sh mixed spike
+scripts/perf-compare.sh cache                       # the same browse load, cache on then off
+```
+
+Each run prints a table (p50/p95/p99 per request type), appends it to
+`performance-tests/target/perf-results.tsv` under `PERF_LABEL`, leaves Gatling's HTML report in
+`performance-tests/target/gatling/`, and fails when the assertions do (errors above 1 %, p95 above
+2 s).
+
+**Why it's built this way:**
+
+- **Its own pom, outside the reactor, with no Spring Boot parent.** A simulation needs a running
+  stack, so it can't be part of `./mvnw verify`. The Docker images shouldn't contain Gatling. And
+  Boot's dependency management would replace Gatling's own Netty. CI still *compiles* the
+  simulations, so an API change that breaks one fails the pull request.
+- **An open model.** Sessions arrive at a rate whether or not earlier ones have finished, like
+  shoppers. A closed model ("keep 50 users busy") slows its own arrivals when the system slows,
+  and hides the queue it was meant to find.
+- **Tokens before the clock starts.** 200 customers are registered and logged in during setup. A
+  login is a deliberately slow BCrypt check and would otherwise dominate "browse". The pool also
+  spreads the gateway's per-user rate limit.
+- **Checkout measures the saga, not just the POST.** `POST /api/orders` answers 201 as soon as the
+  order is PENDING. The simulation polls until CONFIRMED and reports **order settled** percentiles,
+  the wait a shopper actually sees.
+
+**What it found** (details and every number in [`docs/performance.md`](docs/performance.md)):
+
+| | before | after |
+|---|---|---|
+| checkout ramp to 100/s: orders not CONFIRMED within 30 s | 594 | 0 |
+| checkout steady 50/s: order settled p95 | 25.9 s | 3.0 s |
+| checkout steady 50/s: status-poll p99 at the gateway | 21.8 s | 9 ms |
+
+The bottleneck was the outbox relay. It published one batch of 100 events (~0.2 s) and then slept
+its 1 s `poll-delay` even with thousands waiting, a ceiling of ~82 events/s, or ~41 orders. It now
+keeps going while batches come back full, up to `ecomdemo.outbox.max-batches-per-tick` (20), so it
+never holds the scheduler thread it shares for long. An idle outbox still makes one query a second.
+
+The comparisons:
+
+- **Cache.** Turning catalog's cache off barely moved latency on a 40-product catalogue; the
+  gateway was the limit. But it took inventory-service from 0.3 % to 148 % CPU and both databases
+  from ~0 to over 30 %: every product page became a query plus an HTTP call for stock.
+- **Pool sizes.** 5, 10 and 30 connections performed the same at 80 checkouts/s. 2 collapsed
+  (half the requests timed out), because a connection is held across the stock check's HTTP call.
+
+Nothing here was run on a separate load machine. Gatling shares the CPU with the stack, so the
+numbers are for comparing runs, not for promising capacity.
 
 ## Code quality
 
