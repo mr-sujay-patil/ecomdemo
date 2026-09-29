@@ -2,63 +2,35 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-28
-- **Phase:** 29 — AI Shopping Assistant (RAG + tool calling)
-- **Branch:** feature/phase-29-ai-assistant (cut from `main` at `5fb6ac1`)
-- **Step:** PR_OPEN
+- **Updated:** 2026-09-29
+- **Phase:** 30 — Performance Testing (Gatling)
+- **Branch:** feature/phase-30-gatling (cut from `main` at `9b0912f`)
+- **Step:** BRANCHED
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #46 https://github.com/mr-sujay-patil/ecomdemo/pull/46
-- **Waiting for user:** YES - review of the Phase 29 PR
+- **PR:** none yet
+- **Waiting for user:** NO
 
 ## Merge verification before this phase — PASSED
-- Phase 28: PR #45 merged as `5fb6ac1` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
-  locally and on GitHub. CI on main green (run 36466418725). `verify` on main 570/0/0/0. Cold compose
-  (down -v, --build) smoke on a COPY 385/0/0 (the user's `.env` now sets AI_EMBEDDING_PROVIDER=ollama too).
-  Tagged `phase-28-complete`.
+- Phase 29: PR #46 merged as `9b0912f` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
+  locally and on GitHub. CI on main green (run 36477434643). `verify` on main 610/0/0/0. Cold compose
+  (down -v, --build, `.smoke-state` removed) smoke on a COPY 404/0/0 with the user's `.env` (Ollama;
+  assistant model qwen2.5:7b, confirmed inside the container). `phase-29-complete` already existed on
+  `9b0912f` (pushed by an earlier session, whose results were not recorded; re-run in full here).
 
-## Design (decided at the start; decisions.md entries to write)
-- New module `assistant-service` (port 8087), NO database: Redis holds memory and pending actions.
-- `POST /api/assistant/chat {conversationId?, message}` -> `{conversationId, answer, sources[], pendingAction?}`;
-  `POST /api/assistant/actions/{id}/confirm` does the cart write. Gateway: `/api/assistant/**` CUSTOMER,
-  route before the `app` catch-all.
-- The assistant acts AS THE USER: every downstream call carries the caller's own JWT (catalog search,
-  app orders/cart); no service token, no userId argument on any tool. The owner service decides.
-- Tools: `searchProducts` (catalog `/api/products/search`), `getOrderStatus` (app `/api/orders/{id}/status`;
-  403 and 404 both answer "not an order on your account"), `addToCart` = PROPOSE only (pending action in
-  Redis, TTL 10 min); the user confirms outside the model.
-- RAG over policies: `resources/policies/*.md`, chunked by `##`, embedded lazily into an in-memory
-  SimpleVectorStore (tiny corpus shipped in the jar), top-k above a threshold into the system prompt, cited
-  in `sources`. Needs BOTH a chat and an embedding model; otherwise 503 with setup steps.
-- Memory: own `ChatMemoryRepository` on StringRedisTemplate (the Spring AI Redis one pulls Jedis + gson +
-  a search index), key `assistant:memory:{user}:{conversationId}`, TTL; MessageWindowChatMemory.
-- Guardrails: store topics only (fixed refusal sentence), grounded answers, input size limit, identity
-  from the token only, memory per user, confirmation for writes.
-- Evaluation: ~10 cases in `scripts/assistant-eval.json`, run by `scripts/assistant-eval.py` against
-  the live stack (deterministic checks: expected facts, tool/sources used, refusals, no leak).
-- Registration points: root pom, Dockerfile, compose, prometheus, alloy, k8s (kustomization, service,
-  ConfigMap, k8s-up), ContainerMemoryBudgetTest (7 -> 8), README.
+## Design
+(to be decided in IMPLEMENTING; record decisions here, then in `docs/decisions.md`)
 
 ## Checklist (from the phase file's "What you'll implement")
-- [x] assistant-service + `POST /api/assistant/chat` (+ confirm endpoint, gateway route, compose, k8s)
-- [x] RAG over products (search tool) and policy Markdown (5 docs, 19 passages, threshold 0.7 measured)
-- [x] Tools searchProducts, getOrderStatus (caller's token), addToCart (by name, propose + confirm)
-- [x] Conversation memory in Redis (own repository, key user:conversation, TTL 24h, window 20)
-- [x] Guardrails (prompt, input 1000, Spring AI tool limits 5/3, OrderClaimGuard output check)
-- [x] Evaluation set: 11 cases (`scripts/assistant-eval.{json,py}`). qwen2.5:7b 11/11 x3; llama3.2 8/11 x3
-  -> default ASSISTANT_OLLAMA_MODEL=qwen2.5:7b (user must `ollama pull qwen2.5:7b`)
-- [x] Smoke section "Shopping assistant" (+ k8s object loop)
-- [x] Testing protocol: verify 610/0/0; eval qwen2.5:7b 11/11 x3 (final build); compose cold default
-  380/0/3, cold real models 405/0/0; outage 503 Retry-After 30; k8s in place 360/0/7 (gateway needed a
-  rollout restart); test report, README, decisions (15), RECENT (Phase 27 archived), tracker 🔵
+- [ ] Browse, checkout, and mixed simulations (Gatling Java DSL)
+- [ ] Ramp, steady, and spike load profiles
+- [ ] Comparisons with and without the cache and with different pool sizes
+- [ ] Findings in `docs/performance.md`
+- [ ] Done when: at least one bottleneck found, fixed, and documented (before/after numbers)
+- [ ] Testing protocol, test report (Gatling results), README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-STOPPED at PR #46, waiting for the user. Do NOT merge unless the user says `approved, merge it`
-(`gh pr merge 46 --merge`). On `merged, continue`: merge verification (git checks, CI on main, `verify`,
-cold compose smoke on a COPY). NOTE: the user's `.env` enables Ollama; unless they have pulled
-`qwen2.5:7b` the assistant section FAILS - ask them to pull it, or run the smoke with
-`ASSISTANT_OLLAMA_MODEL=llama3.2` exported (NOT yet tried with llama3.2 - record the result
-and which model). Then tag `phase-29-complete`, then Phase 30 (Gatling). Throwaway Ollama removed; compose
-(user's .env) and kind are running.
+Explore how the stack is load-tested today (gateway rate limits, auth, seed data, Hikari/Tomcat/virtual
+thread settings, cache switch), then decide the module layout for Gatling and write the Design section.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
