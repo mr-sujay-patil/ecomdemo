@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-29
 - **Phase:** 32 — Saga Timeouts and Reconciliation
 - **Branch:** feature/phase-32-saga-timeouts (cut from `main` at `1f3fa7c`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -30,11 +30,26 @@
       deadline — automated test + scripted failure scenario
 - [ ] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
 
+## Design (agreed in session 2026-09-29; see also docs/architecture/saga.md)
+- Order service owns the clock: `SagaDeadlineSweeper` (@Scheduled, `ecomdemo.saga.deadline` PT1M,
+  sweep PT10S) → `SagaReconciler` per overdue PENDING order.
+- Ask-and-fence, payment first: payment-service `POST /internal/saga/orders/{id}/settle` (SERVICE
+  only, own security chain; `/api/**` stays deny-all) returns the existing payment, or records a
+  VOIDED one (+ PaymentFailed via outbox) so a late StockReserved can never charge.
+  COMPLETED → confirm. FAILED/VOIDED → inventory `POST /api/inventory/orders/{id}/release` (releases
+  RESERVED + writes a `closed_order` fence so a late/replayed OrderCreated is rejected) → cancel.
+  Payment or inventory unreachable = unknown outcome → leave PENDING, retry next sweep.
+- Reconciliation clients: app-local `SagaParticipants` with timeouts (KI-004 stays separate).
+- DLT admin (app, ADMIN): `GET /api/admin/dead-letters`, `POST .../{topic}/{partition}/{offset}/replay`
+  → raw bytes back to the original topic, audit row in `dead_letter_replay` (unique → 409 twice).
+- Metrics: gauge `ecomdemo.saga.orders.overdue`, counter `ecomdemo.saga.reconciliations{outcome}`;
+  alerts SagaOrdersStuck, SagaDeadlineCancellations.
+- Smoke: stop payment-service, checkout, move its StockReserved to the DLT + skip the offset, start
+  payment → CANCELLED + stock back within deadline; replay → still CANCELLED, no charge.
+
 ## Next action
-Fix-track process change merged (PR #50, `2a7ce51`, verified; `main` merged into this branch).
-KI-001 (Swagger/OpenAPI) waits until Phase 32 is merged. Housekeeping done (phase files 32 + 33, tracker rows, this checkpoint; Phase 31 tagged). Next: design the
-saga deadline and reconciliation (read `ecomdemo-app/.../order/internal/saga/` and the inventory
-and payment saga handlers first), then implement checklist item 1.
+Task 1: payment-service settle endpoint (VOIDED status migration V2, `PaymentService.settle`,
+`/internal/saga/**` chain, tests). Then inventory (task 2), app (3, 4), alerts/smoke (5), docs (6).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
