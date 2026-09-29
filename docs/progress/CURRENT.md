@@ -33,8 +33,7 @@
 ## Next action
 Housekeeping done (phase files 32 + 33, tracker rows, this checkpoint; Phase 31 tagged). Next: design the
 saga deadline and reconciliation (read `ecomdemo-app/.../order/internal/saga/` and the inventory
-and payment saga handlers first), then implement checklist item 1. The Phase 31 blocker above is
-independent: clear it whenever the NVD workflow has succeeded.
+and payment saga handlers first), then implement checklist item 1.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
