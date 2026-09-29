@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-29
 - **Phase:** 31 — Security Scanning (OWASP Dependency-Check + Trivy)
 - **Branch:** feature/phase-31-security-scanning (cut from `main` at `387d755`)
-- **Step:** WAITING_FOR_USER
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** YES - NVD API key, and the API5 fix decision
+- **Waiting for user:** NO (key in .env; GitHub secret NOT set yet - ask)
 
 ## Merge verification before this phase — PASSED
 - Phase 30: PR #47 merged as `387d755` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
@@ -31,20 +31,17 @@
 - [ ] Dependency-Check in CI (fail on high severity) - configured (`d5c6f37`); BLOCKED on NVD_API_KEY (user)
 - [x] Trivy image scans in CI (`d5c6f37`; local run of the exact steps: 8/8 clean)
 - [ ] Every finding fixed or suppressed with a justification
-- [x] An OWASP API Top 10 review in `docs/security.md` (API5 HIGH: catalog + inventory accept any token behind the gateway, verified live)
+- [x] An OWASP API Top 10 review in `docs/security.md`. API5 found AND fixed (user said fix it): `4671fc1`, catalog writes ADMIN|SERVICE, inventory ADMIN|SERVICE; re-probed on rebuilt compose: all 403, reads 200
 - [ ] Done when: CI blocks vulnerable builds (prove it with a deliberately vulnerable dependency on a
   throwaway run), and the security document is complete
 - [ ] Testing protocol, test report (scan results), README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-WAITING FOR USER on two things (asked in chat):
-1. An NVD API key: user sets `NVD_API_KEY` as a GitHub Actions secret (and exports it locally for
-   the local run). Dependency-Check 13 refuses to download NVD data without one.
-2. Whether to fix the API5 gap (catalog/inventory role checks) in this phase or later.
-Then: local ODC run -> fix/suppress findings; prove CI blocks (push a commit adding a known
-vulnerable dependency, watch both scans go red, then revert with a NEW commit - no history
-rewrite, no branch deletion); testing protocol; report; README; decisions; RECENT; tracker; PR.
-Probe account `sec-probe` exists in the compose customer DB (created by the API5 check).
+Local Dependency-Check run in progress (NVD download into ~/.cache/dependency-check, key read from
+.env as NVD_API_KEY - never print it). Then: fix/suppress ODC findings; ask the user to add the
+GitHub secret NVD_API_KEY (or permission to `gh secret set` it from .env); prove CI blocks (commit
+a known-vulnerable dependency, both scans red, revert with a NEW commit); testing protocol; report;
+README; decisions; RECENT; tracker; PR. Probe account `sec-probe` exists in the compose customer DB.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.

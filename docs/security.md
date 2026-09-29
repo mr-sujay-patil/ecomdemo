@@ -127,45 +127,57 @@ Can a client read or write a *field* it shouldn't?
 - 🟡 **No per-user budget for AI calls,** which cost money on a paid provider. This is a
   follow-up from Phase 29.
 
-### API5 Broken Function Level Authorization ⚠️ **HIGH**
+### API5 Broken Function Level Authorization ✅ (found and fixed in this phase)
 
 Can a user call a function meant for a different role?
 
-- **At the gateway: yes, it's enforced.**
-  - `/api/admin/**`, `/api/inventory/**` and product writes need ADMIN.
-  - Cart, orders and the assistant need CUSTOMER.
-  - `anyExchange().authenticated()` is the fallback.
-  - `EdgeSecurityIT` covers these rules.
-- **Behind the gateway: not everywhere.**
-  - ecomdemo-app and payment-service answered 403 to a CUSTOMER token sent straight to them.
-  - **catalog-service and inventory-service only require *a* valid token** and rely on the gateway
-    for the role.
+**At the gateway:** it always was enforced.
 
-  Verified on the running compose stack with a **CUSTOMER** token sent straight to the service
-  ports, with no data changed:
+- `/api/admin/**`, `/api/inventory/**` and product writes need ADMIN.
+- Cart, orders and the assistant need CUSTOMER.
+- `anyExchange().authenticated()` is the fallback.
+- `EdgeSecurityIT` covers these rules.
 
-  | Request (CUSTOMER token, bypassing the gateway) | Result |
-  |---|---|
-  | `GET /api/inventory/1` on :8080 (the gateway) | 403 |
-  | `GET /api/inventory/1` on :8082 (inventory-service) | **200** |
-  | `PUT /api/inventory/1` same level on :8082 | **200**, the write is accepted |
-  | `POST /api/products` (empty body) on :8081 (catalog-service) | **400**: past authorization, stopped only by validation |
-  | `DELETE /api/products/999999` on :8081 | **404**: past authorization; an existing id would be deleted |
-  | `POST /api/admin/batch/product-import` on :8084 (app) | 403 |
+**Behind the gateway:** not everywhere, until this phase.
 
-  How far this reaches depends on how the stack is run:
+- ecomdemo-app and payment-service already checked roles themselves.
+- **catalog-service and inventory-service only required *a* valid token.** They relied on the
+  gateway for the role, a decision from Phase 21, when the edge was meant to be the only way in.
 
-  - **Kubernetes:** these services are `ClusterIP` only, so an attacker needs to be inside the
-    cluster already.
-  - **compose:** every service port is published on `0.0.0.0` (see API8), so anyone who can reach
-    the machine can do it.
+The review tested that on the running compose stack, with a **CUSTOMER** token sent straight to
+the service ports and no data changed:
 
-  **Recommended fix:** defence in depth, so each service enforces the same roles the gateway does.
-  - catalog-service: ADMIN for product writes.
-  - inventory-service: ADMIN for `PUT`, and a service-token scope for `reserve` and `release`.
-  - An integration test per service that a CUSTOMER token gets 403.
+| Request (CUSTOMER token, bypassing the gateway) | Before | After the fix |
+|---|---|---|
+| `GET /api/inventory/1` on :8080 (the gateway) | 403 | 403 |
+| `GET /api/inventory/1` on :8082 (inventory-service) | **200** | 403 |
+| `PUT /api/inventory/1` same level on :8082 | **200**, the write is accepted | 403 |
+| `POST /api/products` (empty body) on :8081 (catalog-service) | **400**: past authorization, stopped only by validation | 403 |
+| `DELETE /api/products/999999` on :8081 | **404**: past authorization; an existing id would be deleted | 403 |
+| `POST /api/admin/batch/product-import` on :8084 (app) | 403 | 403 |
 
-  **Not fixed in this phase** (scanning and the review are its scope). See the test report.
+How far it reached depended on how the stack was run:
+
+- **Kubernetes:** these services are `ClusterIP` only, so an attacker needed to be inside the
+  cluster already.
+- **compose:** every service port is published on `0.0.0.0` (see API8), so anyone who could reach
+  the machine could do it.
+
+**The fix** is defence in depth: each service now repeats the gateway's rule for its own paths.
+
+- **catalog-service:** any valid token may read. Writes and the embedding backfill need ADMIN or
+  SERVICE. The SERVICE identity is the app's batch import, and the gateway's own token for
+  anonymous browsing, which is read-only because the gateway refuses anonymous writes first.
+- **inventory-service:** every path needs ADMIN or SERVICE. No shopper has a reason to call it at
+  all; checkout and catalog call it with their SERVICE token.
+- **Tests:**
+  - `InventorySecurityTest`: a CUSTOMER gets 403 on read, write and reserve; an ADMIN may write.
+  - `ProductApiIT`: a CUSTOMER may read but gets 403 on create, delete and the backfill; an ADMIN
+    and the SERVICE identity may write.
+
+🟡 **What remains:** a SERVICE token is powerful, and with the shared HMAC secret (API2) any
+service can mint one. Scoped service identities (which service may call what) come with
+asymmetric signing.
 
 ### API6 Unrestricted Access to Sensitive Business Flows 🟡
 
@@ -186,8 +198,10 @@ internal paths with the product name or order id as a *parameter*, never as a UR
 
 - ⚠️ **compose publishes every port on all interfaces:** the eight services, the six PostgreSQL
   databases (with default passwords), Redis and Kafka (no authentication). That's convenient for
-  learning, and it's what makes the API5 gap reachable. Recommended: bind to `127.0.0.1`, or keep
-  only the gateway, Grafana and Prometheus published.
+  learning, and it's what made the API5 gap reachable. Recommended: bind to `127.0.0.1`, or keep
+  only the gateway, Grafana and Prometheus published. (The services now check roles themselves,
+  API5, so a published port is no longer a way around authorization, but the databases, Redis
+  and Kafka still have no such second check.)
 - ⚠️ **The gateway's `/actuator/prometheus` is public.** Metrics reveal route names, error rates
   and JVM details. Recommended: scrape it on an internal port, or require a token.
 - ✅ **CSRF off** is deliberate. The API uses bearer tokens, not cookies, so a browser can't be
