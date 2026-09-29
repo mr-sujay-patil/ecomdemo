@@ -12,6 +12,31 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 31: Security Scanning (tag: phase-31-complete, PR #48)
+**What exists now:** CI jobs `dependency-scan` (OWASP Dependency-Check 13.0.0, NVD, CVSS >= 7 fails,
+test scope skipped) and `image-scan` (all 8 images built in one job, Trivy 0.74.0 by digest,
+HIGH/CRITICAL fail, CycloneDX SBOM artifact per image); `publish` needs both. `docs/security.md` =
+scan findings + OWASP API Top 10 (2023) review. catalog/inventory now enforce roles themselves.
+**Key code:** root pom: `dependency-check-maven` in pluginManagement (run explicitly:
+`NVD_API_KEY=... ./mvnw org.owasp:dependency-check-maven:aggregate`), security version overrides
+`tomcat.version` 11.0.25, `jackson-bom.version` 3.1.6, `jackson-2-bom.version` 2.21.6 (REMOVE when Boot
+manages >= these). `dependency-check-suppressions.xml` (2 false positives, until 2027-03-31),
+`.trivyignore.yaml` (empty). catalog `SecurityConfig`: GET any token, writes + `/embeddings/**`
+ADMIN|SERVICE; inventory: everything ADMIN|SERVICE (`ServiceTokens.ROLE`).
+**Config & infrastructure:** GitHub secret `NVD_API_KEY` (set from the user's `.env`); NVD data cached
+in CI (`~/.cache/dependency-check`, first download ~26 min in CI, ~40 min locally); locally the key
+is read from `.env` (never print it). `trivy-reports/` gitignored.
+**Tests:** +4: `InventorySecurityTest` (CUSTOMER 403 on read/write/reserve, ADMIN ok), `ProductApiIT`
+(CUSTOMER reads but 403 on create/delete/backfill; ADMIN writes). CI blocking proven on PR #48 with
+a temporary commons-text 1.9 commit, then reverted.
+**Gotchas:** Dependency-Check 13 will not run without an NVD key. CPE matching is product-wide:
+Kotlin build-tool CVEs hit kotlin-stdlib; pgvector extension CVEs hit the Java client. Dependency-Check
+groups related jars (kotlin-reflect under kotlin-stdlib). Trivy writes root-owned files through the
+docker socket mount (delete via a container).
+**Follow-ups (not done):** login throttling per username; asymmetric JWT + scoped service identities;
+bind compose ports to 127.0.0.1; gateway `/actuator/prometheus` not public; pagination on
+`GET /api/products`; Trivy config/IaC scanning of Dockerfile and k8s manifests; Dependabot/Renovate.
+
 ## Phase 30: Performance Testing (tag: phase-30-complete, PR #47)
 **What exists now:** Gatling load tests in `performance-tests/` (own pom, NO Boot parent, NOT in the
 reactor; CI only test-compiles it): Browse, Checkout (cart -> order -> poll status to CONFIRMED),
@@ -41,39 +66,3 @@ are relative.
 (503 + Retry-After before the pool queues); pipelined outbox sends; shorter poll-delay (~1.5 s settle
 floor = 3 hops); push instead of poll for order status; gateway cost per request (rate-limit Redis
 call + JWT) and replicas; separate load machine; soak test.
-
-## Phase 29: AI Shopping Assistant (tag: phase-29-complete, PR #46)
-**What exists now:** new **assistant-service** (8087, NO database). `POST /api/assistant/chat
-{conversationId?, message}` → `{conversationId, answer, sources[], toolsUsed[], pendingAction?}` and
-`POST /api/assistant/actions/{id}/confirm` (both CUSTOMER; gateway route `/api/assistant/**` before the
-`app` catch-all). RAG over 5 policy Markdown docs (19 passages, in memory) on every message + tools
-`searchProducts` (catalog search), `getOrderStatus` (app), `addToCart` (PROPOSE only; Redis, 10 min,
-GETDEL). Every downstream call carries the CALLER's JWT; `com.ecomdemo.clients` not scanned.
-**Key code:** `com.ecomdemo.assistant`: `AssistantService` (retrieve → prompt → ChatClient with tools +
-memory → tool-limit finish reason → `OrderClaimGuard` → sources), `tools/ShoppingTools` (per request,
-holds token + user id; `TextOrJsonResultConverter`; `Turn`), `policy/PolicyLibrary` (chunk by `##`,
-one batch embed, cosine), `memory/RedisChatMemoryRepository` (`assistant:memory:{userId}:{convId}`, 24 h,
-MULTI/EXEC), `actions/PendingActions`, `store/StoreClient` (RestClient, token relay; 403/404 → empty),
-`ai/OllamaClientConfig` (deadline), `ai/ChatMemoryConfig` (window 20). Prompt:
-`resources/prompts/assistant-system.st`; policies `resources/policies/*.md`.
-**Config & infrastructure:** same switches `AI_CHAT_PROVIDER` + `AI_EMBEDDING_PROVIDER` (BOTH needed,
-else 503); `ASSISTANT_OLLAMA_MODEL` default **qwen2.5:7b** (user must pull it), `ASSISTANT_OPENAI_MODEL`
-gpt-4.1-mini (untested), temperature 0; policy threshold nomic 0.7 (measured), OpenAI 0.3,
-`POLICY_MIN_SIMILARITY`; `spring.ai.tools.limits` 5 total / 3 per tool / THROW. compose service (768M),
-Prometheus target, Alloy, k8s Deployment (1 replica, AI none), k8s-up. Metrics
-`ecomdemo_assistant_chats_seconds{outcome=answered|not_configured|model_failed|tool_limit|ungrounded|empty}`,
-`ecomdemo_assistant_tool_calls_total{tool,outcome}`, `ecomdemo_ai_tokens_total`.
-**Tests:** 610 (+40): `AssistantApiIT` 18, `AssistantNotConfiguredIT` 2, `ShoppingToolsTest` 8 (tool
-schema has no user param), `PolicyLibraryTest` 6, `OrderClaimGuardTest` 3, `RetrievalPropertiesTest` 2,
-`EdgeSecurityIT` +1; support `ScriptedChatModel` (tool-call replies), `FakeStore` (JDK HttpServer),
-`HashingEmbeddingModel`. Eval `scripts/assistant-eval.{json,py}` (11 cases): qwen2.5:7b 11/11 ×3,
-llama3.2 8/11. Smoke "Shopping assistant": compose default 380/0/3, real models 405/0/0, k8s 360/0/7.
-**Gotchas:** `ChatClient.builder(model)` IGNORES `spring.ai.tools.limits` (own ToolCallingManager) → use
-the Builder bean. A tool-limit breach is RETURNED as the answer (finish reason `toolCallLimitExceeded`)
-and already stored in memory. A ChatModel's options must be `ToolCallingChatOptions` or no tools are
-sent. Small models: copy quoted sentences, ignore JSON notes, invent ids → names + plain-text notes.
-`compose up --build X` rebuilds/recreates X's deps; the gateway then keeps the OLD IP (500 until restart).
-**Follow-ups (not done):** LLM-as-judge on top of the deterministic eval; streaming answers; per-user
-rate limit/budget for the assistant; conversation list/delete API; summarising memory; OpenAI
-measurement; gateway DNS caching; k8s-up restarting changed Deployments; policies from a CMS instead of
-the jar; product-price grounding check like OrderClaimGuard.
