@@ -32,6 +32,17 @@ advisory database. Each can miss what the other catches.
 The NVD API key is free (https://nvd.nist.gov/developers/request-an-api-key). CI reads it from the
 `NVD_API_KEY` repository secret and never from a file.
 
+**Keeping the NVD data warm.** The full database is ~400 000 records (~240 MB), and a cold download
+has taken anywhere from 26 minutes to a stall of over an hour, depending on the NVD's API that day.
+So the download isn't left to the scans:
+
+- The `NVD data` workflow (`.github/workflows/nvd-data.yml`) updates it daily, and on demand, on
+  `main`. A cache saved on `main` is readable by every branch; one saved by a pull request is
+  readable only by that pull request.
+- `dependency-scan` restores that copy and tops it up in its own step, which logs progress.
+- It then scans with `-DautoUpdate=false`, and has a 60-minute limit.
+- Only complete updates on `main` are saved.
+
 ### Suppression policy
 
 **Fix first.** That means a newer version, or overriding the version Spring Boot manages through
