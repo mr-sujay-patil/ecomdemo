@@ -69,6 +69,13 @@ jobs:
         # failure here is reproducible locally with no translation.
         run: ./mvnw -B clean verify
 
+      - name: Compile the load tests
+        # performance-tests is outside the reactor (it needs a running stack, and Docker images
+        # have no use for Gatling), so `verify` above never sees it. Compiling it here means an
+        # API change that breaks a simulation fails the pull request, not the next load test.
+        # Nothing is RUN: a load test on a shared CI runner measures the runner.
+        run: ./mvnw -B -f performance-tests/pom.xml test-compile
+
       - name: Upload the test reports
         # `always()` is the point of this step. The default is to skip a step when an earlier one
         # failed — which would mean the reports are uploaded only when everything passed, exactly

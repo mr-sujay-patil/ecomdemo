@@ -23,11 +23,17 @@ import org.springframework.stereotype.Component;
  *
  * <h2>What the drain rate actually is</h2>
  *
- * <p>One batch per tick, so at the defaults — 100 events, one second apart — the outbox drains at
- * about a hundred events a second once the broker returns. A ten-minute outage during which an
- * order was placed every second clears in six seconds. Not draining the whole backlog inside one
- * tick is the point: each batch commits on its own, so recovery is incremental and its progress
- * survives a crash halfway through.
+ * <p>Until Phase 30 a tick published one batch and slept, and this comment claimed that drained
+ * "about a hundred events a second". The load test measured it: a batch of 100 takes ~0.22 s
+ * (every send waits for its acknowledgement), then the relay slept a full second while the table
+ * kept filling - about 82 events a second, a ceiling of ~41 orders a second, and past it every
+ * order waited longer than the one before (see {@code docs/performance.md}).
+ *
+ * <p>Now a tick keeps publishing while batches come back FULL, because a full batch means more is
+ * waiting, and sleeps only after a short one - or after {@code maxBatchesPerTick}, so the one
+ * scheduler thread this shares with the cleanup job and the sales report is never held for long.
+ * An idle outbox behaves exactly as before: one empty query per {@code pollDelay}. Each batch
+ * still commits on its own, so a crash halfway through a drain keeps the progress made.
  *
  * <h2>One instance, and what happens with two</h2>
  *
@@ -50,9 +56,11 @@ class OutboxRelay {
     private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
 
     private final OutboxBatchPublisher publisher;
+    private final OutboxProperties properties;
 
-    OutboxRelay(OutboxBatchPublisher publisher) {
+    OutboxRelay(OutboxBatchPublisher publisher, OutboxProperties properties) {
         this.publisher = publisher;
+        this.properties = properties;
     }
 
     /**
@@ -64,10 +72,16 @@ class OutboxRelay {
             fixedDelayString = "${ecomdemo.outbox.poll-delay:1s}",
             initialDelayString = "${ecomdemo.outbox.poll-delay:1s}")
     void relay() {
+        int published = 0;
         try {
-            int published = publisher.publishPendingBatch();
-            if (published > 0) {
-                log.info("Outbox relay published {} event(s)", published);
+            for (int batch = 1; batch <= properties.maxBatchesPerTick(); batch++) {
+                int thisBatch = publisher.publishPendingBatch();
+                published += thisBatch;
+                // Short means the table is drained, or a send failed and the publisher stopped at
+                // it; either way, wait for the next tick rather than spin.
+                if (thisBatch < properties.batchSize()) {
+                    break;
+                }
             }
         } catch (RuntimeException e) {
             // A scheduled method that throws kills only its own run — the next tick still fires —
@@ -75,6 +89,9 @@ class OutboxRelay {
             // failures are already handled and logged inside the publisher; reaching here means
             // something structural, such as the database being unreachable.
             log.error("Outbox relay tick failed: {}", e.getMessage(), e);
+        }
+        if (published > 0) {
+            log.info("Outbox relay published {} event(s)", published);
         }
     }
 }

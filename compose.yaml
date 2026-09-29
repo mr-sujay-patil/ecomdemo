@@ -163,6 +163,11 @@ services:
       # what it means; a `prod` profile arrives with the deployment phases.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
 
+      # Performance experiments only (Phase 30): the size of the app's database connection pool.
+      # The default is exactly what application-dev.properties already says, so leaving this unset
+      # changes nothing; scripts/perf-compare.sh sets it to measure other sizes.
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: ${APP_DB_POOL_SIZE:-10}
+
       # Overrides the Dockerfile's default when set in .env — useful for pinning a heap on a
       # laptop, or adding -XX:+HeapDumpOnOutOfMemoryError while debugging.
       JAVA_OPTS: ${JAVA_OPTS:--XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError}
@@ -514,6 +519,13 @@ services:
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379
       INVENTORY_BASE_URL: http://inventory-service:8082
+
+      # Performance experiments only (Phase 30), defaults = today's behaviour. CATALOG_CACHE_TYPE=none
+      # turns the Redis product cache off (every read goes to PostgreSQL and inventory-service);
+      # CATALOG_DB_POOL_SIZE is Hikari's pool, whose Spring Boot default is also 10. See
+      # scripts/perf-compare.sh and docs/performance.md.
+      SPRING_CACHE_TYPE: ${CATALOG_CACHE_TYPE:-redis}
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: ${CATALOG_DB_POOL_SIZE:-10}
 
       # The same secret every other service holds, because HMAC verifies with the key it signs
       # with. That is the honest argument for asymmetric signing in a real deployment, and it is

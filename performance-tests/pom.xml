@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Load tests for the running stack (Phase 30). Gatling, Java DSL.
+
+  DELIBERATELY NOT A CHILD OF THE ROOT POM, AND NOT ONE OF ITS MODULES.
+
+  1. No Spring Boot parent. spring-boot-starter-parent manages the versions of Netty, Jackson and
+     friends for the SERVICES. Gatling ships its own Netty and is tested against exactly that one;
+     inheriting Boot's dependency management would silently swap it for Boot's, and the failure
+     would be a load generator that misbehaves under load - the one place nobody would suspect.
+  2. Not in the reactor. `./mvnw clean verify` builds and tests the services and needs no running
+     stack; a simulation needs a running stack and minutes of wall time. The Docker build also runs
+     over the reactor, and has no business downloading Gatling into an image.
+
+  CI still compiles the simulations (`-f performance-tests/pom.xml test-compile`), so an API change
+  that breaks one is caught on the pull request rather than on the day someone runs it.
+
+  Run (stack up on :8080):
+      ./mvnw -f performance-tests/pom.xml gatling:test -Dgatling.simulationClass=com.ecomdemo.perf.BrowseSimulation
+  or  scripts/perf-test.sh browse steady        (knobs: PERF_* environment variables, see PerfConfig)
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.ecomdemo</groupId>
+    <artifactId>performance-tests</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>performance-tests</name>
+    <description>Gatling load tests against the running EcomDemo stack</description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <gatling.version>3.15.1</gatling.version>
+        <gatling-maven-plugin.version>4.21.12</gatling-maven-plugin.version>
+        <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
+        <!-- The Jackson that Gatling already brings (via gatling-recorder). Declared, not borrowed,
+             because TestData uses it directly; pinned to the same version so there is still one. -->
+        <jackson.version>2.21.3</jackson.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>io.gatling.highcharts</groupId>
+            <artifactId>gatling-charts-highcharts</artifactId>
+            <version>${gatling.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>${jackson.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>io.gatling</groupId>
+                <artifactId>gatling-maven-plugin</artifactId>
+                <version>${gatling-maven-plugin.version}</version>
+                <configuration>
+                    <!-- Assertions decide the exit code; a report is still written on failure.
+                         Knobs (PERF_PROFILE, PERF_RATE, ...) are ENVIRONMENT variables: the plugin
+                         runs the simulation in a forked JVM, which inherits the environment. -->
+                    <failOnError>true</failOnError>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

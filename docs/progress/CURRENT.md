@@ -2,63 +2,61 @@
 
 > The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-09-28
-- **Phase:** 29 — AI Shopping Assistant (RAG + tool calling)
-- **Branch:** feature/phase-29-ai-assistant (cut from `main` at `5fb6ac1`)
+- **Updated:** 2026-09-29
+- **Phase:** 30 — Performance Testing (Gatling)
+- **Branch:** feature/phase-30-gatling (cut from `main` at `9b0912f`)
 - **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #46 https://github.com/mr-sujay-patil/ecomdemo/pull/46
-- **Waiting for user:** YES - review of the Phase 29 PR
+- **PR:** #47 https://github.com/mr-sujay-patil/ecomdemo/pull/47
+- **Waiting for user:** YES - review of the Phase 30 PR
 
 ## Merge verification before this phase — PASSED
-- Phase 28: PR #45 merged as `5fb6ac1` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
-  locally and on GitHub. CI on main green (run 36466418725). `verify` on main 570/0/0/0. Cold compose
-  (down -v, --build) smoke on a COPY 385/0/0 (the user's `.env` now sets AI_EMBEDDING_PROVIDER=ollama too).
-  Tagged `phase-28-complete`.
+- Phase 29: PR #46 merged as `9b0912f` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
+  locally and on GitHub. CI on main green (run 36477434643). `verify` on main 610/0/0/0. Cold compose
+  (down -v, --build, `.smoke-state` removed) smoke on a COPY 404/0/0 with the user's `.env` (Ollama;
+  assistant model qwen2.5:7b, confirmed inside the container). `phase-29-complete` already existed on
+  `9b0912f` (pushed by an earlier session, whose results were not recorded; re-run in full here).
 
-## Design (decided at the start; decisions.md entries to write)
-- New module `assistant-service` (port 8087), NO database: Redis holds memory and pending actions.
-- `POST /api/assistant/chat {conversationId?, message}` -> `{conversationId, answer, sources[], pendingAction?}`;
-  `POST /api/assistant/actions/{id}/confirm` does the cart write. Gateway: `/api/assistant/**` CUSTOMER,
-  route before the `app` catch-all.
-- The assistant acts AS THE USER: every downstream call carries the caller's own JWT (catalog search,
-  app orders/cart); no service token, no userId argument on any tool. The owner service decides.
-- Tools: `searchProducts` (catalog `/api/products/search`), `getOrderStatus` (app `/api/orders/{id}/status`;
-  403 and 404 both answer "not an order on your account"), `addToCart` = PROPOSE only (pending action in
-  Redis, TTL 10 min); the user confirms outside the model.
-- RAG over policies: `resources/policies/*.md`, chunked by `##`, embedded lazily into an in-memory
-  SimpleVectorStore (tiny corpus shipped in the jar), top-k above a threshold into the system prompt, cited
-  in `sources`. Needs BOTH a chat and an embedding model; otherwise 503 with setup steps.
-- Memory: own `ChatMemoryRepository` on StringRedisTemplate (the Spring AI Redis one pulls Jedis + gson +
-  a search index), key `assistant:memory:{user}:{conversationId}`, TTL; MessageWindowChatMemory.
-- Guardrails: store topics only (fixed refusal sentence), grounded answers, input size limit, identity
-  from the token only, memory per user, confirmation for writes.
-- Evaluation: ~10 cases in `scripts/assistant-eval.json`, run by `scripts/assistant-eval.py` against
-  the live stack (deterministic checks: expected facts, tool/sources used, refusals, no leak).
-- Registration points: root pom, Dockerfile, compose, prometheus, alloy, k8s (kustomization, service,
-  ConfigMap, k8s-up), ContainerMemoryBudgetTest (7 -> 8), README.
+## Design (decided; decisions.md entries to write)
+- Module `performance-tests/` (Gatling 3.15.1 Java DSL, gatling-maven-plugin 4.21.12), OWN pom with no
+  Spring Boot parent (Boot's dependency management would override Gatling's Netty/Jackson), NOT in the
+  root reactor (Docker images and `verify` stay Gatling-free). CI compiles it: `-f performance-tests/pom.xml
+  test-compile`. Run: `./mvnw -f performance-tests/pom.xml gatling:test -Dgatling.simulationClass=...`.
+- Target = the GATEWAY (8080), like a real client. Rate limit is per USER (50/s, burst 100) and per IP
+  for anonymous -> browse runs AUTHENTICATED with a pool of pre-registered users (anonymous load from
+  one host shares one IP bucket; that is a finding, shown once, not the thing measured).
+- Data setup in the simulation's `before()` with java.net.http (idempotent): register `perf-user-N`
+  (409 = exists), admin creates `Perf Product N` if missing and PUTs stock very high; prices small
+  (payment declines above 10000). Tokens fetched once in `before()` and fed -> login/BCrypt measured
+  separately, not hidden inside every browse.
+- Simulations: Browse (list, detail, search), Checkout (add to cart, place, poll status to
+  CONFIRMED/CANCELLED), Mixed (weighted). Profile by `-Dprofile=ramp|steady|spike` (+ rate/duration
+  knobs), assertions on failure rate and p95/p99.
+- Comparisons via env knobs with today's defaults (compose): catalog cache on/off
+  (`spring.cache.type`), Hikari pool sizes; `scripts/perf-compare.sh` restarts with each setting and
+  collects Gatling's stats.json into a table. Findings + bottleneck fix in `docs/performance.md`.
+- Load generator shares the host with the stack (24 cores, 30 GB): numbers are relative, not absolute.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [x] assistant-service + `POST /api/assistant/chat` (+ confirm endpoint, gateway route, compose, k8s)
-- [x] RAG over products (search tool) and policy Markdown (5 docs, 19 passages, threshold 0.7 measured)
-- [x] Tools searchProducts, getOrderStatus (caller's token), addToCart (by name, propose + confirm)
-- [x] Conversation memory in Redis (own repository, key user:conversation, TTL 24h, window 20)
-- [x] Guardrails (prompt, input 1000, Spring AI tool limits 5/3, OrderClaimGuard output check)
-- [x] Evaluation set: 11 cases (`scripts/assistant-eval.{json,py}`). qwen2.5:7b 11/11 x3; llama3.2 8/11 x3
-  -> default ASSISTANT_OLLAMA_MODEL=qwen2.5:7b (user must `ollama pull qwen2.5:7b`)
-- [x] Smoke section "Shopping assistant" (+ k8s object loop)
-- [x] Testing protocol: verify 610/0/0; eval qwen2.5:7b 11/11 x3 (final build); compose cold default
-  380/0/3, cold real models 405/0/0; outage 503 Retry-After 30; k8s in place 360/0/7 (gateway needed a
-  rollout restart); test report, README, decisions (15), RECENT (Phase 27 archived), tracker 🔵
+- [x] Browse, checkout, and mixed simulations (Gatling Java DSL) - `475b819`, harness checked (browse 5/s, checkout 3/s: 0 KO)
+- [x] Ramp, steady, and spike load profiles (`PERF_PROFILE`; runner `scripts/perf-test.sh`, results TSV)
+- [x] Comparisons with and without the cache and with different pool sizes (`scripts/perf-compare.sh`, compose knobs)
+- [x] Findings in `docs/performance.md` (raw runs: `docs/test-reports/phase-30-perf-results.tsv`)
+- [x] Done when: bottleneck = outbox relay (`8204022`): steady 50/s settle p95 25.9 s -> 3.0 s
+- [x] Testing protocol: verify 616/0/0/0; compose cold smoke 404/0/0; k8s 360/0/7; Gatling acceptance 0 KO; report, README, decisions (7), RECENT (Phase 28 archived), tracker 🔵, PR #47
+
+## Key results (details in docs/performance.md)
+- Outbox fix: checkout steady 50/s settle p50/p95 13.0/25.9 s -> 2.5/3.0 s; ramp to 100/s 594 -> 0
+  unconfirmed. Cache off: same latency (gateway-bound) but +2.5 cores backend/DB. Pool 2 collapses,
+  5/10/30 equal. Mixed spike (3000 in 10 s) 0 KO; accidental 300 checkouts/s = pool exhaustion.
+- Simulation bug found+fixed (`3b8ede8`): mixed gave both scenarios the full spike.
 
 ## Next action
-STOPPED at PR #46, waiting for the user. Do NOT merge unless the user says `approved, merge it`
-(`gh pr merge 46 --merge`). On `merged, continue`: merge verification (git checks, CI on main, `verify`,
-cold compose smoke on a COPY). NOTE: the user's `.env` enables Ollama; unless they have pulled
-`qwen2.5:7b` the assistant section FAILS - ask them to pull it, or run the smoke with
-`ASSISTANT_OLLAMA_MODEL=llama3.2` exported (NOT yet tried with llama3.2 - record the result
-and which model). Then tag `phase-29-complete`, then Phase 30 (Gatling). Throwaway Ollama removed; compose
-(user's .env) and kind are running.
+STOPPED at PR #47, waiting for the user. Do NOT merge unless the user says `approved, merge it`
+(`gh pr merge 47 --merge`). On `merged, continue`: merge verification (git checks, CI on main,
+`verify`, cold compose smoke on a COPY), tag `phase-30-complete`, then Phase 31 per ROADMAP.
+Stack state: compose (user's .env) and kind are running with the Phase 30 build; perf users and
+products exist in the compose DBs.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
