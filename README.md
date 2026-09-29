@@ -2636,6 +2636,75 @@ In Grafana's Tempo view the same checkout is one trace across the gateway, the o
 inventory-service, payment-service and back. The smoke test's **Saga** section runs both endings
 and a two-buyers-one-unit race, and checks the rows in all three databases.
 
+### When a message is lost: the saga deadline (Phase 32)
+
+Choreography has one weak spot: **nobody owns the clock**. Until Phase 32, a saga message that could
+not be processed at all (bad bytes, a bug) was retried three times and moved to a dead-letter topic,
+and its order stayed PENDING for ever, sometimes with stock held for it.
+
+Now the order service owns the clock, because it owns the state being waited on. Every 10 s a sweep
+finds orders PENDING for longer than `ecomdemo.saga.deadline` (1 minute; warm, a saga settles in
+about 1.5 s) and **reconciles** each one. It does not simply time the order out. It first asks the
+services that know what happened:
+
+```
+overdue order ─▶ payment-service: "settle order 4812"   (POST /internal/saga/orders/{id}/settle)
+                   │
+                   ├─ COMPLETED ──────────────────────────────────▶ CONFIRMED  (+ the thank-you e-mail)
+                   │    the saga succeeded; only the reply was lost
+                   │
+                   ├─ FAILED / VOIDED ─▶ inventory-service: "close order 4812"
+                   │    nobody paid,        (POST /api/inventory/orders/{id}/close)
+                   │    and now nobody can     gives back what is held, fences the order
+                   │                           └──────────────────────▶ CANCELLED  (with the reason)
+                   │
+                   └─ no answer / timeout ────────────────────────▶ still PENDING; ask again next sweep
+```
+
+Three ideas are doing the work:
+
+- **Reconciliation, not a blind timeout.** "PENDING too long → cancel" is wrong exactly when it hurts
+  most: a saga that *succeeded*, whose last message was lost. The customer paid, so cancelling would
+  keep their money and give them nothing. Asking payment-service first turns that case into a
+  CONFIRMED order.
+- **Ask and fence in one step.** "Is there a payment?" followed by "cancel" leaves a gap where a
+  late StockReserved could still charge the order. So payment-service never just reports "no
+  payment": it records a **VOIDED** payment in the order's one payment slot, in the same transaction
+  that looked. A late or replayed StockReserved then finds a payment already there and charges
+  nothing. inventory-service does the same with a `closed_order` row, which refuses a late
+  OrderCreated. A per-order advisory lock stops a close from racing a reservation.
+- **An unknown outcome is not guessed.** A timeout does not mean the call failed; it may have
+  succeeded and only the reply was lost. If payment-service or inventory-service does not answer,
+  the order is left alone and asked about again on the next sweep. Both calls are idempotent, which
+  is what makes asking again safe.
+
+`saga_orders_overdue` (a gauge) and `saga_reconciliations_total{outcome}` (a counter) show it
+working. Two Prometheus alerts watch them: **SagaOrdersStuck** (orders overdue for 10 minutes: a
+participant is down) and **SagaDeadlineResolvingOrders** (the deadline had to decide orders, so a
+saga message was lost).
+
+### Dead letters: see them, replay them
+
+A dead-letter topic is "a queue for a person". The person now has a tool (ADMIN only):
+
+```bash
+curl -s localhost:8080/api/admin/dead-letters -H "Authorization: Bearer $ADMIN"
+#   topic, partition, offset, key (the order id), the topic it failed on, the exception, the payload
+curl -s -X POST localhost:8080/api/admin/dead-letters/inventory.stock-reserved-dlt/0/3/replay \
+     -H "Authorization: Bearer $ADMIN"      # sent back byte for byte; a second replay is 409
+curl -s localhost:8080/api/admin/dead-letters/replays -H "Authorization: Bearer $ADMIN"   # the audit log
+```
+
+Replay is safe for two reasons. Every consumer ignores an event id it has already handled, and an
+order the deadline has decided is fenced on both sides. Every replay is recorded in
+`dead_letter_replay`, including who did it and when.
+
+The smoke test's **Saga deadline and dead letters** section is the scripted failure scenario. It
+stops payment-service, places an order, and moves the order's StockReserved to the dead-letter topic
+(skipping payment's offset past it), then starts payment-service again. It then checks that the
+order ends CANCELLED within the deadline, with a VOIDED payment and the stock back. Finally it
+replays the dead letter and checks that nothing is charged.
+
 ## Running on Kubernetes
 
 Phase 25 runs the same system on a local Kubernetes cluster, the way production would, next to

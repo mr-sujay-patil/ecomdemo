@@ -143,7 +143,8 @@ it the way a database transaction would, so it marks it instead:
 | Kafka is down | Checkout still succeeds (Phase 18). Every outbox holds its rows and drains when Kafka is back. |
 | A relay publishes twice (crash after the send) | The consumer's `processed_event` absorbs the duplicate. |
 | Two shoppers take the last unit | Both usually pass the pre-check. The reservation locks the row and gives it to one; the other is CANCELLED "for stock". |
-| A message cannot be processed at all (bad JSON, a bug) | Three attempts in place, then `<topic>-dlt`. **The order stays PENDING**: see "Not done" below. |
+| A message cannot be processed at all (bad JSON, a bug) | Three attempts in place, then `<topic>-dlt`. Since Phase 32 the **saga deadline** resolves the order (see below), and an administrator can replay the dead letter. |
+| A participant is down when the deadline arrives | The order stays PENDING and is asked about again on every sweep: an unknown outcome is never guessed. `SagaOrdersStuck` fires after 10 minutes. |
 
 ## The alternative: orchestration
 
@@ -170,7 +171,7 @@ decides what happens next. With this codebase it would look like this:
 | Cyclic dependencies | Easy to create by accident as steps grow | Avoided by construction |
 | Single point of failure / bottleneck | None | The orchestrator (mitigated by it being just another service with a database) |
 | Compensation order | Implicit (each service reacts) | Explicit, in reverse order, in one place |
-| Timeouts | Nobody owns them | The orchestrator's natural job |
+| Timeouts | Nobody owned them until Phase 32; now the order service's sweeper | The orchestrator's natural job |
 
 **Why choreography here:** three steps, one compensation, and a learning goal of seeing each
 service act on its own. That is choreography's sweet spot. Its weaknesses start to bite around
@@ -179,15 +180,76 @@ point an orchestrator, hand-written or from a framework such as **Temporal**, **
 **Axon** or **Eventuate Tram**, is the better shape. None of them is added here; the phase asked
 for the alternative to be *documented*.
 
+## The saga deadline (Phase 32)
+
+Choreography left timeouts with no owner (see the table above). Phase 32 gives them to the **order
+service**, because it owns the state being waited on: it created the PENDING order, shows it to the
+shopper, and is the only service that can move it. Inventory and payment each see only their own
+step and cannot tell "slow" from "lost".
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as SagaDeadlineSweeper (order service)
+    participant P as payment-service
+    participant I as inventory-service
+
+    S->>S: every 10 s: PENDING orders placed before now - deadline (1 m)
+    S->>P: POST /internal/saga/orders/{id}/settle {amount}
+    alt a payment exists
+        P-->>S: COMPLETED or FAILED (unchanged)
+    else nothing was ever attempted
+        P->>P: payment VOIDED + outbox PaymentFailed (one transaction)
+        P-->>S: VOIDED
+    end
+    alt COMPLETED
+        S->>S: PENDING → CONFIRMED + outbox OrderPlaced
+    else FAILED or VOIDED
+        S->>I: POST /api/inventory/orders/{id}/close {reason}
+        I->>I: advisory lock(order) + closed_order row + release RESERVED rows
+        I-->>S: released n
+        S->>S: PENDING → CANCELLED (reason)
+    end
+    Note over S,I: any timeout or error: decide nothing, ask again next sweep
+```
+
+**Reconciliation, not compensation.** Compensation undoes a step that is known to have happened.
+Reconciliation first finds out what happened, from the service that owns the answer, and then
+brings the order into line with it. A blind "PENDING too long → CANCELLED" would cancel a saga that
+succeeded but lost its last message, after the customer had paid.
+
+**Ask and fence.** Each question to a participant also closes the door behind it. Settling an
+unpaid order VOIDS it, so it occupies the order's single payment slot (`uq_payment_order`), and a
+late or replayed StockReserved is refused by the existing "already has a payment" guard. Closing an
+order writes `closed_order`, so a late or replayed OrderCreated is rejected. Without the fence, the
+answer "nothing happened" could stop being true a moment after it was given.
+
+**Why payment first.** Payment is the one step that cannot be undone, so its answer decides. Stock
+can be released any number of times harmlessly. The order is cancelled only after inventory confirms
+the close; cancelling first would take the order out of every later sweep and could leave its stock
+held for ever.
+
+**The unknown outcome.** A timeout means "I don't know", not "no". The request may have been carried
+out and only the reply lost. The reconciler therefore decides nothing without an answer. The order
+stays PENDING, `saga_orders_overdue` shows it, and the next sweep asks again. That is safe because
+both questions are idempotent.
+
+**Dead letters.** `GET /api/admin/dead-letters` lists the five saga DLTs (read from the beginning
+with an assigned consumer, so nothing is "consumed"). `POST .../{topic}/{partition}/{offset}/replay`
+sends a record back to its original topic byte for byte, recorded in `dead_letter_replay`, and only
+once per record. Replay is safe because of `processed_event` and the fences above.
+
+**Known limits** (in `docs/KNOWN_ISSUES.md`):
+- An order whose **StockRejected** is dead-lettered is cancelled with the void's reason, not the
+  stock message: the rejection was never recorded anywhere the reconciler can ask.
+- The sweep runs in every application instance. That is safe (the far side is idempotent and the
+  decision is a conditional UPDATE) but makes duplicate HTTP calls.
+
 ## Not done (follow-ups)
 
-- **A saga timeout.** An order whose event was dead-lettered stays PENDING forever. A scheduled
-  sweep of "PENDING for more than N minutes" would cancel it and ask inventory to release. That is
-  exactly the job an orchestrator would own. `idx_orders_status` (V19) is there for that query.
-- **Reconciliation** of `stock_reservation` against orders, for the same reason.
 - **Restoring the cart** when an order is cancelled.
 - notification-service still has its own copy of the idempotent-consumer code; it could use
-  `ProcessedEvents` from the library.
-- Nothing prunes `processed_event` yet (the index for it exists).
+  `ProcessedEvents` from the library (KI-010).
+- Nothing prunes `processed_event` yet (the index for it exists) (KI-008).
 - `InventoryGateway.reserve`/`release` and inventory's matching HTTP endpoints are no longer used
-  by checkout. They can go once nothing else is expected to call them.
+  by checkout. They can go once nothing else is expected to call them (KI-011).

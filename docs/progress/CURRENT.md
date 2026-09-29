@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-29
 - **Phase:** 32 — Saga Timeouts and Reconciliation
 - **Branch:** feature/phase-32-saga-timeouts (cut from `main` at `1f3fa7c`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -24,8 +24,8 @@
 - [x] A saga deadline: an order still PENDING after a configurable time is resolved
 - [x] Reconciliation: ask inventory and payment what happened before cancelling (confirm a slow
       success; a cancellation releases reserved stock)
-- [ ] See and replay dead-lettered saga events (`*-dlt`), with an audit trail
-- [ ] Metrics and an alert for stuck and timed-out orders
+- [x] See and replay dead-lettered saga events (`*-dlt`), with an audit trail
+- [x] Metrics and an alert for stuck and timed-out orders
 - [ ] Done when: a dead-lettered saga ends CONFIRMED or CANCELLED (stock released) within the
       deadline — automated test + scripted failure scenario
 - [ ] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
@@ -48,10 +48,14 @@
   payment → CANCELLED + stock back within deadline; replay → still CANCELLED, no charge.
 
 ## Next action
-Done: payment settle (`fe855ac`), inventory close (`fe677a9`), app sweeper/reconciler/metrics
-(`09071d9`, `SagaReconcilerTest` + `SagaDeadlineIT` green). In progress: task 4, dead-letter
-list/replay (`deadletter` module, V20 `dead_letter_replay`, `DeadLetterIT`). Then alerts +
-compose/k8s env + smoke section (5), docs + PR (6).
+All checklist code is committed (payment `fe855ac`, inventory `fe677a9`, order `09071d9`, dead letters
+`308a57d`, alerts `76a3d6d`, smoke `8a…` see git log). Docs written: README saga section, saga.md,
+decisions, security.md, KNOWN_ISSUES (KI-012/013 fixed, KI-037/038 accepted), RECENT rotated (Phase 30
+archived; Phase 32 summary still to write). NOW: full `./mvnw clean verify` (run detached: the tool's
+10-min limit killed the first attempt), then COLD compose stack + `scripts/smoke-test.sh`, test report
+`docs/test-reports/phase-32.md`, RECENT summary, tracker 🔵, PR.
+Also pending: update the stale "saga timeout would do - a follow-up" comment in
+`outbox/.../SagaListenerErrors.java` (after the build, not during it).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
