@@ -31,7 +31,9 @@
 - [ ] Testing protocol, report, README, decisions, RECENT, tracker 🔵, PR
 
 ## Next action
-Housekeeping done (phase files 32 + 33, tracker rows, this checkpoint; Phase 31 tagged). Next: design the
+Housekeeping done (phase files 32 + 33, tracker rows, this checkpoint; Phase 31 tagged). User then
+inserted a new Phase 33 (API Documentation Across Services, `phase-33-api-docs.md`) after this one;
+Auth Hardening is renumbered to Phase 34. Neither is in Phase 32's scope. Next: design the
 saga deadline and reconciliation (read `ecomdemo-app/.../order/internal/saga/` and the inventory
 and payment saga handlers first), then implement checklist item 1.
 

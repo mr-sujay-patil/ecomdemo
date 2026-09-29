@@ -1,13 +1,13 @@
-# Phase 33: Authentication Hardening
+# Phase 34: Authentication Hardening
 
 | | |
 |---|---|
 | **Stage** | Stage 9: Production Hardening |
 | **Technology** | Asymmetric JWT (RS256/ES256) + JWKS + login throttling |
-| **Branch** | `feature/phase-33-auth-hardening` |
-| **PR title** | `Phase 33: Authentication Hardening` |
-| **Requires** | `phase-32-complete` tag exists on `main` |
-| **Completion tag** | `phase-33-complete` |
+| **Branch** | `feature/phase-34-auth-hardening` |
+| **PR title** | `Phase 34: Authentication Hardening` |
+| **Requires** | `phase-33-complete` tag exists on `main` |
+| **Completion tag** | `phase-34-complete` |
 
 > Claude Code: implement **only** this file's scope. Follow `docs/process/execution-protocol.md` for the lifecycle, `docs/process/testing-protocol.md` before raising the PR, and `docs/process/git-workflow.md` for every Git action.
 
