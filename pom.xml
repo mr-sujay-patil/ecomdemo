@@ -108,6 +108,28 @@
 		<spring-ai.version>2.0.1</spring-ai.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
+		<!-- OWASP Dependency-Check (Phase 31), not managed by Boot; configured in pluginManagement. -->
+		<dependency-check.version>13.0.0</dependency-check.version>
+
+		<!--
+			SECURITY OVERRIDES (Phase 31). Versions Spring Boot 4.1.1 manages, raised by one patch
+			each because the image scan found published vulnerabilities in the ones it picks, and
+			4.1.1 is still the newest Boot release. Overriding a managed version through its property
+			is the mechanism Boot documents for exactly this; the fix is a patch release of the same
+			line, so no API changes.
+
+			  tomcat 11.0.24 -> 11.0.25         CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 (CRITICAL)
+			  jackson 3.1.5 -> 3.1.6            CVE-2026-68497 (HIGH)
+			  jackson 2.21.5 -> 2.21.6          CVE-2026-68497 (HIGH), the 2.x line other libraries bring
+
+			Remove each line when a Boot release manages that version or newer: an override left
+			behind would pin the project to an OLD version the day Boot moves past it.
+			docs/security.md lists every finding and what was done about it.
+		-->
+		<tomcat.version>11.0.25</tomcat.version>
+		<jackson-bom.version>3.1.6</jackson-bom.version>
+		<jackson-2-bom.version>2.21.6</jackson-2-bom.version>
+
 		<!--
 			Empty defaults. The JaCoCo executions below fill these in, and Surefire and Failsafe
 			read them with @{...} late evaluation. Without a default here, a build run with
@@ -358,6 +380,48 @@
 					<groupId>org.sonarsource.scanner.maven</groupId>
 					<artifactId>sonar-maven-plugin</artifactId>
 					<version>${sonar-maven-plugin.version}</version>
+				</plugin>
+
+				<!--
+				OWASP Dependency-Check (Phase 31): every jar the services ship, matched against the
+				National Vulnerability Database. Like Sonar, not bound to a phase - it needs the NVD
+				data (a download, and an API key) and is run on purpose:
+
+				    NVD_API_KEY=... ./mvnw org.owasp:dependency-check-maven:aggregate
+
+				`aggregate` scans the whole reactor once and writes ONE report under target/
+				(dependency-check-report.html) rather than one per module.
+
+				  failBuildOnCVSS 7      HIGH and CRITICAL fail (CVSS v3: 7.0-8.9 high, 9.0+ critical)
+				  skipTestScope          test-only jars (Testcontainers, WireMock...) never reach an
+				                         image; the image scan (Trivy) sees what really ships
+				  suppressionFile        a finding that is not a real risk HERE is written down with
+				                         its reason and an expiry, never silently ignored
+				  ossIndexAnalyzerEnabled  off: Sonatype OSS Index now needs an account of its own;
+				                         the NVD plus the GitHub-advisory data Trivy uses are two
+				                         independent sources already
+				  the Node/.NET/Retire.js analyzers are off because there is no JavaScript or .NET here,
+				  and each one would otherwise try to download data of its own
+			-->
+				<plugin>
+					<groupId>org.owasp</groupId>
+					<artifactId>dependency-check-maven</artifactId>
+					<version>${dependency-check.version}</version>
+					<configuration>
+						<nvdApiKeyEnvironmentVariable>NVD_API_KEY</nvdApiKeyEnvironmentVariable>
+						<failBuildOnCVSS>7</failBuildOnCVSS>
+						<skipTestScope>true</skipTestScope>
+						<suppressionFile>${maven.multiModuleProjectDirectory}/dependency-check-suppressions.xml</suppressionFile>
+						<ossIndexAnalyzerEnabled>false</ossIndexAnalyzerEnabled>
+						<nodeAnalyzerEnabled>false</nodeAnalyzerEnabled>
+						<nodeAuditAnalyzerEnabled>false</nodeAuditAnalyzerEnabled>
+						<retireJsAnalyzerEnabled>false</retireJsAnalyzerEnabled>
+						<assemblyAnalyzerEnabled>false</assemblyAnalyzerEnabled>
+						<formats>
+							<format>HTML</format>
+							<format>JSON</format>
+						</formats>
+					</configuration>
 				</plugin>
 				</plugins>
 			</pluginManagement>
