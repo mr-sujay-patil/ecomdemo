@@ -140,4 +140,59 @@ class PaymentServiceTest {
         assertThat(repository.findAll().stream().filter(p -> p.getOrderId() == orderId)).hasSize(1);
         assertThat(outboxRowsFor(orderId)).hasSize(1);
     }
+
+    // --- Phase 32: settling an order for the saga deadline -----------------------------------------
+
+    @Test
+    @DisplayName("settling an order nobody paid for VOIDS it and announces PaymentFailed")
+    void settleVoidsAnUnpaidOrder() throws Exception {
+        long orderId = ORDER_IDS.incrementAndGet();
+
+        Payment settled = payments.settle(orderId, new BigDecimal("42.00"));
+
+        assertThat(settled.getStatus()).isEqualTo(Payment.Status.VOIDED);
+        assertThat(settled.getReason()).isEqualTo(PaymentService.VOID_REASON);
+        OutboxEvent row = outboxRowsFor(orderId).get(0);
+        assertThat(row.getEventType()).isEqualTo("PaymentFailedEvent");
+        assertThat(JacksonUtils.enhancedObjectMapper()
+                        .readValue(row.getPayload(), PaymentFailedEvent.class).reason())
+                .isEqualTo(PaymentService.VOID_REASON);
+    }
+
+    @Test
+    @DisplayName("settling an order that WAS paid reports the payment and changes nothing")
+    void settleReportsAnExistingPayment() {
+        long orderId = ORDER_IDS.incrementAndGet();
+        payments.onStockReserved(reserved(orderId, "10.00"));
+
+        Payment settled = payments.settle(orderId, new BigDecimal("10.00"));
+
+        assertThat(settled.getStatus()).isEqualTo(Payment.Status.COMPLETED);
+        assertThat(outboxRowsFor(orderId)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("settling twice gives the same answer and voids once")
+    void settleIsIdempotent() {
+        long orderId = ORDER_IDS.incrementAndGet();
+
+        Payment first = payments.settle(orderId, new BigDecimal("5.00"));
+        Payment second = payments.settle(orderId, new BigDecimal("5.00"));
+
+        assertThat(second.getId()).isEqualTo(first.getId());
+        assertThat(outboxRowsFor(orderId)).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("THE FENCE: a StockReserved arriving after the void charges nothing")
+    void aLateStockReservedCannotChargeAVoidedOrder() {
+        long orderId = ORDER_IDS.incrementAndGet();
+        payments.settle(orderId, new BigDecimal("10.00"));
+
+        payments.onStockReserved(reserved(orderId, "10.00"));
+
+        assertThat(repository.findByOrderId(orderId).orElseThrow().getStatus())
+                .isEqualTo(Payment.Status.VOIDED);
+        assertThat(outboxRowsFor(orderId)).hasSize(1);
+    }
 }

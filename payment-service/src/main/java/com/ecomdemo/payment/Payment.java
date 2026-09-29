@@ -22,10 +22,15 @@ import java.time.Instant;
 @Table(name = "payment")
 public class Payment {
 
-    /** A mock payment has two outcomes; a real one would add pending, refunded, disputed... */
+    /**
+     * A mock payment has two outcomes of its own; a real one would add pending, refunded,
+     * disputed... VOIDED (Phase 32) is not an outcome of charging: it records that the saga's
+     * deadline closed the order before any charge was attempted, so none ever will be.
+     */
     public enum Status {
         COMPLETED,
-        FAILED
+        FAILED,
+        VOIDED
     }
 
     @Id
@@ -66,6 +71,10 @@ public class Payment {
 
     static Payment failed(Long orderId, BigDecimal amount, String reason) {
         return new Payment(orderId, amount, Status.FAILED, reason);
+    }
+
+    static Payment voided(Long orderId, BigDecimal amount, String reason) {
+        return new Payment(orderId, amount, Status.VOIDED, reason);
     }
 
     public Long getId() {
