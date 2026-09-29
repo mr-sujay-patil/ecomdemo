@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
  * scrape would be database load created by looking.
  */
 @Component
-class SagaMetrics {
+public class SagaMetrics {
 
     static final String OVERDUE = "saga.orders.overdue";
     static final String RECONCILIATIONS = "saga.reconciliations";
@@ -33,7 +33,8 @@ class SagaMetrics {
     private final AtomicLong overdue = new AtomicLong();
     private final Map<SagaReconciler.Outcome, Counter> outcomes = new EnumMap<>(SagaReconciler.Outcome.class);
 
-    SagaMetrics(MeterRegistry registry) {
+    /** Public so the monitoring tests can build the real meters into their own registry. */
+    public SagaMetrics(MeterRegistry registry) {
         Gauge.builder(OVERDUE, overdue, AtomicLong::get)
                 .description("PENDING orders older than the saga deadline, after the last sweep")
                 .register(registry);

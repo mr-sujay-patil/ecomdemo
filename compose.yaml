@@ -183,6 +183,13 @@ services:
       CATALOG_BASE_URL: http://catalog-service:8081
       CUSTOMER_BASE_URL: http://customer-service:8083
 
+      # Phase 32: the saga deadline asks payment-service to settle an overdue order (and
+      # inventory-service, above, to close it). ORDER_SAGA_DEADLINE is how long an order may stay
+      # PENDING first; the smoke test's dead-letter scenario waits for it, so it is not made longer
+      # here without reason.
+      PAYMENT_BASE_URL: http://payment-service:8086
+      ORDER_SAGA_DEADLINE: ${ORDER_SAGA_DEADLINE:-1m}
+
     volumes:
       # The batch working directory (Phase 14). A named volume rather than container-local space,
       # because a restart of a failed import re-reads the file it was given BY PATH: if the
