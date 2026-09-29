@@ -1,6 +1,6 @@
 # 🧪 Testing & Acceptance Protocol
 
-Applies to every phase.
+Applies to every phase and every fix. A fix runs steps 1, 3, 4, 7 and 8 in full, adds the **regression test** that reproduced the defect (it must fail without the fix), and reports results in its PR description instead of a `docs/test-reports/` file.
 
 A phase is **not done** until all of this passes on the feature branch before the PR is raised, and the regression and smoke test pass again on `main` after the merge.
 

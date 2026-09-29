@@ -1,6 +1,6 @@
 # ⚠️ Mandatory Git Workflow
 
-Applies to every phase, without exception.
+Applies to every phase and every fix, without exception. A fix (`fix/ki-XXX-<slug>`, for a defect in `docs/KNOWN_ISSUES.md`) follows the same rules as a phase; where this file says "phase", read "phase or fix". Its lifecycle is in `execution-protocol.md`, section 8.
 
 These rules are **non-negotiable**. Any AI assistant (Claude Code) or developer working on this project must follow them exactly. If any rule cannot be followed, **STOP and ask the user**. Never work around a rule.
 
@@ -21,7 +21,8 @@ These rules are **non-negotiable**. Any AI assistant (Claude Code) or developer 
 - **Never merge the PR yourself.** Claude Code raises the PR and **stops**. The user reviews and merges it on GitHub. Claude Code may merge only if the user explicitly says so in chat for that specific PR.
 - **Merge method: "Create a merge commit" only.** Do not use squash or rebase merging. A merge commit preserves the branch's commits in `main`, which keeps the verification checks below reliable.
 - **Never rebase or rewrite history** on a branch after its PR is opened.
-- **One phase = one branch = one PR.** Do not mix work from two phases.
+- **One phase or fix = one branch = one PR.** Do not mix work from two phases, two fixes, or a phase and a fix.
+- **One open PR at a time.** A fix waits until the current phase is merged and verified, and the next phase waits for the fix, unless the user says to interrupt for a High severity defect.
 - **Do not start the next phase on your own.** The next phase starts only when the user explicitly says to continue **and** the merge verification of the current phase passes.
 
 ## Branch and Naming Conventions
@@ -30,6 +31,10 @@ These rules are **non-negotiable**. Any AI assistant (Claude Code) or developer 
 |---|---|---|
 | Feature branch | `feature/phase-XX-<short-name>` | `feature/phase-06-transactions` |
 | Fix on an open phase | commit to the same feature branch | n/a |
+| Fix branch (known defect) | `fix/ki-XXX-<short-name>` | `fix/ki-001-openapi-docs` |
+| Chore branch (process or docs, only when the user asks) | `chore/<short-name>` | `chore/fix-track` |
+| Fix PR title | `Fix KI-XXX: <summary>` | `Fix KI-001: Restore Swagger UI and OpenAPI docs` |
+| Fix completion tag | `ki-XXX-fixed` (on `main`, after verification) | `ki-001-fixed` |
 | Commit messages | Conventional Commits | `feat(order): make checkout atomic` |
 | PR title | `Phase XX: <Technology>` | `Phase 06: Transactions & Concurrency` |
 | Completion tag | `phase-XX-complete` (on `main`, after verification) | `phase-06-complete` |
@@ -109,7 +114,7 @@ Then **STOP** and give the user the PR URL.
 - [ ] The feature branch is an ancestor of `main` (`merge-base --is-ancestor` passes).
 - [ ] No commits on the feature branch are missing from `main`.
 - [ ] No file differences between the feature branch and `main`.
-- [ ] Every "What you'll implement" item of the phase is present in `main`.
+- [ ] Every "What you'll implement" item of the phase (for a fix: every scope item, and the regression test) is present in `main`.
 - [ ] `./mvnw clean verify` passes on `main` (and CI is green once Phase 11 is done).
 - [ ] The feature branch still exists locally and on GitHub.
-- [ ] Tag `phase-XX-complete` is pushed.
+- [ ] Tag `phase-XX-complete` (for a fix: `ki-XXX-fixed`) is pushed.

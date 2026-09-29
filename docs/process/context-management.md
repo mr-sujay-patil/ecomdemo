@@ -11,6 +11,7 @@ Goal: every session starts small and resumes exactly where the last one stopped.
 | `docs/progress/CURRENT.md` | Every session start | Max ~60 lines |
 | `docs/progress/RECENT.md` | Every session start | 2 summaries, max ~30 lines each |
 | `docs/phases/phase-XX-*.md` | Current phase only | 1 file |
+| `docs/KNOWN_ISSUES.md` | On a fix: that issue's row and detail section only. When adding an issue: `grep` for duplicates first | On demand |
 | `docs/process/testing-protocol.md` | At the testing step | On demand |
 | `docs/process/git-workflow.md` | At pre-flight, PR, and verification | On demand |
 | `docs/decisions.md` | When touching an area with earlier decisions (search it with `grep`) | On demand |
@@ -20,7 +21,7 @@ Goal: every session starts small and resumes exactly where the last one stopped.
 
 ## `CURRENT.md`: the in-phase checkpoint
 
-- Tracks the current phase only. It is reset at every phase start (housekeeping commit).
+- Tracks the current phase or fix only. It is reset at every phase or fix start (housekeeping commit).
 - **Update it when:** the branch is cut, a checklist item is completed, tests are run, a decision is made, a blocker appears, and before every stop.
 - **Commit it** together with the related work (or as `chore(progress): checkpoint` when there is no other change). Push whenever a branch exists.
 - The **Next action** line must always be specific enough that a fresh session can continue without any conversation history. Example: "Implement `OrderAuditService` with `REQUIRES_NEW`, then write the concurrency test in `OrderConcurrencyIT`."
