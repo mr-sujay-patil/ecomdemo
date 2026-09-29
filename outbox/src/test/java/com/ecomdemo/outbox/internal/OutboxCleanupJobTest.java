@@ -35,7 +35,7 @@ class OutboxCleanupJobTest {
                 new OutboxCleanupJob(
                         outbox,
                         new OutboxProperties(
-                                Duration.ofSeconds(1), 100, Duration.ofDays(7), "0 0 3 * * *"));
+                                Duration.ofSeconds(1), 100, Duration.ofDays(7), "0 0 3 * * *", 20));
         when(outbox.deletePublishedBefore(any(Instant.class))).thenReturn(3);
 
         Instant before = Instant.now();
@@ -59,7 +59,7 @@ class OutboxCleanupJobTest {
                 new OutboxCleanupJob(
                         outbox,
                         new OutboxProperties(
-                                Duration.ofSeconds(1), 100, Duration.ofDays(30), "0 0 3 * * *"));
+                                Duration.ofSeconds(1), 100, Duration.ofDays(30), "0 0 3 * * *", 20));
         when(outbox.deletePublishedBefore(any(Instant.class))).thenReturn(0);
 
         job.sweep();

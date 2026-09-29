@@ -58,7 +58,7 @@ class OutboxBatchPublisherTest {
                 new OutboxBatchPublisher(
                         outbox,
                         sender,
-                        new OutboxProperties(Duration.ofSeconds(1), 10, Duration.ofDays(7), "-"),
+                        new OutboxProperties(Duration.ofSeconds(1), 10, Duration.ofDays(7), "-", 20),
                         new OutboxTracing(Tracer.NOOP, Propagator.NOOP),
                         OutboxRoutes.builder().route(SampleOrderEvent.class, TOPIC).build());
     }
