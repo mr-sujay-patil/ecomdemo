@@ -46,7 +46,8 @@ Every suppression records **why** and **until when**:
 - `.trivyignore.yaml`: `statement` and `expired_at`
 
 After the date the finding fails the build again, so a suppression can't quietly become permanent.
-Both files are empty today.
+Today there are two Dependency-Check suppressions, both false positives (below), and none for
+Trivy.
 
 ### Findings and what was done
 
@@ -55,14 +56,27 @@ Both files are empty today.
 | CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 | `tomcat-embed-core` 11.0.24 (7 images) | CRITICAL | Trivy | **Fixed**: `tomcat.version` 11.0.25 |
 | CVE-2026-68497 | `tools.jackson.core:jackson-databind` 3.1.5 (8 images) | HIGH | Trivy | **Fixed**: `jackson-bom.version` 3.1.6 |
 | CVE-2026-68497 | `com.fasterxml.jackson.core:jackson-databind` 2.21.5 (7 images) | HIGH | Trivy | **Fixed**: `jackson-2-bom.version` 2.21.6 |
-| Dependency-Check results | all modules | | Dependency-Check | **Pending**: needs the NVD API key (see the test report) |
+| CVE-2026-53914 (9.8) | `kotlin-stdlib` 2.3.21, `kotlin-stdlib-common` 1.9.10, `kotlin-reflect` 2.3.21 | CRITICAL | Dependency-Check | **Suppressed, false positive**: the CVE is in Kotlin's *build cache* (compiler tooling), and the CPE covers the whole product, so every Kotlin jar matches. Only the runtime libraries ship here (via OkHttp and the OpenAI client); Trivy doesn't flag them. Expires 2027-03-31 |
+| CVE-2026-18022 (8.8) | `com.pgvector:pgvector` 0.1.6 (Java client) | HIGH | Dependency-Check | **Suppressed, false positive**: the CVE is in the PostgreSQL *extension's* IVFFlat build, on 32-bit only. The jar has no index code, and the running extension was checked: 0.8.6 (fixed), HNSW index, 64-bit. Expires 2027-03-31 |
 
 All three overrides are for versions Spring Boot 4.1.1 (the newest release) manages. Each is one
 patch release in the same line, and each should be removed when a Boot release catches up. The
 comment in the root pom says so.
 
-After the fix, **all 8 images scan clean** at HIGH/CRITICAL, and the Alpine base had no
-HIGH/CRITICAL findings to begin with.
+After the fixes, **all 8 images scan clean** at HIGH/CRITICAL, and the Alpine base had no
+HIGH/CRITICAL findings to begin with. **Dependency-Check** covered 142 dependencies and passes
+with the two suppressions above.
+
+**Below the gate (MEDIUM, recorded, not failing the build)**, from Dependency-Check. These are
+revisited when the libraries update:
+
+| Finding | Where | CVSS |
+|---|---|---|
+| CVE-2026-89044 | `netty-transport` 4.2.17 | 6.5 |
+| CVE-2020-29582 | `kotlin-stdlib-common` 1.9.10 (the CPE range matches the whole product; the bug was fixed in 1.4.21) | 5.3 |
+| CVE-2026-54285 | `opentelemetry-api` 1.62.0 | 5.3 |
+| CVE-2026-39882, -40894, -41178, -44967, -54285 | `opentelemetry-proto` 1.10.0-alpha | 5.3 |
+| CVE-2026-41115 | `kafka-clients` 4.2.1 | 4.3 |
 
 ## 2. OWASP API Security Top 10 (2023) review
 
