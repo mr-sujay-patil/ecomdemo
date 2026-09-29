@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-29
 - **Phase:** 31 — Security Scanning (OWASP Dependency-Check + Trivy)
 - **Branch:** feature/phase-31-security-scanning (cut from `main` at `387d755`)
-- **Step:** PR_OPEN
+- **Step:** VERIFYING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** #48 https://github.com/mr-sujay-patil/ecomdemo/pull/48
-- **Waiting for user:** YES - review of the Phase 31 PR
+- **PR:** #48 merged (`2a3d74a`); follow-up #49 https://github.com/mr-sujay-patil/ecomdemo/pull/49
+- **Waiting for user:** YES - review of follow-up PR #49
 
 ## Merge verification before this phase — PASSED
 - Phase 30: PR #47 merged as `387d755` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
@@ -36,11 +36,17 @@
 - [x] Testing: verify 620/0/0/0; compose cold 404/0/0; k8s 360/0/7; report, README, decisions (7), RECENT (Phase 29 archived), tracker 🔵, PR #48
 
 ## Next action
-STOPPED at PR #48 (opened as a draft for the CI demonstration, now ready), waiting for the user. Do
-NOT merge unless the user says `approved, merge it` (`gh pr merge 48 --merge`). On `merged, continue`:
-merge verification (git checks, CI on main incl. both scans, `verify`, cold compose smoke on a COPY),
-tag `phase-31-complete`, then Phase 32 per ROADMAP. Note: commit 386cacb "placeholder" is the revert
-of 9065a72 (mistaken --amend, explained in 9484507 and the test report).
+Phase 31 merge verification is INCOMPLETE: git checks PASS (PR #48 = `2a3d74a`), `verify` on main
+620/0/0/0, cold compose smoke 404/0/0, CI build + Trivy on main green, but dependency-scan on main
+stalled (no cache on main; 80+ min, then a rerun 29+ min) and was cancelled on the user's
+instruction. Fix = follow-up PR #49 (nvd-data.yml + split dependency-scan steps, timeout, no -q).
+STOPPED waiting for the user to review #49. Do NOT merge without `approved, merge it`.
+After #49 merges: run the `NVD data` workflow once (`gh workflow run nvd-data.yml`) to seed main's
+cache, then re-verify main (CI all green incl. both scans, `verify`, cold smoke on a COPY), tag
+`phase-31-complete`. THEN Phase 32 (user APPROVED phases 32 + 33; drafts in the session were at
+/tmp/claude-1000/drafts - if lost, rewrite from the approved scope: 32 = saga timeouts +
+reconciliation + DLT replay + stuck-order metric; 33 = asymmetric JWT/JWKS + scoped service identity
++ login throttling). Housekeeping commit on the phase-32 branch adds both phase files + tracker rows.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
