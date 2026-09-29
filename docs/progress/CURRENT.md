@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-29
 - **Phase:** 30 — Performance Testing (Gatling)
 - **Branch:** feature/phase-30-gatling (cut from `main` at `9b0912f`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -40,16 +40,22 @@
 ## Checklist (from the phase file's "What you'll implement")
 - [x] Browse, checkout, and mixed simulations (Gatling Java DSL) - `475b819`, harness checked (browse 5/s, checkout 3/s: 0 KO)
 - [x] Ramp, steady, and spike load profiles (`PERF_PROFILE`; runner `scripts/perf-test.sh`, results TSV)
-- [ ] Comparisons with and without the cache and with different pool sizes
-- [ ] Findings in `docs/performance.md`
-- [ ] Done when: at least one bottleneck found, fixed, and documented (before/after numbers)
+- [x] Comparisons with and without the cache and with different pool sizes (`scripts/perf-compare.sh`, compose knobs)
+- [x] Findings in `docs/performance.md` (raw runs: `docs/test-reports/phase-30-perf-results.tsv`)
+- [x] Done when: bottleneck = outbox relay (`8204022`): steady 50/s settle p95 25.9 s -> 3.0 s
 - [ ] Testing protocol, test report (Gatling results), README, decisions, RECENT, tracker 🔵, PR
 
+## Key results (details in docs/performance.md)
+- Outbox fix: checkout steady 50/s settle p50/p95 13.0/25.9 s -> 2.5/3.0 s; ramp to 100/s 594 -> 0
+  unconfirmed. Cache off: same latency (gateway-bound) but +2.5 cores backend/DB. Pool 2 collapses,
+  5/10/30 equal. Mixed spike (3000 in 10 s) 0 KO; accidental 300 checkouts/s = pool exhaustion.
+- Simulation bug found+fixed (`3b8ede8`): mixed gave both scenarios the full spike.
+
 ## Next action
-Explore: ramp browse and checkout to find the knee (watch Grafana/Prometheus: Hikari pending, CPU per
-container, Kafka lag). Early clue: orders take ~1.5 s to settle even at 3/s (fixed delay in the saga?
-check outbox poll interval). Then cache on/off and pool-size knobs (compose env with today's defaults)
-+ `scripts/perf-compare.sh`. Keep raw results in performance-tests/target/perf-results.tsv.
+Testing protocol: full `./mvnw clean verify`; cold compose (down -v, --build, rm .smoke-state)
+smoke on a COPY; k8s in place (images rebuilt: app, catalog, inventory, payment; check how Phase 29
+did it in docs/test-reports/phase-29.md). Then test report `docs/test-reports/phase-30.md`, README,
+decisions.md, RECENT (archive Phase 28), tracker 🔵, PR.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
