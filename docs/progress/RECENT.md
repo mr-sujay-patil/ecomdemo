@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 30: Performance Testing (tag: phase-30-complete, PR #TBD)
+## Phase 30: Performance Testing (tag: phase-30-complete, PR #47)
 **What exists now:** Gatling load tests in `performance-tests/` (own pom, NO Boot parent, NOT in the
 reactor; CI only test-compiles it): Browse, Checkout (cart -> order -> poll status to CONFIRMED),
 Mixed (80/20) x ramp/steady/spike, all through the gateway. The outbox relay now drains while

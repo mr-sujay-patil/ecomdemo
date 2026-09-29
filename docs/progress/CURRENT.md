@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-29
 - **Phase:** 30 — Performance Testing (Gatling)
 - **Branch:** feature/phase-30-gatling (cut from `main` at `9b0912f`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #47 https://github.com/mr-sujay-patil/ecomdemo/pull/47
+- **Waiting for user:** YES - review of the Phase 30 PR
 
 ## Merge verification before this phase — PASSED
 - Phase 29: PR #46 merged as `9b0912f` (merge commit, 2 parents). 0 missing commits, 0 diffs, branch alive
@@ -43,7 +43,7 @@
 - [x] Comparisons with and without the cache and with different pool sizes (`scripts/perf-compare.sh`, compose knobs)
 - [x] Findings in `docs/performance.md` (raw runs: `docs/test-reports/phase-30-perf-results.tsv`)
 - [x] Done when: bottleneck = outbox relay (`8204022`): steady 50/s settle p95 25.9 s -> 3.0 s
-- [ ] Testing protocol, test report (Gatling results), README, decisions, RECENT, tracker 🔵, PR
+- [x] Testing protocol: verify 616/0/0/0; compose cold smoke 404/0/0; k8s 360/0/7; Gatling acceptance 0 KO; report, README, decisions (7), RECENT (Phase 28 archived), tracker 🔵, PR #47
 
 ## Key results (details in docs/performance.md)
 - Outbox fix: checkout steady 50/s settle p50/p95 13.0/25.9 s -> 2.5/3.0 s; ramp to 100/s 594 -> 0
@@ -52,10 +52,11 @@
 - Simulation bug found+fixed (`3b8ede8`): mixed gave both scenarios the full spike.
 
 ## Next action
-Testing protocol: full `./mvnw clean verify`; cold compose (down -v, --build, rm .smoke-state)
-smoke on a COPY; k8s in place (images rebuilt: app, catalog, inventory, payment; check how Phase 29
-did it in docs/test-reports/phase-29.md). Then test report `docs/test-reports/phase-30.md`, README,
-decisions.md, RECENT (archive Phase 28), tracker 🔵, PR.
+STOPPED at PR #47, waiting for the user. Do NOT merge unless the user says `approved, merge it`
+(`gh pr merge 47 --merge`). On `merged, continue`: merge verification (git checks, CI on main,
+`verify`, cold compose smoke on a COPY), tag `phase-30-complete`, then Phase 31 per ROADMAP.
+Stack state: compose (user's .env) and kind are running with the Phase 30 build; perf users and
+products exist in the compose DBs.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack.
