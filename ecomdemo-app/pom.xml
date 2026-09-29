@@ -21,6 +21,13 @@
 		honest moment to decide that is when the service exists.
 	-->
 	<dependencies>
+		<!-- TEMPORARY, Phase 31: a KNOWN-VULNERABLE library (Text4Shell, CVE-2022-42889, CVSS 9.8)
+		     added only to prove that CI's scans block it. Reverted by the next commit. -->
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-text</artifactId>
+			<version>1.9</version>
+		</dependency>
 		<dependency>
 			<groupId>com.ecomdemo</groupId>
 			<artifactId>ecomdemo-common</artifactId>
