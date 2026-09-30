@@ -3559,13 +3559,15 @@ SCOPED_JSON="$(ctr_exec "$GATEWAY_CONTAINER" sh -c 'wget -qO- \
 check "the gateway gets a service token scoped to catalog:read only" "catalog:read" \
     "$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['scope'])" "$SCOPED_JSON" 2>/dev/null)"
 SCOPED_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "$SCOPED_JSON" 2>/dev/null)"
-# in_gateway_status <token> <url> [json-body] -> the HTTP status, as BusyBox wget reports it
+# in_gateway_status <token> <url> [json-body] -> the HTTP status, as BusyBox wget reports it. On an
+# error it ALSO prints "wget: server returned error: HTTP/1.1 403 ...", so the code is taken from
+# after "HTTP/x.x" rather than from a fixed word position.
 in_gateway_status() {
     ctr_exec "$GATEWAY_CONTAINER" sh -c 'if [ -n "$3" ]; then
             wget -q -S -O /dev/null --header "Authorization: Bearer $1" --header "Content-Type: application/json" --post-data "$3" "$2"
         else
             wget -q -S -O /dev/null --header "Authorization: Bearer $1" "$2"
-        fi 2>&1 | awk "/HTTP\\//{print \$2}" | tail -1' _ "$1" "$2" "${3:-}" 2>/dev/null
+        fi 2>&1 | sed -n "s/.*HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p" | tail -1' _ "$1" "$2" "${3:-}" 2>/dev/null
 }
 check "with it, the gateway may read the catalogue (200)" "200" \
     "$(in_gateway_status "$SCOPED_TOKEN" http://catalog-service:8081/api/products/1)"
