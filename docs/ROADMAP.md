@@ -103,4 +103,4 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 30 | [Performance Testing](phases/phase-30-gatling.md) | Gatling | `feature/phase-30-gatling` | ✅ |
 | 31 | [Security Scanning](phases/phase-31-security-scanning.md) | OWASP Dependency-Check + Trivy | `feature/phase-31-security-scanning` | ✅ |
 | 32 | [Saga Timeouts and Reconciliation](phases/phase-32-saga-timeouts.md) | Scheduled reconciliation + Kafka dead-letter handling | `feature/phase-32-saga-timeouts` | ✅ |
-| 33 | [Authentication Hardening](phases/phase-33-auth-hardening.md) | Asymmetric JWT + JWKS + login throttling | `feature/phase-33-auth-hardening` | 🟡 |
+| 33 | [Authentication Hardening](phases/phase-33-auth-hardening.md) | Asymmetric JWT + JWKS + login throttling | `feature/phase-33-auth-hardening` | 🔵 |
