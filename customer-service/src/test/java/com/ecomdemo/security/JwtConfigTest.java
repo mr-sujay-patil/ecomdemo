@@ -1,150 +1,193 @@
 package com.ecomdemo.security;
 
-import com.ecomdemo.shared.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ecomdemo.auth.TokenService;
 import com.ecomdemo.customer.Role;
+import com.ecomdemo.jwt.JwtKeyConfig;
+import com.ecomdemo.jwt.JwtProperties;
+import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.support.TestData;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
-import javax.crypto.SecretKey;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import com.ecomdemo.jwt.JwtProperties;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.security.oauth2.jwt.JwtValidationException;
 
 /**
- * Guards how the signing key is obtained, and proves a token this application mints is one it
- * will accept back.
+ * Guards how customer-service gets its signing keys, and proves a token it signs is one it accepts
+ * back (Phase 33: RS256, a {@code kid}, several published keys).
  *
- * <p>{@link ApplicationContextRunner} builds a tiny context containing only {@link JwtConfig},
- * so these are configuration assertions: nothing starts a web server or a database. It is the
- * same tool {@code DatasourceConfigurationTest} uses for the profile settings.
- *
- * <p>Phase 20b moved the key and the decoder to {@code common}, leaving only the encoder here, and
- * this test deliberately did NOT follow them. What it asserts is the round trip — signed here,
- * accepted here — and that claim spans both halves. It still passes because {@code JwtConfig}
- * imports {@code JwtKeyConfig}, which is the other thing worth guarding: the day that import is
- * dropped, the login endpoint starts minting tokens nothing can verify, and this test is what says
- * so.
+ * <p>{@link ApplicationContextRunner} builds a tiny context with only {@link JwtConfig} and the
+ * shared {@link JwtKeyConfig} (which supplies {@link JwtProperties}), so these are configuration
+ * assertions: nothing starts a web server or a database.
  */
 class JwtConfigTest {
 
-    private static final String VALID_KEY = "a-test-signing-key-of-32-bytes!!";
+    private static final String KEY_1 = pkcs8();
+    private static final String KEY_2 = pkcs8();
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(JwtConfig.class)
+            .withUserConfiguration(JwtConfig.class, JwtKeyConfig.class)
             .withPropertyValues("ecomdemo.jwt.issuer=ecomdemo", "ecomdemo.jwt.expiry=15m");
 
+    /** A fresh RSA private key as PKCS#8 base64 on one line: what JWT_SIGNING_KEY holds. */
+    private static String pkcs8() {
+        try {
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+            generator.initialize(2048);
+            return Base64.getEncoder().encodeToString(generator.generateKeyPair().getPrivate().getEncoded());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static String loginToken(org.springframework.context.ApplicationContext context) {
+        TokenService tokens = new TokenService(context.getBean(JwtEncoder.class),
+                context.getBean(JwtProperties.class), context.getBean(SigningKeys.class));
+        return tokens.issueFor(new AppUserDetails(TestData.user(7L, "asha", Role.CUSTOMER))).accessToken();
+    }
+
     @Test
-    @DisplayName("a token this application signs is one it accepts back")
+    @DisplayName("a token this service signs is one it accepts back, and it names its key")
     void roundTripsItsOwnToken() {
-        runner.withPropertyValues("ecomdemo.jwt.secret=" + VALID_KEY).run(context -> {
-            assertThat(context).hasNotFailed();
-            TokenService tokenService = new TokenService(
-                    context.getBean(JwtEncoder.class), context.getBean(JwtProperties.class));
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1)
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    String token = loginToken(context);
 
-            String token = tokenService
-                    .issueFor(new AppUserDetails(TestData.user(7L, "asha", Role.CUSTOMER)))
-                    .accessToken();
+                    // Encoder, decoder and issuer validator agree; a mismatch anywhere among them
+                    // would otherwise only show up as "every request is 401" at runtime.
+                    var decoded = context.getBean(JwtDecoder.class).decode(token);
+                    assertThat(decoded.getSubject()).isEqualTo("asha");
+                    assertThat(decoded.getClaimAsString("iss")).isEqualTo("ecomdemo");
+                    assertThat(decoded.getHeaders()).containsEntry("alg", "RS256").containsEntry("kid", "key-1");
+                });
+    }
 
-            // This is the assertion that matters most in the file: it proves the encoder, the
-            // decoder and the issuer validator agree. A mismatch anywhere among them would
-            // otherwise only show up as "every request is 401" at runtime.
-            var decoded = context.getBean(JwtDecoder.class).decode(token);
-            assertThat(decoded.getSubject()).isEqualTo("asha");
-            assertThat(decoded.getClaimAsString("iss")).isEqualTo("ecomdemo");
-        });
+    @Test
+    @DisplayName("the published key set holds public halves only")
+    @SuppressWarnings("unchecked")
+    void publishesOnlyPublicKeys() {
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1)
+                .run(context -> {
+                    List<Map<String, Object>> keys = (List<Map<String, Object>>)
+                            context.getBean(SigningKeys.class).publicJwkSet().get("keys");
+
+                    assertThat(keys).singleElement().satisfies(key -> {
+                        assertThat(key).containsEntry("kid", "key-1").containsEntry("kty", "RSA")
+                                .containsKeys("n", "e");
+                        // "d" is the private exponent: publishing it would hand out the signing key.
+                        assertThat(key).doesNotContainKeys("d", "p", "q", "dp", "dq", "qi");
+                    });
+                });
+    }
+
+    @Test
+    @DisplayName("during a rotation both keys are published, the new one signs, and old tokens still verify")
+    void rotationKeepsOldTokensValid() {
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1)
+                .run(before -> {
+                    String oldToken = loginToken(before);
+
+                    runner.withPropertyValues(
+                                    "ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1,
+                                    "ecomdemo.auth.keys[1].id=key-2", "ecomdemo.auth.keys[1].private-key=" + KEY_2,
+                                    "ecomdemo.auth.active-key-id=key-2")
+                            .run(after -> {
+                                String newToken = loginToken(after);
+                                JwtDecoder decoder = after.getBean(JwtDecoder.class);
+
+                                assertThat(decoder.decode(newToken).getHeaders()).containsEntry("kid", "key-2");
+                                assertThat(decoder.decode(oldToken).getSubject())
+                                        .as("a token signed before the rotation").isEqualTo("asha");
+                            });
+                });
     }
 
     @Test
     @DisplayName("a token from another issuer is rejected, even signed with our key")
     void refusesAForeignIssuer() {
-        runner.withPropertyValues("ecomdemo.jwt.secret=" + VALID_KEY).run(context -> {
-            // Given a token signed with THIS key but claiming to come from somewhere else — the
-            // shape of a leaked-key incident, or of a token borrowed from a sibling environment
-            TokenService elsewhere = new TokenService(
-                    context.getBean(JwtEncoder.class),
-                    new JwtProperties(VALID_KEY, "some-other-system", Duration.ofMinutes(15)));
-            String token = elsewhere
-                    .issueFor(new AppUserDetails(TestData.user(2L, "admin", Role.ADMIN)))
-                    .accessToken();
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1)
+                .run(context -> {
+                    TokenService elsewhere = new TokenService(context.getBean(JwtEncoder.class),
+                            new JwtProperties("some-other-system", Duration.ofMinutes(15), null),
+                            context.getBean(SigningKeys.class));
+                    String token = elsewhere.issueFor(new AppUserDetails(TestData.user(2L, "admin", Role.ADMIN)))
+                            .accessToken();
 
-            // Then: a valid signature is not on its own a reason to trust a token.
-            // The bean is looked up outside the lambda so that only decode() can throw.
-            JwtDecoder decoder = context.getBean(JwtDecoder.class);
-            assertThatThrownBy(() -> decoder.decode(token))
-                    .isInstanceOf(JwtValidationException.class);
-        });
+                    // A valid signature is not on its own a reason to trust a token.
+                    JwtDecoder decoder = context.getBean(JwtDecoder.class);
+                    assertThatThrownBy(() -> decoder.decode(token)).isInstanceOf(JwtValidationException.class);
+                });
     }
 
     @Test
     @DisplayName("an expired token is rejected")
     void refusesAnExpiredToken() {
-        runner.withPropertyValues("ecomdemo.jwt.secret=" + VALID_KEY).run(context -> {
-            // Given a correctly signed token whose whole lifetime is in the past. It is built
-            // here rather than through TokenService because that class can only ever mint a
-            // token starting now — and waiting for a real one to expire would mean waiting out
-            // the decoder's clock-skew allowance as well, which is a minute the suite should not
-            // spend. Two hours ago is comfortably beyond any skew.
-            Instant issuedAt = Instant.now().minus(Duration.ofHours(2));
-            JwtClaimsSet expired = JwtClaimsSet.builder()
-                    .issuer("ecomdemo")
-                    .issuedAt(issuedAt)
-                    .expiresAt(issuedAt.plus(Duration.ofMinutes(15)))
-                    .subject("customer")
-                    .claim(TokenClaims.USER_ID, 1L)
-                    .claim(TokenClaims.ROLES, List.of("CUSTOMER"))
-                    .build();
-            String token = context.getBean(JwtEncoder.class)
-                    .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), expired))
-                    .getTokenValue();
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1)
+                .run(context -> {
+                    // Two hours ago, comfortably beyond the decoder's one-minute clock-skew allowance.
+                    Instant issuedAt = Instant.now().minus(Duration.ofHours(2));
+                    JwtClaimsSet expired = JwtClaimsSet.builder()
+                            .issuer("ecomdemo").issuedAt(issuedAt).expiresAt(issuedAt.plus(Duration.ofMinutes(15)))
+                            .subject("customer").claim(TokenClaims.USER_ID, 1L)
+                            .claim(TokenClaims.ROLES, List.of("CUSTOMER")).build();
+                    JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId("key-1").build();
+                    String token = context.getBean(JwtEncoder.class)
+                            .encode(JwtEncoderParameters.from(header, expired)).getTokenValue();
 
-            // Then: expiry is checked by the decoder, not by anything we wrote — and because
-            // nothing consults a database, it is the ONLY thing that ever takes a token out of
-            // circulation. A signature that verifies is not enough.
-            JwtDecoder decoder = context.getBean(JwtDecoder.class);
-            assertThatThrownBy(() -> decoder.decode(token))
-                    .isInstanceOf(JwtValidationException.class)
-                    .hasMessageContaining("exp");
-        });
+                    // Expiry is the ONLY thing that takes a token out of circulation.
+                    JwtDecoder decoder = context.getBean(JwtDecoder.class);
+                    assertThatThrownBy(() -> decoder.decode(token))
+                            .isInstanceOf(JwtValidationException.class)
+                            .hasMessageContaining("exp");
+                });
     }
 
     @Test
-    @DisplayName("a key shorter than 256 bits is refused at startup, not padded")
-    void refusesAWeakKey() {
-        runner.withPropertyValues("ecomdemo.jwt.secret=too-short").run(context -> {
-            // Failing to start is the correct outcome. Quietly padding or hashing a short secret
-            // would leave an application running with a weaker signature than its configuration
-            // claims, and nothing would ever say so.
-            assertThat(context).hasFailed();
-            assertThat(context.getStartupFailure())
-                    .rootCause()
-                    .hasMessageContaining("at least 32");
-        });
+    @DisplayName("a malformed key is refused at startup, with the command that makes a good one")
+    void refusesAMalformedKey() {
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=not-a-key")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasStackTraceContaining("openssl genpkey");
+                });
     }
 
     @Test
-    @DisplayName("with no key configured the application still starts, on a generated one")
+    @DisplayName("an active key id that names no configured key is refused at startup")
+    void refusesAnUnknownActiveKey() {
+        runner.withPropertyValues("ecomdemo.auth.keys[0].id=key-1", "ecomdemo.auth.keys[0].private-key=" + KEY_1,
+                        "ecomdemo.auth.active-key-id=key-9")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).rootCause().hasMessageContaining("key-9");
+                });
+    }
+
+    @Test
+    @DisplayName("with no key configured the service still starts, on a generated key")
     void generatesAKeyWhenNoneIsSet() {
-        runner.withPropertyValues("ecomdemo.jwt.secret=").run(context -> {
-            // No manual setup step, and no secret in Git. The cost is that this key dies with the
-            // process, so every token issued before a restart stops working after it — JwtConfig
-            // logs a WARN saying exactly that.
+        runner.run(context -> {
+            // No setup step and no key in Git. SigningKeys logs a WARN that this key dies with
+            // the process, so every token issued before a restart stops working after it.
             assertThat(context).hasNotFailed();
-            SecretKey key = context.getBean(SecretKey.class);
-            assertThat(key.getEncoded()).hasSize(32);
-            assertThat(key.getAlgorithm()).isEqualTo("HmacSHA256");
+            assertThat(context.getBean(SigningKeys.class).active().getKeyID()).startsWith("ephemeral-");
+            assertThat(context.getBean(JwtDecoder.class).decode(loginToken(context)).getSubject()).isEqualTo("asha");
         });
     }
 }

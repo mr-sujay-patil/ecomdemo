@@ -1,5 +1,10 @@
 package com.ecomdemo.auth;
 
+import com.ecomdemo.security.SigningKeyProperties;
+import com.ecomdemo.security.SigningKeys;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import java.util.List;
+
 import com.ecomdemo.shared.TokenClaims;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -9,16 +14,12 @@ import com.ecomdemo.security.AppUserDetails;
 import com.ecomdemo.security.JwtConfig;
 import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.support.TestData;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
@@ -28,24 +29,29 @@ import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
  *
  * <p>A real encoder is used rather than a mock. Mocking it would leave nothing worth asserting —
  * the whole value of this class is the claim set it builds, and the only honest way to check
- * that is to sign a token and read it back. The key here is a fixed 32-byte string, so the test
- * is deterministic and nothing about it depends on configuration.
+ * that is to sign a token and read it back. The key is an RSA pair generated for the run (Phase 33:
+ * RS256), and verification uses only its PUBLIC half, as every other service does.
  */
 class TokenServiceTest {
 
-    private static final String KEY_TEXT = "a-test-signing-key-of-32-bytes!!";
-
-    private static final SecretKey KEY =
-            new SecretKeySpec(KEY_TEXT.getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+    /** A generated RSA key pair, as customer-service uses when no key is configured. */
+    private static final SigningKeys KEYS = SigningKeys.from(new SigningKeyProperties(List.of(), null));
 
     private static final JwtProperties PROPERTIES =
-            new JwtProperties(KEY_TEXT, "ecomdemo-test", Duration.ofMinutes(15));
+            new JwtProperties("ecomdemo-test", Duration.ofMinutes(15), null);
 
     private final TokenService tokenService =
-            new TokenService(new NimbusJwtEncoder(new ImmutableSecret<>(KEY)), PROPERTIES);
+            new TokenService(new NimbusJwtEncoder(new ImmutableJWKSet<>(KEYS.all())), PROPERTIES, KEYS);
 
-    private final JwtDecoder decoder =
-            NimbusJwtDecoder.withSecretKey(KEY).macAlgorithm(MacAlgorithm.HS256).build();
+    private final JwtDecoder decoder = publicKeyDecoder(KEYS);
+
+    private static JwtDecoder publicKeyDecoder(SigningKeys keys) {
+        try {
+            return NimbusJwtDecoder.withPublicKey(keys.active().toRSAPublicKey()).build();
+        } catch (com.nimbusds.jose.JOSEException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     @Test
     @DisplayName("the token carries the account id, the username and the roles")
@@ -141,17 +147,30 @@ class TokenServiceTest {
     @Test
     @DisplayName("a token signed with a different key is rejected")
     void aDifferentKeyDoesNotVerify() {
-        // Given a token minted with somebody else's key
-        SecretKey otherKey = new SecretKeySpec(
-                "a-completely-different-32-byte-k".getBytes(StandardCharsets.UTF_8), "HmacSHA256");
+        // Given a token minted with somebody else's RSA key
+        SigningKeys other = SigningKeys.from(new SigningKeyProperties(List.of(), null));
         TokenService impostor =
-                new TokenService(new NimbusJwtEncoder(new ImmutableSecret<>(otherKey)), PROPERTIES);
+                new TokenService(new NimbusJwtEncoder(new ImmutableJWKSet<>(other.all())), PROPERTIES, other);
         String token = impostor.issueFor(new AppUserDetails(TestData.admin())).accessToken();
 
-        // Then: HMAC signs and verifies with the SAME secret, so not holding it means not being
-        // able to mint one either — which is also why sharing the key with a second service
-        // would hand that service the power to issue tokens.
+        // Then: our public key verifies only what our private key signed. And holding the public key,
+        // as every other service does since Phase 33, is no help in minting one: that is the point
+        // of asymmetric signing, and what HS256's one shared secret could not give.
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> decoder.decode(token))
                 .isInstanceOf(org.springframework.security.oauth2.jwt.JwtException.class);
+    }
+
+    @Test
+    @DisplayName("a service token names the service and its scopes, and claims no user and no role")
+    void issuesAScopedServiceToken() {
+        TokenService.IssuedServiceToken issued =
+                tokenService.issueForService("catalog-service", List.of("inventory:read"));
+
+        var token = decoder.decode(issued.value());
+        assertThat(token.getSubject()).isEqualTo("catalog-service");
+        assertThat(token.getClaimAsString(TokenClaims.SCOPE)).isEqualTo("inventory:read");
+        assertThat(token.getClaimAsString(TokenClaims.USER_ID)).isNull();
+        assertThat(token.getClaimAsStringList(TokenClaims.ROLES)).isNull();
+        assertThat(issued.expiresInSeconds()).isEqualTo(900L);
     }
 }

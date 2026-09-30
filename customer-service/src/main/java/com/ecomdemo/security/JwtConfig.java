@@ -52,6 +52,11 @@ public class JwtConfig {
         DefaultJWTProcessor<SecurityContext> processor = new DefaultJWTProcessor<>();
         processor.setJWSKeySelector(new JWSVerificationKeySelector<>(
                 JWSAlgorithm.RS256, new ImmutableJWKSet<>(keys.all().toPublicJWKSet())));
+        // Claims (exp, nbf, iss) are left to Spring's validators below, as Spring's own decoder
+        // builders do, so expiry is judged the same way here as in every other service, with the
+        // same clock-skew allowance.
+        processor.setJWTClaimsSetVerifier((claims, context) -> {
+        });
         NimbusJwtDecoder decoder = new NimbusJwtDecoder(processor);
         decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(properties.issuer()));
         return decoder;

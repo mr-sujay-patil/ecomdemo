@@ -27,6 +27,8 @@ import org.springframework.context.annotation.Import;
 @Documented
 @Inherited
 @Import({
+    // Phase 33: a web slice loads no auto-configuration of ours, so the test key is imported here.
+    TestJwtAutoConfiguration.class,
     SecurityConfig.class,
     JwtKeyConfig.class,
     ApiErrorWriter.class,
