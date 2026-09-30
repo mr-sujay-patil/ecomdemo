@@ -638,35 +638,34 @@ check "a tampered ADMIN claim buys nothing" "401" \
     "$(request POST /api/products '{"name":"Forged","price":1.00,"stockQuantity":1}')"
 
 # Expiry. A correctly signed token whose lifetime is entirely in the past is only mintable with
-# the signing key, so this check runs in full when JWT_SECRET is set and falls back to an
+# the signing key. Since Phase 33 that is customer-service's RSA key (RS256), so this check runs in
+# full when JWT_SIGNING_KEY is set in the environment (openssl signs it) and falls back to an
 # unsigned expired token otherwise - which the server refuses just as firmly, though for the
 # signature rather than the clock. Either way the honest thing is to say which ran.
-EXPIRED_TOKEN="$(python3 -c "
-import base64, hashlib, hmac, json, os, sys
-
-def b64(raw):
-    return base64.urlsafe_b64encode(raw).decode().rstrip('=')
-
-issued = int(__import__('time').time()) - 7200          # two hours ago
-claims = {'iss': 'ecomdemo', 'sub': sys.argv[1], 'uid': 1, 'roles': ['CUSTOMER'],
-          'iat': issued, 'exp': issued + 900}           # expired 105 minutes ago
-header = b64(json.dumps({'alg': 'HS256'}).encode())
-payload = b64(json.dumps(claims).encode())
-secret = os.environ.get('JWT_SECRET', '')
-signing_input = (header + '.' + payload).encode()
-signature = b64(hmac.new(secret.encode(), signing_input, hashlib.sha256).digest()) if secret \
-    else b64(b'not-a-real-signature')
-print('.'.join([header, payload, signature]))
-" "$CUSTOMER_USER" 2>/dev/null)"
+b64url() { base64 -w0 | tr '+/' '-_' | tr -d '='; }
+EXPIRED_ISSUED=$(( $(date +%s) - 7200 ))                  # two hours ago, expired 105 minutes ago
+EXPIRED_HEADER="$(printf '{"alg":"RS256","kid":"%s"}' "${JWT_SIGNING_KEY_ID:-key-1}" | b64url)"
+EXPIRED_PAYLOAD="$(printf '{"iss":"ecomdemo","sub":"%s","uid":1,"roles":["CUSTOMER"],"iat":%d,"exp":%d}' \
+    "$CUSTOMER_USER" "$EXPIRED_ISSUED" "$((EXPIRED_ISSUED + 900))" | b64url)"
+EXPIRED_SIGNATURE="$(printf 'not-a-real-signature' | b64url)"
+if [ -n "${JWT_SIGNING_KEY:-}" ]; then
+    SIGNING_PEM="$(mktemp)"
+    printf '%s' "$JWT_SIGNING_KEY" | base64 -d 2>/dev/null \
+        | openssl pkey -inform DER -out "$SIGNING_PEM" 2>/dev/null \
+        && EXPIRED_SIGNATURE="$(printf '%s.%s' "$EXPIRED_HEADER" "$EXPIRED_PAYLOAD" \
+            | openssl dgst -sha256 -sign "$SIGNING_PEM" | b64url)"
+    rm -f "$SIGNING_PEM"
+fi
+EXPIRED_TOKEN="$EXPIRED_HEADER.$EXPIRED_PAYLOAD.$EXPIRED_SIGNATURE"
 
 as_token "$EXPIRED_TOKEN"
 check "an expired token returns 401" "401" "$(request GET /api/customers/me)"
 check "and says the token is invalid or expired" "True" \
     "$(jget "'invalid or has expired' in d['message']")"
-if [ -n "${JWT_SECRET:-}" ]; then
+if [ -n "${JWT_SIGNING_KEY:-}" ]; then
     pass "the expired token was correctly signed, so expiry alone caused the refusal"
 else
-    pass "the expired token was unsigned (JWT_SECRET unset); set it to test expiry specifically"
+    pass "the expired token was unsigned (JWT_SIGNING_KEY unset); set it to test expiry specifically"
 fi
 
 as_token "not-even-a-jwt"
@@ -1718,7 +1717,7 @@ check "a CUSTOMER may not read /actuator/metrics either" "403" \
 as_admin
 check "an ADMIN may" "200" "$(app_request GET /actuator/metrics)"
 # Not in management.endpoints.web.exposure.include, so it does not exist over HTTP at all - the
-# allow-list, not an authorization rule, is what keeps the environment (and JWT_SECRET) off the
+# allow-list, not an authorization rule, is what keeps the environment (and every secret) off the
 # wire. Even the administrator gets a 404.
 check "/actuator/env is not exposed at all, not even to an ADMIN" "404" \
     "$(app_request GET /actuator/env)"
@@ -3516,6 +3515,85 @@ if command -v docker >/dev/null 2>&1 \
 else
     skip "the dead-letter scenario" "needs the Kafka, payment-service and payment-db containers"
 fi
+
+# --------------------------------------------------------------------------------------------
+# Authentication hardening (Phase 33)
+# --------------------------------------------------------------------------------------------
+# customer-service is now the only service with a signing key (RS256); everyone else verifies with its
+# PUBLIC keys from /oauth2/jwks. Services get their own tokens from it (client credentials), scoped
+# to what each needs. Failed logins are throttled.
+#
+# The JWKS and service-token checks run INSIDE catalog-service's container: customer-service:8083
+# resolves there on compose and on Kubernetes alike, and that container holds catalog-service's own
+# client secret (SERVICE_CLIENT_SECRET). The secret never leaves the container and is never printed.
+section "Authentication hardening"
+
+JWKS_JSON="$(ctr_exec "$CATALOG_CONTAINER" wget -qO- http://customer-service:8083/oauth2/jwks 2>/dev/null)"
+check "customer-service publishes its public keys at /oauth2/jwks" "True" \
+    "$(python3 -c "import json,sys; k=json.loads(sys.argv[1])['keys']; print(bool(k) and all(x['kty']=='RSA' and x.get('kid') for x in k))" "$JWKS_JSON" 2>/dev/null)"
+check "and no private key material (no 'd', 'p' or 'q')" "True" \
+    "$(python3 -c "import json,sys; k=json.loads(sys.argv[1])['keys']; print(not any(f in x for x in k for f in ('d','p','q')))" "$JWKS_JSON" 2>/dev/null)"
+
+# A token with the right shape, a real key id and an ADMIN role, signed with a key customer-service
+# never published: the signature is what refuses it.
+ACTIVE_KID="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['keys'][0]['kid'])" "$JWKS_JSON" 2>/dev/null)"
+FOREIGN_PEM="$(mktemp)"
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$FOREIGN_PEM" 2>/dev/null
+FOREIGN_NOW="$(date +%s)"
+FOREIGN_HEADER="$(printf '{"alg":"RS256","kid":"%s"}' "$ACTIVE_KID" | b64url)"
+FOREIGN_PAYLOAD="$(printf '{"iss":"ecomdemo","sub":"admin","uid":1,"roles":["ADMIN"],"iat":%d,"exp":%d}' \
+    "$FOREIGN_NOW" "$((FOREIGN_NOW + 900))" | b64url)"
+FOREIGN_SIGNATURE="$(printf '%s.%s' "$FOREIGN_HEADER" "$FOREIGN_PAYLOAD" | openssl dgst -sha256 -sign "$FOREIGN_PEM" | b64url)"
+rm -f "$FOREIGN_PEM"
+as_token "$FOREIGN_HEADER.$FOREIGN_PAYLOAD.$FOREIGN_SIGNATURE"
+check "a token signed with any other key is rejected (401), even claiming ADMIN" "401" \
+    "$(request GET /api/customers/me)"
+
+# catalog-service's own token: it asks with its own secret and gets inventory:read, nothing more.
+SCOPED_JSON="$(ctr_exec "$CATALOG_CONTAINER" sh -c 'wget -qO- \
+    --header "Authorization: Basic $(printf "catalog-service:%s" "$SERVICE_CLIENT_SECRET" | base64 | tr -d "\n")" \
+    --header "Content-Type: application/x-www-form-urlencoded" \
+    --post-data "grant_type=client_credentials" http://customer-service:8083/oauth2/token' 2>/dev/null)"
+check "catalog-service gets a service token scoped to inventory:read only" "inventory:read" \
+    "$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['scope'])" "$SCOPED_JSON" 2>/dev/null)"
+SCOPED_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "$SCOPED_JSON" 2>/dev/null)"
+# in_catalog_status <token> <url> [json-body] -> the HTTP status, as BusyBox wget reports it
+in_catalog_status() {
+    ctr_exec "$CATALOG_CONTAINER" sh -c 'if [ -n "$3" ]; then
+            wget -q -S -O /dev/null --header "Authorization: Bearer $1" --header "Content-Type: application/json" --post-data "$3" "$2"
+        else
+            wget -q -S -O /dev/null --header "Authorization: Bearer $1" "$2"
+        fi 2>&1 | awk "/HTTP\\//{print \$2}" | tail -1' _ "$1" "$2" "${3:-}" 2>/dev/null
+}
+check "with it, catalog-service may read stock (200)" "200" \
+    "$(in_catalog_status "$SCOPED_TOKEN" http://inventory-service:8082/api/inventory/1)"
+check "but a service token cannot call outside its scope: changing stock is 403" "403" \
+    "$(in_catalog_status "$SCOPED_TOKEN" http://inventory-service:8082/api/inventory/1/reserve '{"units":1,"productName":"Smoke"}')"
+check "and asking payment-service to settle an order is 403" "403" \
+    "$(in_catalog_status "$SCOPED_TOKEN" http://payment-service:8086/internal/saga/orders/1/settle '{"amount":1.00}')"
+
+# Throttling: five wrong passwords for one username, then the sixth attempt is refused before the
+# password is even checked. The username is unique per run; an account need not exist to be throttled.
+THROTTLE_USER="smoke-throttle-$(date +%s)"
+as_anonymous
+THROTTLE_STATUSES=""
+for _ in 1 2 3 4 5; do
+    THROTTLE_STATUSES="$THROTTLE_STATUSES $(request POST /api/auth/login "{\"username\":\"$THROTTLE_USER\",\"password\":\"wrong-password\"}")"
+done
+check "five wrong passwords are five ordinary 401s" "401 401 401 401 401" "${THROTTLE_STATUSES# }"
+THROTTLED_HEADERS="$(curl -sS -o "$BODY" -D - -X POST "$BASE_URL/api/auth/login" -H 'Content-Type: application/json' \
+    -d "{\"username\":\"$THROTTLE_USER\",\"password\":\"wrong-password\"}" 2>/dev/null | tr -d '\r')"
+check "the next attempt is throttled: 429" "429" "$(printf '%s\n' "$THROTTLED_HEADERS" | head -1 | awk '{print $2}')"
+check "with a Retry-After of a few seconds, and the same number in the message" "True" \
+    "$(python3 -c "
+import json,re,sys
+h={l.split(':',1)[0].strip().lower(): l.split(':',1)[1].strip() for l in sys.argv[1].splitlines()[1:] if ':' in l}
+s=int(h.get('retry-after','0')); m=json.load(open(sys.argv[2]))['message']
+print(0 < s <= 30 and ('in %d seconds' % s) in m)" "$THROTTLED_HEADERS" "$BODY" 2>/dev/null)"
+# Leave no block behind: forget this username, and the per-client counts that are not blocking
+# anyone, so repeated smoke runs from one machine cannot add up to the per-client limit.
+customer_psql_query "DELETE FROM login_throttle WHERE throttle_key = 'user:$THROTTLE_USER'
+    OR (throttle_key LIKE 'client:%' AND blocked_until IS NULL);" >/dev/null
 
 # --------------------------------------------------------------------------------------------
 # LLM integration (Phase 27)
