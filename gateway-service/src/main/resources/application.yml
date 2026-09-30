@@ -89,6 +89,44 @@ spring:
               predicates:
                 - Path=/api/assistant/**
 
+            # KI-001: each documented service's OpenAPI document, at /v3/api-docs/<service>, which is
+            # what the Swagger UI below lists. Each service serves its own at /v3/api-docs, so the
+            # path is rewritten on the way. One EXACT path per service rather than a
+            # /v3/api-docs/{segment} pattern: an unknown name, or payment and notification (no public
+            # API), then has no route and answers 404, instead of being forwarded somewhere.
+            # springdoc's own /v3/api-docs and /v3/api-docs/swagger-config on this gateway are
+            # controller mappings, which Spring checks before routes, so neither is shadowed here.
+            - id: catalog-docs
+              uri: ${CATALOG_BASE_URL:http://localhost:8081}
+              predicates:
+                - Path=/v3/api-docs/catalog
+              filters:
+                - RewritePath=/v3/api-docs/catalog, /v3/api-docs
+            - id: customer-docs
+              uri: ${CUSTOMER_BASE_URL:http://localhost:8083}
+              predicates:
+                - Path=/v3/api-docs/customer
+              filters:
+                - RewritePath=/v3/api-docs/customer, /v3/api-docs
+            - id: inventory-docs
+              uri: ${INVENTORY_BASE_URL:http://localhost:8082}
+              predicates:
+                - Path=/v3/api-docs/inventory
+              filters:
+                - RewritePath=/v3/api-docs/inventory, /v3/api-docs
+            - id: assistant-docs
+              uri: ${ASSISTANT_BASE_URL:http://localhost:8087}
+              predicates:
+                - Path=/v3/api-docs/assistant
+              filters:
+                - RewritePath=/v3/api-docs/assistant, /v3/api-docs
+            - id: app-docs
+              uri: ${APP_BASE_URL:http://localhost:8084}
+              predicates:
+                - Path=/v3/api-docs/app
+              filters:
+                - RewritePath=/v3/api-docs/app, /v3/api-docs
+
             # The application - cart, orders, batch imports, reports. Last, and deliberately the
             # BROADEST predicate: a route list is evaluated in order, so a catch-all placed earlier
             # would swallow the three above it.
@@ -115,6 +153,30 @@ spring:
                 exposedHeaders: ["X-Correlation-Id"]
                 allowCredentials: false
                 maxAge: 3600
+
+# KI-001: one Swagger UI for the whole system, at http://localhost:8080/swagger-ui.html. Its dropdown
+# lists each service's own document, fetched through the docs routes above; every document names the
+# gateway as its only server, so "Try it out" goes through this edge like any client.
+# The gateway's own /v3/api-docs stays on (springdoc's UI needs its configuration), but it describes
+# nothing: the gateway has no controllers, and the dropdown does not list it.
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    urls-primary-name: catalog-service
+    urls:
+      - name: catalog-service
+        url: /v3/api-docs/catalog
+      - name: customer-service
+        url: /v3/api-docs/customer
+      - name: inventory-service
+        url: /v3/api-docs/inventory
+      - name: ecomdemo-app (orders)
+        url: /v3/api-docs/app
+      - name: assistant-service
+        url: /v3/api-docs/assistant
+    tags-sorter: alpha
+    operations-sorter: method
+    try-it-out-enabled: true
 
 server:
   port: ${GATEWAY_PORT:8080}

@@ -2,25 +2,32 @@ package com.ecomdemo.gateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.ecomdemo.gateway.support.GatewayTest;
+import com.ecomdemo.support.RedisContainerConfig;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.web.reactive.server.WebTestClient;
 
 /**
  * The gateway is the one place a browser can reach, so it is where the API is documented (KI-001).
@@ -32,9 +39,16 @@ import org.springframework.test.context.DynamicPropertySource;
  * <p>The upstreams here are JDK {@link HttpServer}s, one per service, each answering with its own name
  * and recording the path it was asked for. That proves both halves of a route: that it reaches the
  * RIGHT service, and that the path is rewritten to the one the service actually serves.
+ *
+ * <p>It does not extend {@code GatewayTest}: that class points every upstream at a closed port, and
+ * its {@code @DynamicPropertySource} wins over a subclass's for the same property. Nothing here
+ * needs a token, so the context is set up directly, with the same profile and Redis.
  */
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
+@Import(RedisContainerConfig.class)
 @DisplayName("API documentation at the edge")
-class ApiDocsIT extends GatewayTest {
+class ApiDocsIT {
 
     /** Gateway document name → the environment variable its route's uri reads. */
     private static final Map<String, String> DOCUMENTED = new LinkedHashMap<>();
@@ -76,6 +90,19 @@ class ApiDocsIT extends GatewayTest {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @LocalServerPort
+    private int port;
+
+    private WebTestClient web;
+
+    @BeforeEach
+    void bindTheClientToTheRunningServer() {
+        web = WebTestClient.bindToServer()
+                .baseUrl("http://localhost:" + port)
+                .responseTimeout(Duration.ofSeconds(30))
+                .build();
     }
 
     @AfterAll
