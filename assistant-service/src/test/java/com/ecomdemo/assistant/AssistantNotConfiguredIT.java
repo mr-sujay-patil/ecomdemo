@@ -1,14 +1,13 @@
 package com.ecomdemo.assistant;
 
+import com.ecomdemo.support.TestJwt;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.support.RedisContainerConfig;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Instant;
 import java.util.List;
-import javax.crypto.SecretKey;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,11 +22,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 
 /**
@@ -44,8 +39,6 @@ class AssistantNotConfiguredIT {
     @Autowired
     private TestRestTemplate rest;
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
@@ -77,9 +70,7 @@ class AssistantNotConfiguredIT {
                 .claim(TokenClaims.USER_ID, 11)
                 .claim(TokenClaims.ROLES, List.of("CUSTOMER"))
                 .build();
-        String token = new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        String token = TestJwt.sign(claims);
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setBearerAuth(token);

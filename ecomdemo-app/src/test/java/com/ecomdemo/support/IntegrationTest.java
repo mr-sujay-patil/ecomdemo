@@ -2,16 +2,10 @@ package com.ecomdemo.support;
 
 import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.shared.TokenClaims;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import javax.crypto.SecretKey;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.assertj.core.api.Assertions;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.restclient.RestTemplateBuilder;
@@ -130,8 +124,6 @@ public abstract class IntegrationTest {
     @Autowired
     protected TestRestTemplate rest;
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
@@ -182,9 +174,7 @@ public abstract class IntegrationTest {
                 .claim(TokenClaims.USER_ID, userId)
                 .claim(TokenClaims.ROLES, List.of(role))
                 .build();
-        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        return TestJwt.sign(claims);
     }
 
     protected TestRestTemplate withToken(String token) {

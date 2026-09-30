@@ -1,13 +1,12 @@
 package com.ecomdemo.assistant.support;
 
+import com.ecomdemo.support.TestJwt;
 import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.support.RedisContainerConfig;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
-import javax.crypto.SecretKey;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
@@ -23,11 +22,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -63,8 +58,6 @@ public abstract class AssistantIntegrationTest {
     @Autowired
     protected StringRedisTemplate redis;
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
@@ -98,9 +91,7 @@ public abstract class AssistantIntegrationTest {
                 .claim(TokenClaims.USER_ID, userId)
                 .claim(TokenClaims.ROLES, List.of(roles))
                 .build();
-        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        return TestJwt.sign(claims);
     }
 
     protected ResponseEntity<String> post(String token, String path, String json) {

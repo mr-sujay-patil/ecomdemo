@@ -101,6 +101,23 @@ public final class TestJwt {
                 .claim(TokenClaims.ROLES, List.of(roles)));
     }
 
+    /** A service token signed with some OTHER key: well-formed, and not to be trusted. */
+    public static String serviceSignedBy(RSAKey key, String clientId, String... scopes) {
+        return sign(key, JwtClaimsSet.builder()
+                .subject(clientId)
+                .claim(TokenClaims.SCOPE, String.join(" ", scopes)));
+    }
+
+    /**
+     * Signs a claim set a test built itself (an expired token, an odd claim), with the trusted key,
+     * exactly as given: nothing is added.
+     */
+    public static String sign(JwtClaimsSet claims) {
+        NimbusJwtEncoder encoder = new NimbusJwtEncoder(new ImmutableJWKSet<>(new JWKSet(KEY)));
+        JwsHeader header = JwsHeader.with(SignatureAlgorithm.RS256).keyId(KEY_ID).build();
+        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+    }
+
     private static String sign(RSAKey key, JwtClaimsSet.Builder claims) {
         Instant now = Instant.now();
         JwtClaimsSet complete = claims.issuer(ISSUER)

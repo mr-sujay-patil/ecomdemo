@@ -25,7 +25,7 @@ System_Boundary("EcomdemoApplication_boundary", "EcomdemoApplication", $tags="")
 }
 
 Rel(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
-Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "uses", $techn="", $tags="", $link="")
+Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "depends on", $techn="", $tags="", $link="")
 Rel(EcomdemoApplication.EcomdemoApplication.Serviceclients, EcomdemoApplication.EcomdemoApplication.Sharedkernel, "depends on", $techn="", $tags="", $link="")
 
 SHOW_LEGEND(true)

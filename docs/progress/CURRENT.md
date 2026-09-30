@@ -15,10 +15,10 @@ KI-041: PR #53 merge commit (2 parents), 0 missing, 0 diff, branch alive. CI mai
 green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
 
 ## Checklist (from the phase file's "What you'll implement")
-- [ ] customer-service signs with a private key (RS256, `kid`); JWKS endpoint; every other service
+- [x] customer-service signs with a private key (RS256, `kid`); JWKS endpoint; every other service
       verifies via JWKS; no HS256 secret anywhere; key rotation without downtime
-- [ ] Scoped service identities replace the shared SERVICE role; callees check scopes
-- [ ] Login throttling per username and per client, backoff, 429 + Retry-After, metrics
+- [x] Scoped service identities replace the shared SERVICE role; callees check scopes
+- [x] Login throttling per username and per client, backoff, 429 + Retry-After, metrics
 - [ ] `docs/security.md` API2, API5; KI-014 and KI-015 closed
 - [ ] Done when: only customer-service holds a signing key, rotation without downtime, repeated wrong
       passwords throttled - each proven by automated tests
@@ -46,20 +46,13 @@ green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
   counters `ecomdemo.auth.login.failures`, `ecomdemo.auth.login.throttled{key}`.
 
 ## Next action
-DONE (committed): common (JWKS decoder, ROLE_+SCOPE_ authorities, ClientCredentialsTokenProvider,
-ServiceTokens scopes, TestJwt + TestJwtAutoConfiguration in the test-jar; common tests green);
-customer-service main code compiles: SigningKeys/JwtConfig (RS256, kid), TokenService, OAuth2Controller
-(/oauth2/jwks, /oauth2/token), ServiceClientProperties, login throttle (V2 migration, entity, service,
-429 + Retry-After in AuthController). NOT yet run: customer tests.
-NEXT, in order: (1) rewrite customer tests JwtConfigTest, TokenServiceTest, AuthApiIT (drop HS256;
-add OAuth2Controller + throttle tests); (2) remove `ecomdemo.jwt.secret` from every other service's
-properties, add `ecomdemo.jwt.jwk-set-uri` + `ecomdemo.service-identity.*` (app client-id
-`ecomdemo-app`); gateway: reactive JWKS decoder + authorities(), ServiceIdentityFilter fetch off the
-event loop, drop JwtKeyConfig import; (3) scope rules in catalog/inventory/payment SecurityConfig
-(ServiceTokens.ROLE is gone); (4) fix remaining tests (list: grep jwtSigningKey|SecretKey|ServiceTokens.ROLE);
-(5) compose/k8s env (JWT_JWK_SET_URI, SERVICE_TOKEN_URI, *_CLIENT_SECRET, JWT_SIGNING_KEY; k8s-up
-generates), .env.example; USER STEP before the compose smoke: add the secrets to .env; (6) smoke,
-docs, testing protocol, PR.
+DONE (committed, tests green): common, customer-service (RS256/JWKS/token endpoint/throttle + tests),
+gateway + every service on JWKS, scope rules in catalog/inventory/payment + scope tests, all tests
+off HS256. Full `./mvnw clean verify`: 693 tests, 0 failed (+4 scope tests since, green).
+NEXT: (5) compose/k8s env: JWT_JWK_SET_URI + SERVICE_TOKEN_URI for every service, SERVICE_CLIENT_SECRET
+for gateway/app/catalog, and in customer-service JWT_SIGNING_KEY + GATEWAY/APP/CATALOG_CLIENT_SECRET;
+k8s-up.sh generates them; .env.example documents them; remove JWT_SECRET. Then STOP for the USER STEP
+(append the generated secrets to .env), then (6) smoke additions, docs, testing protocol, PR.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - Verification uses a COLD stack (`down -v`, `up --build --wait`, `.smoke-state` removed).

@@ -20,7 +20,9 @@ import org.springframework.security.web.SecurityFilterChain;
  * <h2>Two chains since Phase 32</h2>
  *
  * <p>The saga deadline added one internal question, {@code POST /internal/saga/orders/{id}/settle}
- * ({@link SettlementController}), which a SERVICE token may ask. It gets a chain of its own rather
+ * ({@link SettlementController}). Since Phase 33 only a token with the {@code payment:settle} scope may
+ * ask it, which customer-service gives to the application alone: the gateway or catalog-service,
+ * which held the same SERVICE role until then, now get 403. It gets a chain of its own rather
  * than a line in the existing one, so the existing one stays exactly what it was: no
  * authentication mechanism at all, and everything outside the probes refused with 403 - including
  * anything that looks like a payment API under {@code /api}. A single chain with a resource server
@@ -41,7 +43,8 @@ public class SecurityConfig {
                 // No cookie and no session: every call carries a bearer token.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().hasRole(ServiceTokens.ROLE))
+                .authorizeHttpRequests(auth -> auth.anyRequest()
+                        .hasAuthority(ServiceTokens.authority(ServiceTokens.PAYMENT_SETTLE)))
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))
                         .authenticationEntryPoint(entryPoint)

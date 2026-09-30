@@ -1,15 +1,14 @@
 package com.ecomdemo.payment;
 
+import com.ecomdemo.jwt.ServiceTokens;
+import com.ecomdemo.support.TestJwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecomdemo.jwt.JwtProperties;
-import com.ecomdemo.jwt.ServiceTokenProvider;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Instant;
 import java.util.List;
-import javax.crypto.SecretKey;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -17,11 +16,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -38,16 +33,12 @@ class PaymentSecurityTest {
     @Autowired
     private MockMvc mvc;
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
 
     private String serviceToken() {
-        return new ServiceTokenProvider(
-                new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey)), jwtProperties, "ecomdemo-app")
-                .token();
+        return TestJwt.service("ecomdemo-app", ServiceTokens.PAYMENT_SETTLE);
     }
 
     private String customerToken() {
@@ -59,9 +50,7 @@ class PaymentSecurityTest {
                 .expiresAt(now.plusSeconds(300))
                 .claim("roles", List.of("CUSTOMER"))
                 .build();
-        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        return TestJwt.sign(claims);
     }
 
     @Test
@@ -88,10 +77,25 @@ class PaymentSecurityTest {
     }
 
     @Test
-    @DisplayName("and a SERVICE token: a shopper's token is 403")
+    @DisplayName("and the payment:settle scope: a shopper's token is 403")
     void settlementRefusesAShopper() throws Exception {
         mvc.perform(post("/internal/saga/orders/1/settle")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + customerToken())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":1.00}"))
+                .andExpect(status().isForbidden());
+    }
+
+    /**
+     * Phase 33: until now any SERVICE token could ask for a settlement, the gateway's included. Only
+     * the application holds {@code payment:settle}; every other service's token is refused.
+     */
+    @Test
+    @DisplayName("a service without the payment:settle scope is 403")
+    void settlementRefusesAnotherService() throws Exception {
+        String gateways = TestJwt.service("gateway-service", ServiceTokens.CATALOG_READ);
+
+        mvc.perform(post("/internal/saga/orders/1/settle")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + gateways)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"amount\":1.00}"))
                 .andExpect(status().isForbidden());
     }

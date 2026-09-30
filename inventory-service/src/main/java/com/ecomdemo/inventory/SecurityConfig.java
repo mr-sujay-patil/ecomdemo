@@ -31,12 +31,21 @@ import org.springframework.security.web.SecurityFilterChain;
  *
  * <p>The fix needs no new information, because no shopper ever has a reason to call this service:
  * the gateway refuses {@code /api/inventory/**} to anyone but an ADMIN, and every other caller
- * (the application's checkout, catalog's stock lookups) sends its own SERVICE token. So every
- * business path now requires ADMIN or SERVICE, and a CUSTOMER gets 403 here as well as at the edge.
- * {@code InventorySecurityTest} proves it.
+ * (the application's checkout, catalog's stock lookups) sends its own service token. So every
+ * business path requires ADMIN or a service, and a CUSTOMER gets 403 here as well as at the edge.
+ *
+ * <p><strong>Scoped since Phase 33.</strong> "A service" used to mean the one shared SERVICE role,
+ * so catalog-service, which only ever reads stock, could equally set it. Now reads need ADMIN or
+ * {@code inventory:read} (catalog-service, the application) and every change needs ADMIN or
+ * {@code inventory:write} (only the application: checkout, the saga, the stock import).
+ * {@code InventorySecurityTest} proves both, and that a read-only token cannot write.
  */
 @Configuration
 public class SecurityConfig {
+
+    private static final String ADMIN = JwtAuthorities.ROLE_PREFIX + "ADMIN";
+    private static final String READ = ServiceTokens.authority(ServiceTokens.INVENTORY_READ);
+    private static final String WRITE = ServiceTokens.authority(ServiceTokens.INVENTORY_WRITE);
 
     @Bean
     SecurityFilterChain filterChain(
@@ -61,7 +70,8 @@ public class SecurityConfig {
                         // learn how to authenticate. GET only, and only the JSON document.
                         .requestMatchers(HttpMethod.GET, "/v3/api-docs").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .anyRequest().hasAnyRole("ADMIN", ServiceTokens.ROLE))
+                        .requestMatchers(HttpMethod.GET, "/**").hasAnyAuthority(ADMIN, READ)
+                        .anyRequest().hasAnyAuthority(ADMIN, WRITE))
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))
                         // The resource server's own entry point, for a token that is present but bad.
