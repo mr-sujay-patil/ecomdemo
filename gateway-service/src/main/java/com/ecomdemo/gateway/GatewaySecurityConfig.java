@@ -1,12 +1,16 @@
 package com.ecomdemo.gateway;
 
 import org.springframework.boot.security.autoconfigure.actuate.web.reactive.EndpointRequest;
+import org.springframework.cloud.gateway.config.GlobalCorsProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.web.cors.reactive.CorsConfigurationSource;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 /**
  * Who may reach what, decided once, at the edge.
@@ -27,6 +31,14 @@ import org.springframework.security.web.server.SecurityWebFilterChain;
  * to ride on: the token travels in an {@code Authorization} header that a browser will not attach on
  * a cross-site request by itself. CSRF protection defends a credential the browser sends
  * automatically, which is exactly what this system does not have.
+ *
+ * <p><strong>CORS is decided here, FIRST (KI-041).</strong> Before a cross-origin request with a
+ * token or a JSON body, a browser sends a preflight: an {@code OPTIONS} with no token at all. Without
+ * {@code .cors(...)} this chain met it before the gateway's CORS configuration did, and
+ * {@code anyExchange().authenticated()} answered 401 - so no browser app on another origin could even
+ * log in. With it, Spring Security's CORS filter runs before authorisation: it answers a preflight
+ * itself (200 with the allow headers, or 403 for an origin that is not allowed) and adds the allow
+ * header to every other response, a 401 included, so the browser can read why it was refused.
  */
 @Configuration(proxyBeanMethods = false)
 @EnableWebFluxSecurity
@@ -35,6 +47,7 @@ public class GatewaySecurityConfig {
     @Bean
     SecurityWebFilterChain gatewaySecurity(ServerHttpSecurity http, ApiErrors apiErrors) {
         return http
+                .cors(Customizer.withDefaults())
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
                 .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
@@ -95,5 +108,19 @@ public class GatewaySecurityConfig {
                         .authenticationEntryPoint(apiErrors)
                         .accessDeniedHandler(apiErrors))
                 .build();
+    }
+
+    /**
+     * The rules {@code .cors(...)} applies: the gateway's own {@code globalcors} configuration from
+     * {@code application.yml}, not a second copy. One place says which origins, methods and headers
+     * are allowed ({@code CORS_ALLOWED_ORIGINS}), so the security chain and the routes cannot drift
+     * apart. The routes' own CORS processing then sees the header already set and adds no duplicate:
+     * a response with two {@code Access-Control-Allow-Origin} headers is one a browser rejects.
+     */
+    @Bean
+    CorsConfigurationSource corsConfigurationSource(GlobalCorsProperties globalCors) {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.setCorsConfigurations(globalCors.getCorsConfigurations());
+        return source;
     }
 }
