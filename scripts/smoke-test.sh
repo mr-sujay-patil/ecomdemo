@@ -2856,6 +2856,36 @@ check "a different caller is not refused because of somebody else's burst" "200"
 
 as_customer
 
+# --- CORS: a browser on another origin can use the API (KI-041) ---------------------------------
+# A browser sends a PREFLIGHT (OPTIONS, no token) before any cross-origin call with a token or a
+# JSON body. Until KI-041 the gateway's security answered it 401, so a browser app on another origin
+# could not even log in; curl sends no preflight, which is why every check above passed anyway.
+# The origin is the gateway's default allowed one (CORS_ALLOWED_ORIGINS in compose and k8s).
+CORS_ORIGIN="${SMOKE_CORS_ORIGIN:-http://localhost:3000}"
+preflight_headers() { # preflight_headers <origin> <path> <method> <request-headers> -> status line + headers
+    curl -sS -o /dev/null -D - -X OPTIONS "$BASE_URL$2" -H "Origin: $1" \
+        -H "Access-Control-Request-Method: $3" -H "Access-Control-Request-Headers: $4" 2>/dev/null | tr -d '\r'
+}
+header_of() { # header_of <name> : reads headers on stdin, prints every value of that header
+    awk -F': ' -v name="$1" 'tolower($1) == tolower(name) { print $2 }'
+}
+CORS_LOGIN="$(preflight_headers "$CORS_ORIGIN" /api/auth/login POST content-type)"
+check "the login preflight from $CORS_ORIGIN is answered 200" "200" \
+    "$(printf '%s\n' "$CORS_LOGIN" | head -1 | awk '{print $2}')"
+check "and allows that origin" "$CORS_ORIGIN" \
+    "$(printf '%s\n' "$CORS_LOGIN" | header_of Access-Control-Allow-Origin | head -1)"
+CORS_CART="$(preflight_headers "$CORS_ORIGIN" /api/cart GET authorization)"
+check "the preflight of an authenticated call is answered 200 and allows Authorization" "200|True" \
+    "$(printf '%s\n' "$CORS_CART" | head -1 | awk '{print $2}')|$(printf '%s\n' "$CORS_CART" \
+        | header_of Access-Control-Allow-Headers | grep -qi authorization && echo True || echo False)"
+check "a preflight from an origin that is not allowed is refused (403)" "403" \
+    "$(preflight_headers http://evil.example /api/auth/login POST content-type | head -1 | awk '{print $2}')"
+CORS_REAL="$(curl -sS -o /dev/null -D - "$BASE_URL/api/cart" -H "Origin: $CORS_ORIGIN" \
+    -H "Authorization: Bearer $CUSTOMER_TOKEN" 2>/dev/null | tr -d '\r')"
+check "an authenticated cross-origin call returns 200 with exactly one Access-Control-Allow-Origin" "200|1" \
+    "$(printf '%s\n' "$CORS_REAL" | head -1 | awk '{print $2}')|$(printf '%s\n' "$CORS_REAL" \
+        | header_of Access-Control-Allow-Origin | wc -l | tr -d ' ')"
+
 # --------------------------------------------------------------------------------------------
 # Resilience (Phase 22)
 # --------------------------------------------------------------------------------------------
