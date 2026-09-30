@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-30
 - **Fix:** KI-001 — Swagger UI and OpenAPI docs unreachable since the split
 - **Branch:** fix/ki-001-openapi-docs (cut from `main` at `48e8949`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #52 https://github.com/mr-sujay-patil/ecomdemo/pull/52
+- **Waiting for user:** YES (review of PR #52)
 
 ## Merge verification before this fix — PASSED (tag `phase-32-complete` on `48e8949`)
 - Phase 32: PR #51 `48e8949`, merge commit (2 parents). 0 missing commits, 0 diffs, branch alive
@@ -35,12 +35,13 @@
 - [x] README, `security.md` API9, `decisions.md` (`[KI-001] Decision: ...`)
 - [x] Testing protocol: verify 668 (506 unit, 162 IT) 0 failed; cold compose smoke (`down -v`) 452/0/0;
       kind (re-applied, 9 Deployments restarted) 408/0/7 (same 7 skips as Phase 32); cleaned up
-- [ ] PR; PR number in KNOWN_ISSUES status
+- [x] PR #52; KI-001 status "Fixed (PR #52)"
 
 ## Next action
-Tests passed (above). Open the PR `Fix KI-001: ...`, then put its number into KI-001's status and
-here, commit, push, and STOP for the user's review. After merge: merge verification, tag
-`ki-001-fixed`, then Phase 33 (see `docs/phases/`) unless the user queues another fix.
+PR #52 is open. STOP: wait for the user's review. On `approved, merge it` (or `merged, continue`):
+merge verification (git checks, CI on main, `./mvnw clean verify` + cold `down -v` smoke on main),
+tag `ki-001-fixed`, then the next item: Phase 33 (auth hardening, approved) unless the user queues
+another fix (KI-039/KI-040 were found in Phase 32's verification).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack
