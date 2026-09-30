@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-30
 - **Fix:** KI-001 — Swagger UI and OpenAPI docs unreachable since the split
 - **Branch:** fix/ki-001-openapi-docs (cut from `main` at `48e8949`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -23,23 +23,24 @@
 ## Checklist (from KI-001's "Fix scope" and "Done when")
 - [x] Reproduce first: gateway `ApiDocsIT` (11/11 fail: 401), per-service docs tests (all fail:
       401 / `openApiResource` present), app title test fails
-- [ ] catalog, customer, inventory, assistant, app: open `/v3/api-docs` in each `SecurityConfig`,
+- [x] catalog, customer, inventory, assistant, app: open `/v3/api-docs` in each `SecurityConfig`,
       own title from configuration via `OpenApiConfig`, gateway as the only server
-- [ ] payment and notification: docs closed or disabled
-- [ ] Gateway routes `/v3/api-docs/{service}` and serves one Swagger UI (WebFlux) with a dropdown;
+- [x] payment and notification: docs closed or disabled (springdoc off)
+- [x] Gateway routes `/v3/api-docs/{service}` and serves one Swagger UI (WebFlux) with a dropdown;
       "Try it out" goes through the gateway
-- [ ] A spec test per documented service; catalogue-schema test moves to catalog-service
+- [x] A spec test per documented service; catalogue-schema test moves to catalog-service
       (`ProductWrite` + constraints); delete the stale comment
-- [ ] Smoke additions: gateway Swagger UI 200; `/v3/api-docs/{service}` is OpenAPI 3 per service;
+- [x] Smoke additions: gateway Swagger UI 200; `/v3/api-docs/{service}` is OpenAPI 3 per service;
       catalog spec has `ProductWrite`; payment/notification expose no docs via the gateway
-- [ ] README, `security.md` API9, `decisions.md` (`[KI-001] Decision: ...`)
+- [x] README, `security.md` API9, `decisions.md` (`[KI-001] Decision: ...`)
 - [ ] Testing protocol steps 1, 3, 4, 7, 8 + regression test; KI-001 → Fixed; PR; PR number in status
 
 ## Next action
-Regression tests committed (red on purpose). Fix: `OpenApiConfig` title/description/server from
-`ecomdemo.openapi.*`; open docs paths in catalog/customer/inventory/assistant `SecurityConfig`;
-`springdoc.*.enabled=false` in payment/notification; gateway: springdoc-openapi-starter-webflux-ui
-3.1.1, explicit `/v3/api-docs/<svc>` routes (RewritePath, before `app`), permitAll docs paths.
+All fix commits are in. Found on the way and fixed as part of KI-001 (a spec could not load):
+Spring AI pinned old swagger-annotations (parent `dependencyManagement`, `swagger-core.version`).
+Server is RELATIVE `/` (kind's gateway is on 18080). Catalog's write schema is `ProductRequest`.
+Now: `./mvnw clean verify`, cold compose smoke (`down -v`), `SKIP_BUILD=1 scripts/k8s-up.sh` +
+`scripts/k8s-smoke.sh`, clean up, then PR `Fix KI-001: ...`, PR number into KNOWN_ISSUES, STOP.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack
