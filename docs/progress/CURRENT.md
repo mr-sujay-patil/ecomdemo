@@ -33,14 +33,14 @@
 - [x] Smoke additions: gateway Swagger UI 200; `/v3/api-docs/{service}` is OpenAPI 3 per service;
       catalog spec has `ProductWrite`; payment/notification expose no docs via the gateway
 - [x] README, `security.md` API9, `decisions.md` (`[KI-001] Decision: ...`)
-- [ ] Testing protocol steps 1, 3, 4, 7, 8 + regression test; KI-001 → Fixed; PR; PR number in status
+- [x] Testing protocol: verify 668 (506 unit, 162 IT) 0 failed; cold compose smoke (`down -v`) 452/0/0;
+      kind (re-applied, 9 Deployments restarted) 408/0/7 (same 7 skips as Phase 32); cleaned up
+- [ ] PR; PR number in KNOWN_ISSUES status
 
 ## Next action
-All fix commits are in. Found on the way and fixed as part of KI-001 (a spec could not load):
-Spring AI pinned old swagger-annotations (parent `dependencyManagement`, `swagger-core.version`).
-Server is RELATIVE `/` (kind's gateway is on 18080). Catalog's write schema is `ProductRequest`.
-Now: `./mvnw clean verify`, cold compose smoke (`down -v`), `SKIP_BUILD=1 scripts/k8s-up.sh` +
-`scripts/k8s-smoke.sh`, clean up, then PR `Fix KI-001: ...`, PR number into KNOWN_ISSUES, STOP.
+Tests passed (above). Open the PR `Fix KI-001: ...`, then put its number into KI-001's status and
+here, commit, push, and STOP for the user's review. After merge: merge verification, tag
+`ki-001-fixed`, then Phase 33 (see `docs/phases/`) unless the user queues another fix.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack
