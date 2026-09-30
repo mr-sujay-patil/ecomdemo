@@ -16,8 +16,11 @@ import tools.jackson.databind.json.JsonMapper;
  */
 public final class PublishedApiDocs {
 
-    /** The gateway, the one address a client uses. Every document's only server. */
-    public static final String GATEWAY = "http://localhost:8080";
+    /**
+     * Every document's only server: relative, so it resolves to the gateway the document was fetched
+     * through, on whatever port that is published.
+     */
+    public static final String SERVER = "/";
 
     private PublishedApiDocs() {
     }
@@ -38,7 +41,7 @@ public final class PublishedApiDocs {
         List<String> servers = spec.path("servers").valueStream()
                 .map(server -> server.path("url").asString(""))
                 .toList();
-        assertThat(servers).as("the gateway is the only server").containsExactly(GATEWAY);
+        assertThat(servers).as("the gateway is the only server").containsExactly(SERVER);
 
         assertThat(spec.path("paths").propertyNames())
                 .as("the document describes this service's API")

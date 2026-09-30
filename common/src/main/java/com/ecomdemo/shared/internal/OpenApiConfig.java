@@ -32,8 +32,8 @@ import org.springframework.context.annotation.Configuration;
  * and the gateway's Swagger UI shows them side by side. So the parts that differ come from each
  * service's {@code application.properties}: {@code ecomdemo.openapi.title} says which service a
  * document belongs to, and {@code ecomdemo.openapi.summary} what it does. The conventions below
- * them are the same everywhere and stay here, written once. The only server is the gateway: a
- * client never calls a service's own port, and "Try it out" should not either.
+ * them are the same everywhere and stay here, written once. The only server is the gateway (see
+ * {@link #DEFAULT_SERVER}): a client never calls a service's own port, and "Try it out" should not either.
  */
 @Configuration
 public class OpenApiConfig {
@@ -41,8 +41,13 @@ public class OpenApiConfig {
     /** The name operations refer to in {@code @SecurityRequirement(name = "bearerAuth")}. */
     public static final String BEARER_AUTH = "bearerAuth";
 
-    /** The gateway: the one address clients use, and so the only server in every document. */
-    static final String DEFAULT_SERVER = "http://localhost:8080";
+    /**
+     * The only server in every document: RELATIVE, so it resolves against the address the document
+     * was fetched from. Through the gateway's Swagger UI that is always the gateway, on whatever port
+     * it is published (8080 in compose, 18080 on kind), so "Try it out" goes through the same edge as
+     * a client. An absolute {@code http://localhost:8080} was right for compose only.
+     */
+    static final String DEFAULT_SERVER = "/";
 
     private static final String CONVENTIONS =
             """
@@ -71,7 +76,7 @@ public class OpenApiConfig {
                         .description(summary + "\n\n" + CONVENTIONS)
                         .contact(new Contact().name("EcomDemo").url("https://github.com/mr-sujay-patil/ecomdemo"))
                         .license(new License().name("MIT")))
-                .servers(List.of(new Server().url(serverUrl).description("The gateway")))
+                .servers(List.of(new Server().url(serverUrl).description("The gateway this document was fetched through")))
                 // Declaring the scheme is what puts the "Authorize" button in Swagger UI and
                 // makes "Try it out" attach an Authorization header. Individual operations opt
                 // into it with @SecurityRequirement("bearerAuth"); the ones without it — browsing

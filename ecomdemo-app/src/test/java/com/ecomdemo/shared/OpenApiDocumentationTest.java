@@ -86,9 +86,10 @@ class OpenApiDocumentationTest {
         assertThat(spec.path("info").path("title").asString("")).isEqualTo("EcomDemo Orders API");
         assertThat(spec.path("info").path("version").asString("")).isEqualTo("v1");
         assertThat(spec.path("info").path("description").asString("")).isNotBlank();
-        // The gateway is the only server, so "Try it out" goes through the same edge as a client.
+        // The only server is relative: it resolves to the gateway the document was fetched through, so
+        // "Try it out" goes through the same edge as a client, on any port.
         assertThat(spec.path("servers").valueStream().map(server -> server.path("url").asString("")))
-                .containsExactly("http://localhost:8080");
+                .containsExactly("/");
     }
 
     @ParameterizedTest
