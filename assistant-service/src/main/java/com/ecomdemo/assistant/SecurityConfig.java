@@ -6,6 +6,7 @@ import com.ecomdemo.jwt.JwtAuthorities;
 import org.springframework.boot.security.autoconfigure.actuate.web.servlet.EndpointRequest;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
@@ -31,6 +32,10 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
+                        // KI-001: the OpenAPI document, which the gateway serves at /v3/api-docs/assistant. Open,
+                        // because it describes the API's shape, not its data, and a reader needs it to
+                        // learn how to authenticate. GET only, and only the JSON document.
+                        .requestMatchers(HttpMethod.GET, "/v3/api-docs").permitAll()
                         .requestMatchers("/api/assistant/**").hasRole("CUSTOMER")
                         .anyRequest().denyAll())
                 .oauth2ResourceServer(oauth2 -> oauth2

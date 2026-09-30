@@ -60,6 +60,10 @@ public class SecurityConfig {
                         // scraper. EndpointRequest rather than a literal path, because the base path
                         // is configurable and a literal stops matching when it moves.
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
+                        // KI-001: the OpenAPI document, which the gateway serves at /v3/api-docs/customer. Open,
+                        // because it describes the API's shape, not its data, and a reader needs it to
+                        // learn how to authenticate. GET only, and only the JSON document.
+                        .requestMatchers(HttpMethod.GET, "/v3/api-docs").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
