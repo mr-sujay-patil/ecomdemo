@@ -839,21 +839,19 @@ section "API documentation"
 # excluded deliberately - there is nothing there to document) and no route for those paths. So the
 # section was asking the wrong server, and getting an honest answer.
 #
-# ⚠️ This section now describes ONE service's document. That is the uncomfortable part of the phase:
-# nothing describes the whole API any more. See the note on the path list below.
+# These checks describe the APPLICATION's own document, read on its own port. Since KI-001 every
+# documented service publishes one, and the gateway serves them all in one Swagger UI: see "API
+# documentation through the gateway" at the end of this section.
 STATUS="$(app_request GET /v3/api-docs)"
 check "GET /v3/api-docs returns 200" "200" "$STATUS"
-check "the spec is titled EcomDemo API" "EcomDemo API" "$(jget "d['info']['title']")"
+# "EcomDemo API" until KI-001, when all six services' documents carried that same title.
+check "the spec is titled EcomDemo Orders API" "EcomDemo Orders API" "$(jget "d['info']['title']")"
 
 # Every path THIS APPLICATION serves must appear in its spec. Listed explicitly rather than derived
 # from the spec itself, so that an endpoint springdoc fails to pick up is caught instead of ignored.
 #
-# /api/products and /api/products/{id} LEFT this list in Phase 21, and their absence is not a
-# documentation bug in this service - the application no longer serves them. It is a gap in the system,
-# though: catalog-service does not declare springdoc, so the catalogue is now documented NOWHERE. A
-# gateway can aggregate its services' specifications, which is the real fix and its own piece of work.
-# OpenApiDocumentationTest asserts the same absence in a unit test, so the day somebody closes the gap,
-# both it and this list fail and say what to update.
+# /api/products and /api/products/{id} LEFT this list in Phase 21: the application no longer serves
+# them. catalog-service documents them, and the gateway serves its document (KI-001, below).
 API_PATHS="/api/cart /api/cart/items /api/cart/items/{productId} /api/orders /api/orders/{id} /api/orders/{id}/status"
 for path in $API_PATHS; do
     check "the spec documents $path" "True" "$(jget "'$path' in d['paths']")"
@@ -878,6 +876,51 @@ check "the Swagger UI page itself returns 200" "200" "$STATUS"
 
 STATUS="$(app_request GET /swagger-ui/swagger-ui-bundle.js)"
 check "the Swagger UI javascript bundle is served" "200" "$STATUS"
+
+# API documentation through the gateway (KI-001). From Phase 21 until KI-001 the gateway answered 401
+# for all of this, and the README's Swagger URL was dead. Each service builds its own document; the
+# gateway routes /v3/api-docs/<service> to it and serves one Swagger UI with a dropdown of them.
+# Anonymous, because the documents describe the API's shape, not its data.
+SAVED_AUTH="$AUTH"
+as_anonymous
+STATUS="$(curl -sS -L -o "$BODY" -w '%{http_code}' "$BASE_URL/swagger-ui.html")"
+check "the gateway's Swagger UI answers 200 (following its redirect)" "200" "$STATUS"
+check "and it is the Swagger UI page" "True" "$(grep -q 'swagger-ui' "$BODY" && echo True || echo False)"
+
+STATUS="$(request GET /v3/api-docs/swagger-config)"
+check "the gateway's Swagger UI configuration answers 200" "200" "$STATUS"
+check "its dropdown lists the five documented services" \
+    "/v3/api-docs/app /v3/api-docs/assistant /v3/api-docs/catalog /v3/api-docs/customer /v3/api-docs/inventory" \
+    "$(jget "' '.join(sorted(u['url'] for u in d['urls']))")"
+
+for doc in "catalog|EcomDemo Catalog API" "customer|EcomDemo Customer API" "inventory|EcomDemo Inventory API" \
+           "app|EcomDemo Orders API" "assistant|EcomDemo Assistant API"; do
+    service="${doc%%|*}"
+    title="${doc#*|}"
+    STATUS="$(request GET "/v3/api-docs/$service")"
+    check "GET /v3/api-docs/$service through the gateway returns 200" "200" "$STATUS"
+    check "and is an OpenAPI 3 document titled $title" "3|$title" \
+        "$(jget "d['openapi'].split('.')[0] + '|' + d['info']['title']")"
+    # Relative: it resolves to the gateway this was fetched through, so "Try it out" goes through it too.
+    check "and its only server is relative (the gateway it was fetched through)" "/" \
+        "$(jget "' '.join(s['url'] for s in d['servers'])")"
+done
+
+request GET /v3/api-docs/catalog >/dev/null
+check "the catalog spec documents the write schema, ProductRequest, with its constraints" "True|255" \
+    "$(jget "str('ProductRequest' in d['components']['schemas']) + '|' + str(d['components']['schemas']['ProductRequest']['properties']['name']['maxLength'])")"
+
+for service in payment notification; do
+    check "$service-service exposes no docs through the gateway (404)" "404" \
+        "$(request GET "/v3/api-docs/$service")"
+done
+
+# What "Try it out" does with an authorized request: the server is relative, so it is the gateway's
+# own address plus the documented path, with the token pasted into Authorize.
+as_customer
+check "an authorized \"Try it out\" call through the gateway succeeds (GET /api/cart)" "200" \
+    "$(request GET /api/cart)"
+AUTH="$SAVED_AUTH"
 
 # --------------------------------------------------------------------------------------------
 # 4. Persistence across restarts (Phase 4)
