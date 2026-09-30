@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-30
 - **Phase:** 33 — Authentication Hardening
 - **Branch:** feature/phase-33-auth-hardening (cut from `main` at `5878be9`)
-- **Step:** IMPLEMENTING
+- **Step:** WAITING_FOR_USER
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
-- **Waiting for user:** NO
+- **Waiting for user:** YES (add the Phase 33 secrets to .env, then say `done`)
 
 ## Merge verification before this phase — PASSED (tag `ki-041-fixed` on `5878be9`)
 KI-041: PR #53 merge commit (2 parents), 0 missing, 0 diff, branch alive. CI main run 36676951498
@@ -19,7 +19,7 @@ green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
       verifies via JWKS; no HS256 secret anywhere; key rotation without downtime
 - [x] Scoped service identities replace the shared SERVICE role; callees check scopes
 - [x] Login throttling per username and per client, backoff, 429 + Retry-After, metrics
-- [ ] `docs/security.md` API2, API5; KI-014 and KI-015 closed
+- [x] `docs/security.md` API2, API5; KI-014 and KI-015 closed
 - [ ] Done when: only customer-service holds a signing key, rotation without downtime, repeated wrong
       passwords throttled - each proven by automated tests
 - [ ] Smoke: JWKS serves the public key, foreign-key token rejected; 429 + Retry-After; out-of-scope
@@ -46,13 +46,13 @@ green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
   counters `ecomdemo.auth.login.failures`, `ecomdemo.auth.login.throttled{key}`.
 
 ## Next action
-DONE (committed, tests green): common, customer-service (RS256/JWKS/token endpoint/throttle + tests),
-gateway + every service on JWKS, scope rules in catalog/inventory/payment + scope tests, all tests
-off HS256. Full `./mvnw clean verify`: 693 tests, 0 failed (+4 scope tests since, green).
-NEXT: (5) compose/k8s env: JWT_JWK_SET_URI + SERVICE_TOKEN_URI for every service, SERVICE_CLIENT_SECRET
-for gateway/app/catalog, and in customer-service JWT_SIGNING_KEY + GATEWAY/APP/CATALOG_CLIENT_SECRET;
-k8s-up.sh generates them; .env.example documents them; remove JWT_SECRET. Then STOP for the USER STEP
-(append the generated secrets to .env), then (6) smoke additions, docs, testing protocol, PR.
+All code, config, smoke additions and docs (README, security.md, decisions, KNOWN_ISSUES) are
+committed; `./mvnw clean verify` 693/0 before the last 4 scope tests (those green separately).
+WAITING: the user appends JWT_SIGNING_KEY and GATEWAY/APP/CATALOG_CLIENT_SECRET to .env with the
+command in .env.example (check presence only: `grep -q "^NAME=." .env`, never print values), then says
+`done`. THEN: full `./mvnw clean verify`; cold compose (`down -v`, `up --build --wait`) + smoke copy;
+kind (`SKIP_BUILD=1 scripts/k8s-up.sh`, rollout restart all Deployments, `scripts/k8s-smoke.sh`); test
+report docs/test-reports/phase-33.md, RECENT.md rotation, tracker 🔵, PR `Phase 33: Authentication Hardening`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - Verification uses a COLD stack (`down -v`, `up --build --wait`, `.smoke-state` removed).
