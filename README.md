@@ -16,7 +16,7 @@ token for any administrator, and every service token carried one all-powerful SE
   published before it signs, and a verifier refetches the set when it meets an unknown `kid`.
 - **Service identities are scoped.** A service gets its token from customer-service with its own
   secret (OAuth2 client credentials), and the token carries only what that service needs: the
-  gateway `catalog:read`, catalog-service `inventory:read`, the application the rest. Each service
+  gateway `catalog:read`, catalog-service the stock it keeps in step with the catalogue, the application the rest. Each service
   checks the scope its endpoint requires.
 - **Logins are throttled** per username (5 failures) and per client address (20), with a block that
   starts at 30 s and doubles: `429` with `Retry-After`. Counted in PostgreSQL, before the password
@@ -3997,7 +3997,7 @@ has on record for it, and nothing else:
 |---|---|---|
 | `gateway-service` | `catalog:read` | anonymous browsing |
 | `ecomdemo-app` | `catalog:read catalog:write inventory:read inventory:write payment:settle` | checkout, the saga, the CSV import |
-| `catalog-service` | `inventory:read` | stock lookups |
+| `catalog-service` | `inventory:read inventory:write` | stock lookups, and the stock of a product created, updated or deleted |
 
 Each callee checks the scope it needs: catalog reads need a person or `catalog:read`, writes
 `catalog:write`; inventory reads `inventory:read`, changes `inventory:write`; payment's settlement

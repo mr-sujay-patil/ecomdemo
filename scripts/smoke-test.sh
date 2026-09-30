@@ -594,7 +594,7 @@ pass "login returns a token for the admin and both customers"
 # A JWT is three Base64url segments joined by dots: header, payload, signature.
 check "the token has three dot-separated parts" "3" \
     "$(printf '%s' "$CUSTOMER_TOKEN" | awk -F. '{print NF}')"
-check "the header names the signing algorithm" "HS256" \
+check "the header names the signing algorithm (RS256 since Phase 33)" "RS256" \
     "$(python3 -c "import json,sys;print(json.loads(sys.argv[1])['alg'])" "$(jwt_part "$CUSTOMER_TOKEN" 0)" 2>/dev/null)"
 
 # The payload decodes with no key at all. That is not a flaw - it is why nothing secret may ever
@@ -3549,28 +3549,30 @@ as_token "$FOREIGN_HEADER.$FOREIGN_PAYLOAD.$FOREIGN_SIGNATURE"
 check "a token signed with any other key is rejected (401), even claiming ADMIN" "401" \
     "$(request GET /api/customers/me)"
 
-# catalog-service's own token: it asks with its own secret and gets inventory:read, nothing more.
-SCOPED_JSON="$(ctr_exec "$CATALOG_CONTAINER" sh -c 'wget -qO- \
-    --header "Authorization: Basic $(printf "catalog-service:%s" "$SERVICE_CLIENT_SECRET" | base64 | tr -d "\n")" \
+# The gateway's own token: it asks with its own secret (inside its container) and gets catalog:read,
+# nothing more. Until Phase 33 every service token carried one SERVICE role that allowed all of this.
+GATEWAY_CONTAINER="${GATEWAY_CONTAINER:-ecomdemo-gateway-service}"
+SCOPED_JSON="$(ctr_exec "$GATEWAY_CONTAINER" sh -c 'wget -qO- \
+    --header "Authorization: Basic $(printf "gateway-service:%s" "$SERVICE_CLIENT_SECRET" | base64 | tr -d "\n")" \
     --header "Content-Type: application/x-www-form-urlencoded" \
     --post-data "grant_type=client_credentials" http://customer-service:8083/oauth2/token' 2>/dev/null)"
-check "catalog-service gets a service token scoped to inventory:read only" "inventory:read" \
+check "the gateway gets a service token scoped to catalog:read only" "catalog:read" \
     "$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['scope'])" "$SCOPED_JSON" 2>/dev/null)"
 SCOPED_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "$SCOPED_JSON" 2>/dev/null)"
-# in_catalog_status <token> <url> [json-body] -> the HTTP status, as BusyBox wget reports it
-in_catalog_status() {
-    ctr_exec "$CATALOG_CONTAINER" sh -c 'if [ -n "$3" ]; then
+# in_gateway_status <token> <url> [json-body] -> the HTTP status, as BusyBox wget reports it
+in_gateway_status() {
+    ctr_exec "$GATEWAY_CONTAINER" sh -c 'if [ -n "$3" ]; then
             wget -q -S -O /dev/null --header "Authorization: Bearer $1" --header "Content-Type: application/json" --post-data "$3" "$2"
         else
             wget -q -S -O /dev/null --header "Authorization: Bearer $1" "$2"
         fi 2>&1 | awk "/HTTP\\//{print \$2}" | tail -1' _ "$1" "$2" "${3:-}" 2>/dev/null
 }
-check "with it, catalog-service may read stock (200)" "200" \
-    "$(in_catalog_status "$SCOPED_TOKEN" http://inventory-service:8082/api/inventory/1)"
-check "but a service token cannot call outside its scope: changing stock is 403" "403" \
-    "$(in_catalog_status "$SCOPED_TOKEN" http://inventory-service:8082/api/inventory/1/reserve '{"units":1,"productName":"Smoke"}')"
+check "with it, the gateway may read the catalogue (200)" "200" \
+    "$(in_gateway_status "$SCOPED_TOKEN" http://catalog-service:8081/api/products/1)"
+check "but a service token cannot call outside its scope: reading stock is 403" "403" \
+    "$(in_gateway_status "$SCOPED_TOKEN" http://inventory-service:8082/api/inventory/1)"
 check "and asking payment-service to settle an order is 403" "403" \
-    "$(in_catalog_status "$SCOPED_TOKEN" http://payment-service:8086/internal/saga/orders/1/settle '{"amount":1.00}')"
+    "$(in_gateway_status "$SCOPED_TOKEN" http://payment-service:8086/internal/saga/orders/1/settle '{"amount":1.00}')"
 
 # Throttling: five wrong passwords for one username, then the sixth attempt is refused before the
 # password is even checked. The username is unique per run; an account need not exist to be throttled.

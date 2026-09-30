@@ -96,20 +96,19 @@ class InventorySecurityTest {
     }
 
     /**
-     * Phase 33: least privilege between services. catalog-service looks stock up and never sets it,
-     * so customer-service gives its token {@code inventory:read} and nothing more. Until Phase 33 it
-     * carried the same SERVICE role as the application and could have emptied the stock of any
-     * product.
+     * Phase 33: least privilege between services. A token holding {@code inventory:read} alone may
+     * look stock up and never set it. Until Phase 33 every service token carried the same SERVICE
+     * role, and any service could have emptied the stock of any product.
      */
     @Test
     @DisplayName("a read-only service token can read stock but not change it")
     void aReadScopeCannotWrite() throws Exception {
-        String catalogs = TestJwt.service("catalog-service", ServiceTokens.INVENTORY_READ);
+        String readOnly = TestJwt.service("read-only-client", ServiceTokens.INVENTORY_READ);
 
-        mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + catalogs))
+        mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + readOnly))
                 .andExpect(status().isOk());
         mvc.perform(post("/api/inventory/1/reserve")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + catalogs)
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + readOnly)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"units\":1,\"productName\":\"Anything\"}"))
                 .andExpect(status().isForbidden());

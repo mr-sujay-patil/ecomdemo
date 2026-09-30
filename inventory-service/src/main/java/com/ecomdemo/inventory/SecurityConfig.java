@@ -35,9 +35,10 @@ import org.springframework.security.web.SecurityFilterChain;
  * business path requires ADMIN or a service, and a CUSTOMER gets 403 here as well as at the edge.
  *
  * <p><strong>Scoped since Phase 33.</strong> "A service" used to mean the one shared SERVICE role,
- * so catalog-service, which only ever reads stock, could equally set it. Now reads need ADMIN or
- * {@code inventory:read} (catalog-service, the application) and every change needs ADMIN or
- * {@code inventory:write} (only the application: checkout, the saga, the stock import).
+ * so the gateway, which only browses the catalogue, could equally set stock. Now reads need ADMIN or
+ * {@code inventory:read} and every change needs ADMIN or {@code inventory:write}: held by the
+ * application (checkout, the saga) and catalog-service (a product's stock on create, update and
+ * delete), and by nothing else.
  * {@code InventorySecurityTest} proves both, and that a read-only token cannot write.
  */
 @Configuration

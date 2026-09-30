@@ -36,7 +36,7 @@ import org.springframework.security.web.SecurityFilterChain;
  * role, so each rule names exactly which service may do it: reads for a person (CUSTOMER or ADMIN)
  * or {@code catalog:read} (the gateway, the application); writes and the embedding backfill for
  * ADMIN or {@code catalog:write} (only the application). catalog-service's own token, which holds
- * {@code inventory:read} and nothing else, cannot even read here. {@code CatalogSecurityTest} proves
+ * inventory scopes only, cannot even read here. {@code CatalogSecurityTest} proves
  * a CUSTOMER and an out-of-scope service get 403.
  *
  * <p>Note what that means for reads: the public product listing is public on the APPLICATION, not

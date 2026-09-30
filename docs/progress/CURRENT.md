@@ -36,7 +36,8 @@ green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
 - Service identities: minimal OAuth2 client credentials, `POST /oauth2/token` (HTTP Basic client id +
   secret, BCrypt-hashed in config), token `sub` = client id, `scope` claim, no roles. Clients:
   gateway-service `catalog:read`; ecomdemo-app `catalog:read catalog:write inventory:read
-  inventory:write payment:settle`; catalog-service `inventory:read`. Secrets from env
+  inventory:write payment:settle`; catalog-service `inventory:read
+  inventory:write`. Secrets from env
   (`*_CLIENT_SECRET`); k8s-up.sh generates them; compose needs them in `.env` (USER STEP).
 - Authorities: `roles` → ROLE_*, `scope` → SCOPE_*. Callees: catalog reads CUSTOMER|ADMIN|
   SCOPE_catalog:read, writes ADMIN|SCOPE_catalog:write; inventory reads ADMIN|SCOPE_inventory:read,

@@ -218,11 +218,11 @@ credentials), carrying only its scopes, and each callee checks them:
 | Caller | Scopes | Refused, for example |
 |---|---|---|
 | gateway-service | `catalog:read` | writing the catalogue, reading stock, settling a payment |
-| catalog-service | `inventory:read` | changing stock, reading the catalogue, settling a payment |
+| catalog-service | `inventory:read inventory:write` | reading or writing the catalogue as a service, settling a payment |
 | ecomdemo-app | `catalog:read catalog:write inventory:read inventory:write payment:settle` | - |
 
 Proven by `InventorySecurityTest`, `ProductApiIT` and `PaymentSecurityTest` (an out-of-scope token
-gets 403) and by the smoke test, which asks for catalog-service's real token inside its container.
+gets 403) and by the smoke test, which asks for the gateway's real token inside its container.
 
 ### API6 Unrestricted Access to Sensitive Business Flows 🟡
 

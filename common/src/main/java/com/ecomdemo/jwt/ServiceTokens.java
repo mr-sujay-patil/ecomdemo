@@ -28,7 +28,8 @@ package com.ecomdemo.jwt;
  *   <tr><td>gateway-service</td><td>{@code catalog:read} (anonymous browsing)</td></tr>
  *   <tr><td>ecomdemo-app</td><td>{@code catalog:read catalog:write inventory:read
  *       inventory:write payment:settle}</td></tr>
- *   <tr><td>catalog-service</td><td>{@code inventory:read}</td></tr>
+ *   <tr><td>catalog-service</td><td>{@code inventory:read inventory:write} (a product's stock is
+ *       set when the product is created, updated or deleted)</td></tr>
  * </table>
  *
  * <p>The list is configured in customer-service, which issues the tokens; these constants are the
