@@ -1,34 +1,59 @@
 package com.ecomdemo.security;
 
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
-import javax.crypto.SecretKey;
+import com.ecomdemo.jwt.JwtProperties;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
+import com.nimbusds.jose.proc.JWSVerificationKeySelector;
+import com.nimbusds.jose.proc.SecurityContext;
+import com.nimbusds.jwt.proc.DefaultJWTProcessor;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Import;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
+import org.springframework.security.oauth2.jwt.JwtValidators;
+import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 
 /**
- * The half of Phase 9's JWT configuration that did <strong>not</strong> move to {@code common}.
+ * The only service that can sign a token (Phase 33).
  *
- * <p>Phase 20b split this class in two along the line that matters: every service must
- * <em>verify</em> a token, so the key and the {@link org.springframework.security.oauth2.jwt.JwtDecoder}
- * are in {@link com.ecomdemo.jwt.JwtKeyConfig}; only the service that owns logins may
- * <em>issue</em> one, so the encoder stayed here. When customer-service is extracted, this file
- * goes with it and no other service ever gains the ability to mint a token.
+ * <p>Phase 20b split Phase 9's JWT configuration along the line that matters: every service
+ * VERIFIES, only this one ISSUES. With HS256 that line was aspirational, because verifying and
+ * signing used the same shared secret and every service held it. Now it is enforced by
+ * mathematics: this service holds RSA private keys ({@link SigningKeys}); everyone else only ever
+ * receives the public halves, from {@code /oauth2/jwks}, and a public key cannot sign.
  *
- * <p>That line is aspirational rather than enforced, and the reason is in {@code JwtKeyConfig}:
- * HS256 verifies with the same secret it signs with, so every service <em>could</em> mint a token
- * whether or not it has an encoder bean. Keeping the bean where it belongs is still worth doing —
- * it makes the intended shape obvious, and it is what survives the move to asymmetric keys.
+ * <p>This service verifies its own tokens (a customer reading their profile) against the same key
+ * set it signs with, in process, rather than fetching its own JWKS over HTTP.
  */
 @Configuration
-@Import(com.ecomdemo.jwt.JwtKeyConfig.class)
+@EnableConfigurationProperties(SigningKeyProperties.class)
 public class JwtConfig {
 
-    /** Signs. Used only by the login endpoint. */
     @Bean
-    public JwtEncoder jwtEncoder(SecretKey jwtSigningKey) {
-        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey));
+    public SigningKeys signingKeys(SigningKeyProperties properties) {
+        return SigningKeys.from(properties);
+    }
+
+    /**
+     * Signs with whichever key a token's header names ({@code kid}); {@code TokenService} always
+     * names the active one. Given several keys, Nimbus refuses to guess, which is the behaviour
+     * wanted.
+     */
+    @Bean
+    public JwtEncoder jwtEncoder(SigningKeys keys) {
+        return new NimbusJwtEncoder(new ImmutableJWKSet<>(keys.all()));
+    }
+
+    /** Verifies against every published key, so tokens signed before a rotation stay valid. */
+    @Bean
+    public JwtDecoder jwtDecoder(SigningKeys keys, JwtProperties properties) {
+        DefaultJWTProcessor<SecurityContext> processor = new DefaultJWTProcessor<>();
+        processor.setJWSKeySelector(new JWSVerificationKeySelector<>(
+                JWSAlgorithm.RS256, new ImmutableJWKSet<>(keys.all().toPublicJWKSet())));
+        NimbusJwtDecoder decoder = new NimbusJwtDecoder(processor);
+        decoder.setJwtValidator(JwtValidators.createDefaultWithIssuer(properties.issuer()));
+        return decoder;
     }
 }

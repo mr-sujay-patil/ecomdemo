@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-30
 - **Phase:** 33 — Authentication Hardening
 - **Branch:** feature/phase-33-auth-hardening (cut from `main` at `5878be9`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -46,8 +46,20 @@ green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
   counters `ecomdemo.auth.login.failures`, `ecomdemo.auth.login.throttled{key}`.
 
 ## Next action
-Housekeeping committed. Implement step 1: common verification (JWKS / test public key, ROLE_ + SCOPE_
-authorities), then customer-service signing + JWKS + token endpoint.
+DONE (committed): common (JWKS decoder, ROLE_+SCOPE_ authorities, ClientCredentialsTokenProvider,
+ServiceTokens scopes, TestJwt + TestJwtAutoConfiguration in the test-jar; common tests green);
+customer-service main code compiles: SigningKeys/JwtConfig (RS256, kid), TokenService, OAuth2Controller
+(/oauth2/jwks, /oauth2/token), ServiceClientProperties, login throttle (V2 migration, entity, service,
+429 + Retry-After in AuthController). NOT yet run: customer tests.
+NEXT, in order: (1) rewrite customer tests JwtConfigTest, TokenServiceTest, AuthApiIT (drop HS256;
+add OAuth2Controller + throttle tests); (2) remove `ecomdemo.jwt.secret` from every other service's
+properties, add `ecomdemo.jwt.jwk-set-uri` + `ecomdemo.service-identity.*` (app client-id
+`ecomdemo-app`); gateway: reactive JWKS decoder + authorities(), ServiceIdentityFilter fetch off the
+event loop, drop JwtKeyConfig import; (3) scope rules in catalog/inventory/payment SecurityConfig
+(ServiceTokens.ROLE is gone); (4) fix remaining tests (list: grep jwtSigningKey|SecretKey|ServiceTokens.ROLE);
+(5) compose/k8s env (JWT_JWK_SET_URI, SERVICE_TOKEN_URI, *_CLIENT_SECRET, JWT_SIGNING_KEY; k8s-up
+generates), .env.example; USER STEP before the compose smoke: add the secrets to .env; (6) smoke,
+docs, testing protocol, PR.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - Verification uses a COLD stack (`down -v`, `up --build --wait`, `.smoke-state` removed).
