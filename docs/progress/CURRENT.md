@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-30
 - **Phase:** 33 — Authentication Hardening
 - **Branch:** feature/phase-33-auth-hardening (cut from `main` at `5878be9`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #54 https://github.com/mr-sujay-patil/ecomdemo/pull/54
+- **Waiting for user:** YES (review of PR #54)
 
 ## Merge verification before this phase — PASSED (tag `ki-041-fixed` on `5878be9`)
 KI-041: PR #53 merge commit (2 parents), 0 missing, 0 diff, branch alive. CI main run 36676951498
@@ -47,9 +47,10 @@ green (4 jobs). On main: verify 673/0, cold smoke (`down -v`) 457/0/0.
   counters `ecomdemo.auth.login.failures`, `ecomdemo.auth.login.throttled{key}`.
 
 ## Next action
-Tested: verify 697 (521 unit, 176 IT) 0 failed; cold compose smoke 467/0/0; kind 423/0/7 (report:
-docs/test-reports/phase-33.md). Open the PR `Phase 33: Authentication Hardening`, put its number in
-RECENT.md (PR #PR_NUMBER placeholder), commit, push, STOP for review.
+PR #54 is open. STOP: wait for the user's review. After the merge: merge verification (git checks,
+CI on main, `./mvnw clean verify` + cold `down -v` smoke on main; the user's .env already has the
+Phase 33 secrets), tag `phase-33-complete`. Phase 33 is the last phase on the roadmap: ask the user
+what is next (open fixes: KI-039, KI-040, KI-002..011).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - Verification uses a COLD stack (`down -v`, `up --build --wait`, `.smoke-state` removed).

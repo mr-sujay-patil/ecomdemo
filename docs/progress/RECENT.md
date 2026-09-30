@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 33: Authentication Hardening (tag: phase-33-complete, PR #PR_NUMBER)
+## Phase 33: Authentication Hardening (tag: phase-33-complete, PR #54)
 **What exists now:** customer-service alone signs tokens, RS256 with a `kid`; everyone else verifies
 with its public keys from `/oauth2/jwks` (no shared secret anywhere). Services get their own tokens
 from `POST /oauth2/token` (client credentials, own secret) with scopes: gateway `catalog:read`,
