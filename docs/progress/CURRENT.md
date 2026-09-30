@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-30
 - **Fix:** KI-001 — Swagger UI and OpenAPI docs unreachable since the split
 - **Branch:** fix/ki-001-openapi-docs (cut from `main` at `48e8949`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -21,7 +21,8 @@
   (option A, 2026-09-30).
 
 ## Checklist (from KI-001's "Fix scope" and "Done when")
-- [ ] Reproduce first: failing regression test(s) for the missing docs
+- [x] Reproduce first: gateway `ApiDocsIT` (11/11 fail: 401), per-service docs tests (all fail:
+      401 / `openApiResource` present), app title test fails
 - [ ] catalog, customer, inventory, assistant, app: open `/v3/api-docs` in each `SecurityConfig`,
       own title from configuration via `OpenApiConfig`, gateway as the only server
 - [ ] payment and notification: docs closed or disabled
@@ -35,8 +36,10 @@
 - [ ] Testing protocol steps 1, 3, 4, 7, 8 + regression test; KI-001 → Fixed; PR; PR number in status
 
 ## Next action
-Housekeeping commit is done. Start with the step "Reproduce first": write tests that fail today
-(e.g. a gateway test for `/v3/api-docs/catalog` and per-service spec tests), then fix service by service.
+Regression tests committed (red on purpose). Fix: `OpenApiConfig` title/description/server from
+`ecomdemo.openapi.*`; open docs paths in catalog/customer/inventory/assistant `SecurityConfig`;
+`springdoc.*.enabled=false` in payment/notification; gateway: springdoc-openapi-starter-webflux-ui
+3.1.1, explicit `/v3/api-docs/<svc>` routes (RewritePath, before `app`), permitAll docs paths.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification still uses a COLD stack
