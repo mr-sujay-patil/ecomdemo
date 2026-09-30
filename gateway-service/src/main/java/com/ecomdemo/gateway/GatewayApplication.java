@@ -1,7 +1,6 @@
 package com.ecomdemo.gateway;
 
 import com.ecomdemo.clients.ServiceIdentityConfig;
-import com.ecomdemo.jwt.JwtKeyConfig;
 import com.ecomdemo.metrics.MetricsConfig;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
@@ -19,30 +18,27 @@ import org.springframework.context.annotation.Import;
  * everything looks configured.
  *
  * <p>So the scan covers this package only, and the pieces of {@code common} that are genuinely
- * shared are brought in explicitly: {@link JwtKeyConfig} and {@link MetricsConfig} below, plus the
+ * shared are brought in explicitly: {@link MetricsConfig} and {@link ServiceIdentityConfig} below, plus the
  * constants ({@code AuthMessages}, {@code CorrelationId}, {@code TokenClaims}, {@code ApiError})
  * which are plain classes and need no context at all.
  *
  * <p>{@link ServiceIdentityConfig} supplies the {@code ServiceTokenProvider} that
- * {@link ServiceIdentityFilter} signs with. Its own javadoc explains why it lives in
- * {@code com.ecomdemo.clients} rather than {@code com.ecomdemo.jwt}: everyone verifies, only callers
- * sign — and a gateway is a caller.
+ * {@link ServiceIdentityFilter} uses: since Phase 33 it fetches the gateway's own token from
+ * customer-service, scoped to {@code catalog:read}. Everyone verifies, only callers need a token,
+ * and a gateway is a caller.
  *
  * <p>{@link MetricsConfig} is the one an explicit import is easiest to forget, and forgetting it is
  * invisible: it stamps {@code application=<name>} onto every meter, and without it this service's
  * {@code http_server_requests} series merges with another service's under the same name. Prometheus
  * would show one graph that looks plausible and is two services added together.
  *
- * <p><strong>Why {@link JwtKeyConfig} is imported rather than copied.</strong> It derives the HS256
- * key from {@code JWT_SECRET}, refuses a key shorter than 256 bits instead of padding it, and warns
- * that a generated key differs per service. That is security-relevant logic with a reason behind
- * every line, and a second copy of it at the edge would be a second thing to get wrong. Importing
- * it also contributes a servlet {@code JwtDecoder} bean that nothing here uses — an accepted,
- * visible cost, and cheaper than duplicating key handling. The reactive decoder this application
- * actually validates with is in {@link GatewayJwtConfig}.
+ * <p><strong>Token validation</strong> is in {@link GatewayJwtConfig}: a reactive decoder that checks
+ * signatures against customer-service's published PUBLIC keys (Phase 33). Until then this class
+ * imported {@code JwtKeyConfig} for the shared HS256 secret; with no shared secret left, there is
+ * nothing to import.
  */
 @SpringBootApplication(scanBasePackages = "com.ecomdemo.gateway")
-@Import({JwtKeyConfig.class, MetricsConfig.class, ServiceIdentityConfig.class})
+@Import({MetricsConfig.class, ServiceIdentityConfig.class})
 public class GatewayApplication {
 
     public static void main(String[] args) {

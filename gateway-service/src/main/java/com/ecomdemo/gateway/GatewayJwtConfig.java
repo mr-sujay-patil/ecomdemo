@@ -2,19 +2,18 @@ package com.ecomdemo.gateway;
 
 import com.ecomdemo.jwt.JwtAuthorities;
 import com.ecomdemo.jwt.JwtProperties;
-import com.ecomdemo.shared.TokenClaims;
-import javax.crypto.SecretKey;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtGrantedAuthoritiesConverterAdapter;
 import reactor.core.publisher.Mono;
@@ -29,11 +28,11 @@ import reactor.core.publisher.Mono;
  * distinction is not cosmetic — a blocking decode on a Netty event loop would stall every other
  * connection that thread is serving.
  *
- * <p>What is shared is the part that matters: the {@code SecretKey} bean comes from
- * {@code JwtKeyConfig} (imported by {@link GatewayApplication}), so the key-length rule and the
- * missing-secret warning have exactly one implementation. The validator is built from the same
- * {@code JwtValidators.createDefaultWithIssuer} call for the same reason: signature, {@code exp},
- * {@code nbf} and {@code iss}, with the same clock-skew allowance between containers.
+ * <p>What is shared is the part that matters. Since Phase 33 both check the signature against
+ * customer-service's PUBLIC keys, fetched from {@code ecomdemo.jwt.jwk-set-uri} and refetched when
+ * a token names a key id the cache does not know (so a key rotation needs no restart here either),
+ * and both use {@code JwtValidators.createDefaultWithIssuer}: {@code exp}, {@code nbf} and
+ * {@code iss}, with the same clock-skew allowance between containers.
  *
  * <p><strong>The edge validates, and the services validate again.</strong> That is deliberate
  * duplication. If a route here were ever misconfigured — pointing at the wrong service, or missing
@@ -42,12 +41,15 @@ import reactor.core.publisher.Mono;
  * something that will reject it itself.
  */
 @Configuration(proxyBeanMethods = false)
+@EnableConfigurationProperties(JwtProperties.class)
 public class GatewayJwtConfig {
 
+    /** Only when a JWKS URI is configured: the tests supply a decoder that trusts their own key. */
     @Bean
-    ReactiveJwtDecoder reactiveJwtDecoder(SecretKey jwtSigningKey, JwtProperties properties) {
-        NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withSecretKey(jwtSigningKey)
-                .macAlgorithm(MacAlgorithm.HS256)
+    @ConditionalOnProperty(name = "ecomdemo.jwt.jwk-set-uri")
+    ReactiveJwtDecoder reactiveJwtDecoder(JwtProperties properties) {
+        NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder.withJwkSetUri(properties.jwkSetUri())
+                .jwsAlgorithm(SignatureAlgorithm.RS256)
                 .build();
         OAuth2TokenValidator<Jwt> validator = JwtValidators.createDefaultWithIssuer(properties.issuer());
         decoder.setJwtValidator(validator);
@@ -55,8 +57,9 @@ public class GatewayJwtConfig {
     }
 
     /**
-     * Turns the {@code roles} claim into authorities, with the same {@code ROLE_} prefix the
-     * services use.
+     * Turns the {@code roles} claim into {@code ROLE_*} and, since Phase 33, the {@code scope} claim
+     * of a service token into {@code SCOPE_*}: the same {@code JwtAuthorities.authorities()} every
+     * service uses.
      *
      * <p>The prefix is the whole reason this bean exists. Spring Security's {@code hasRole("ADMIN")}
      * looks for an authority literally named {@code ROLE_ADMIN}, while the token carries
@@ -69,13 +72,9 @@ public class GatewayJwtConfig {
      */
     @Bean
     Converter<Jwt, Mono<AbstractAuthenticationToken>> reactiveJwtAuthenticationConverter() {
-        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName(TokenClaims.ROLES);
-        authorities.setAuthorityPrefix(JwtAuthorities.ROLE_PREFIX);
-
         ReactiveJwtAuthenticationConverter converter = new ReactiveJwtAuthenticationConverter();
         converter.setJwtGrantedAuthoritiesConverter(
-                new ReactiveJwtGrantedAuthoritiesConverterAdapter(authorities));
+                new ReactiveJwtGrantedAuthoritiesConverterAdapter(JwtAuthorities.authorities()));
         return converter;
     }
 }

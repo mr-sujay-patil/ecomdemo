@@ -18,9 +18,10 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
  * of a module that depends on the test-jar, and only there: production code never sees it.
  *
  * <ul>
- *   <li>A decoder that trusts the test key, only when the application defined none. No test profile
- *       sets {@code ecomdemo.jwt.jwk-set-uri}, so the JWKS decoder is absent and this one fills in;
- *       customer-service, which verifies with its own keys, keeps its own.
+ *   <li>A decoder that trusts the test key. {@code @Primary}, because every service's configuration
+ *       has a default {@code ecomdemo.jwt.jwk-set-uri}, so its real JWKS decoder exists too (it would
+ *       fetch keys from a customer-service that is not running). Not in customer-service, recognised
+ *       by its {@code signingKeys} bean: it verifies with its own keys, and its tests log in for real.
  *   <li>A service token that needs no customer-service. {@code @Primary}, because the application's
  *       own provider (which would call {@code /oauth2/token} over HTTP) is still defined. It carries
  *       every scope: the scope CHECKS are tested in each callee with tokens made for that purpose.
@@ -30,14 +31,15 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 public class TestJwtAutoConfiguration {
 
     @Bean
-    @ConditionalOnMissingBean(JwtDecoder.class)
+    @Primary
+    @ConditionalOnMissingBean(name = "signingKeys")
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
     JwtDecoder testJwtDecoder() {
         return TestJwt.decoder();
     }
 
     @Bean
-    @ConditionalOnMissingBean(ReactiveJwtDecoder.class)
+    @Primary
     @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.REACTIVE)
     ReactiveJwtDecoder testReactiveJwtDecoder() {
         return TestJwt.reactiveDecoder();
