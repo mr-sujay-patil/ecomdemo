@@ -112,8 +112,8 @@ a preflight from another origin is refused; an authenticated cross-origin `GET /
 |---|---|---|---|
 | KI-012 | An order whose saga event is dead-lettered stays PENDING forever | Phase 32 | Fixed in Phase 32 (saga deadline) |
 | KI-013 | No reconciliation of `stock_reservation` against orders | Phase 32 | Fixed in Phase 32 (close + fence) |
-| KI-014 | No login throttling or lockout (BCrypt cost is the only brake) | Phase 33 | Open |
-| KI-015 | Symmetric JWT signing (HS256): every verifier can also mint tokens; one shared SERVICE role | Phase 33 | Open |
+| KI-014 | No login throttling or lockout (BCrypt cost is the only brake) | Phase 33 | Fixed in Phase 33 (per-username and per-client throttling, 429 + Retry-After) |
+| KI-015 | Symmetric JWT signing (HS256): every verifier can also mint tokens; one shared SERVICE role | Phase 33 | Fixed in Phase 33 (RS256 + JWKS, scoped client-credentials service tokens) |
 
 ## Candidates: new capabilities (a phase only if approved)
 
