@@ -31,6 +31,12 @@ public final class TokenClaims {
     /** The roles, without the {@code ROLE_} prefix Spring Security adds back on the way in. */
     public static final String ROLES = "roles";
 
+    /**
+     * A SERVICE token's permissions, space-separated ({@code "catalog:read inventory:read"}), as
+     * OAuth2 spells it. People's tokens carry {@link #ROLES} instead (Phase 33).
+     */
+    public static final String SCOPE = "scope";
+
     /** The username. Standard: {@link JwtClaimNames#SUB}. */
     public static final String SUBJECT = JwtClaimNames.SUB;
 

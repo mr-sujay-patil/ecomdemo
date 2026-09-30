@@ -1,40 +1,54 @@
 package com.ecomdemo.jwt;
 
 import com.ecomdemo.shared.TokenClaims;
+import java.util.ArrayList;
+import java.util.Collection;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 
 /**
- * Turns the {@code roles} claim of a token into Spring Security authorities, the same way in every
- * service.
+ * Turns a token's claims into the authorities the security rules check.
  *
- * <p>Spring's default reads {@code scope}/{@code scp} and prefixes with {@code SCOPE_}. This system
- * issues its own tokens and thinks in roles, so it reads {@code roles} and prefixes with
- * {@code ROLE_} — which is what makes the untouched {@code hasRole(...)} expressions keep working.
- *
- * <p>It is in {@code common} for the reason every contract here ends up in {@code common}: two
- * services that disagree about the prefix do not fail to compile, they fail at runtime with a 403
- * that says nothing about why.
+ * <p>Two kinds of caller, two claims (Phase 33):
+ * <ul>
+ *   <li>a PERSON's token carries {@code roles} ({@code CUSTOMER}, {@code ADMIN}) → {@code ROLE_*};
+ *   <li>a SERVICE's token carries {@code scope} ({@code catalog:read inventory:read}) →
+ *       {@code SCOPE_*}. It has no roles: a service is not a customer or an administrator, and the
+ *       old shared {@code ROLE_SERVICE} let every service call every endpoint any service could.
+ * </ul>
+ * A rule then names exactly who may call it, for example
+ * {@code hasAnyAuthority("ROLE_ADMIN", "SCOPE_inventory:write")}.
  */
 public final class JwtAuthorities {
 
-    /**
-     * The one definition. {@code hasRole("ADMIN")} is shorthand for the authority
-     * {@code ROLE_ADMIN}, so anything that builds authorities by hand has to agree with this.
-     */
     public static final String ROLE_PREFIX = "ROLE_";
+
+    public static final String SCOPE_PREFIX = "SCOPE_";
 
     private JwtAuthorities() {
     }
 
-    /** The converter to hand to {@code oauth2ResourceServer().jwt(...)}. */
-    public static JwtAuthenticationConverter converter() {
-        JwtGrantedAuthoritiesConverter authorities = new JwtGrantedAuthoritiesConverter();
-        authorities.setAuthoritiesClaimName(TokenClaims.ROLES);
-        authorities.setAuthorityPrefix(ROLE_PREFIX);
+    /** {@code roles} → {@code ROLE_*} plus {@code scope} → {@code SCOPE_*}, for any decoder. */
+    public static Converter<Jwt, Collection<GrantedAuthority>> authorities() {
+        JwtGrantedAuthoritiesConverter roles = new JwtGrantedAuthoritiesConverter();
+        roles.setAuthoritiesClaimName(TokenClaims.ROLES);
+        roles.setAuthorityPrefix(ROLE_PREFIX);
+        JwtGrantedAuthoritiesConverter scopes = new JwtGrantedAuthoritiesConverter();
+        scopes.setAuthoritiesClaimName(TokenClaims.SCOPE);
+        scopes.setAuthorityPrefix(SCOPE_PREFIX);
+        return jwt -> {
+            Collection<GrantedAuthority> all = new ArrayList<>(roles.convert(jwt));
+            all.addAll(scopes.convert(jwt));
+            return all;
+        };
+    }
 
+    public static JwtAuthenticationConverter converter() {
         JwtAuthenticationConverter converter = new JwtAuthenticationConverter();
-        converter.setJwtGrantedAuthoritiesConverter(authorities);
+        converter.setJwtGrantedAuthoritiesConverter(authorities());
         return converter;
     }
 }

@@ -3,22 +3,20 @@ package com.ecomdemo.clients.catalog;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ecomdemo.jwt.JwtProperties;
 import com.ecomdemo.jwt.ServiceTokenProvider;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
+import com.ecomdemo.jwt.ServiceTokens;
+import com.ecomdemo.support.TestJwt;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import javax.crypto.spec.SecretKeySpec;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
@@ -102,12 +100,8 @@ class CatalogClientTimeoutTest {
     }
 
     private static ServiceTokenProvider tokens() {
-        String key = "a-test-signing-key-of-32-bytes!!";
-        return new ServiceTokenProvider(
-                new NimbusJwtEncoder(new ImmutableSecret<>(new SecretKeySpec(
-                        key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"))),
-                new JwtProperties(key, "ecomdemo-test", Duration.ofMinutes(15)),
-                "ecomdemo-app");
+        // The timeouts under test are the catalogue client's; the token only has to be present.
+        return () -> TestJwt.service("ecomdemo-app", ServiceTokens.CATALOG_READ);
     }
 
     private static void sleep(Duration duration) {

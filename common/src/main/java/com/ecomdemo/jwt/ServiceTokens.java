@@ -1,7 +1,7 @@
 package com.ecomdemo.jwt;
 
 /**
- * The identity one service uses when it calls another on nobody's behalf.
+ * The identity one service uses when it calls another on nobody's behalf, and what it may do.
  *
  * <p><strong>Why a service identity at all, rather than passing the caller's token along?</strong>
  * Token relay is the better pattern where it works — the callee sees who is really being served,
@@ -16,17 +16,41 @@ package com.ecomdemo.jwt;
  *       either.
  * </ul>
  *
- * <p>So the caller authenticates as itself. Note what this gives up: inventory-service can no
- * longer tell an administrator from a shopper, so <em>authorisation</em> stays at the edge, in the
- * service that owns the endpoint the human called. That is the usual shape — the edge authorises,
- * the internal service authenticates — and it is only safe while the internal service is not
- * reachable from outside. Recorded in {@code docs/decisions.md}.
+ * <p><strong>Scoped since Phase 33, instead of one shared role.</strong> Until then every service
+ * token carried {@code ROLE_SERVICE}, so catalog-service could write stock and the gateway could ask
+ * payment-service to settle an order: anything one service may do, all could. Now each service gets
+ * its token from customer-service ({@code POST /oauth2/token}, with its own client secret), and the
+ * token lists only what that service needs. Each callee checks the scope its endpoint requires:
+ *
+ * <table>
+ *   <caption>Who may call what</caption>
+ *   <tr><th>Service</th><th>Scopes</th></tr>
+ *   <tr><td>gateway-service</td><td>{@code catalog:read} (anonymous browsing)</td></tr>
+ *   <tr><td>ecomdemo-app</td><td>{@code catalog:read catalog:write inventory:read
+ *       inventory:write payment:settle}</td></tr>
+ *   <tr><td>catalog-service</td><td>{@code inventory:read}</td></tr>
+ * </table>
+ *
+ * <p>The list is configured in customer-service, which issues the tokens; these constants are the
+ * names both sides agree on.
  */
 public final class ServiceTokens {
 
-    /** The {@code roles} entry, so a service call arrives as the authority {@code ROLE_SERVICE}. */
-    public static final String ROLE = "SERVICE";
+    public static final String CATALOG_READ = "catalog:read";
+
+    public static final String CATALOG_WRITE = "catalog:write";
+
+    public static final String INVENTORY_READ = "inventory:read";
+
+    public static final String INVENTORY_WRITE = "inventory:write";
+
+    public static final String PAYMENT_SETTLE = "payment:settle";
 
     private ServiceTokens() {
+    }
+
+    /** The authority a scope becomes after {@link JwtAuthorities}: {@code SCOPE_catalog:read}. */
+    public static String authority(String scope) {
+        return JwtAuthorities.SCOPE_PREFIX + scope;
     }
 }
