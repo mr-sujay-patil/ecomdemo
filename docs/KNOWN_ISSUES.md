@@ -44,6 +44,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-011 | Dead code: `InventoryGateway.reserve`/`release` and inventory's matching HTTP endpoints are no longer called by checkout | Low | Phase 24 | `architecture/saga.md` | Open |
 | KI-039 | compose's Kafka keeps nothing across `down`/`up`: the `kafka-data` volume is mounted at `/var/lib/kafka/data`, but the broker writes to `/tmp/kafka-logs`. Every topic, offset and consumer group is lost while the PostgreSQL volumes survive | Medium | Phase 17 | Phase 32 merge verification (2026-09-30): `kafka-log-dirs.sh` reports `/tmp/kafka-logs` | Open |
 | KI-040 | A dead letter is identified only by its Kafka address. `dead_letter_replay` is unique on `(dlt_topic, dlt_partition, dlt_offset)`, so once a DLT's offsets restart (topic recreated, or KI-039), a new dead letter at a reused offset is refused 409 "already replayed" and can never be replayed. Fails safe (never replays twice). Key it on the record's identity (e.g. the event ID) as well | Medium | Phase 32 | Phase 32 merge verification (2026-09-30): smoke with kept volumes 429/2 failed | Open |
+| KI-041 | The gateway answers every CORS preflight (`OPTIONS`) with 401, so a browser app on another origin cannot log in or send any authenticated request (details below) | Medium | Phase 21 | Found 2026-09-30 while writing the frontend integration guide: `curl -X OPTIONS` with `Origin: http://localhost:3000` → 401, no `Access-Control-Allow-*` | Fixed (PR #53) |
 
 ### KI-001: Swagger UI and OpenAPI docs unreachable since the split
 
@@ -75,6 +76,35 @@ servlet service builds a spec. But:
 authorized "Try it out" call succeeds through the gateway. Smoke additions: the gateway's Swagger UI
 answers 200, `/v3/api-docs/{service}` returns an OpenAPI 3 document per documented service, the
 catalog spec contains `ProductWrite`, and payment and notification expose no docs through the gateway.
+
+### KI-041: CORS preflight refused at the gateway
+
+**Found:** 2026-09-30, while writing the frontend integration guide. **Branch:** `fix/ki-041-cors-preflight`.
+
+**What's broken:** a browser sends a preflight `OPTIONS` before any cross-origin request with an
+`Authorization` header or a JSON body, and it never carries a token. The gateway's security chain
+(`GatewaySecurityConfig`) has no `.cors(...)`, so Spring Security handles the preflight before the
+gateway's `globalcors` configuration ever sees it: `anyExchange().authenticated()` → 401, with no
+`Access-Control-Allow-*` headers. Every preflight fails, `POST /api/auth/login` included. Simple
+anonymous `GET`s work, which is why nothing noticed: every client so far (curl, the smoke test,
+Gatling, Swagger UI on the same origin) sends no preflight. Workaround: serve the frontend from the
+gateway's origin, or proxy `/api` through the frontend's dev server.
+
+**Fix scope:**
+- The gateway's security chain processes CORS first (`.cors(...)`), from the SAME configuration as
+  `spring.cloud.gateway.server.webflux.globalcors` in `application.yml`, so the allowed origins,
+  methods and headers stay in one place (`CORS_ALLOWED_ORIGINS`).
+- A preflight from an allowed origin gets 200 with the allow headers and never reaches a service;
+  one from any other origin is refused (403); an actual request carries exactly one
+  `Access-Control-Allow-Origin` header.
+- Regression tests in the gateway (preflight allowed, preflight from a foreign origin, no duplicate
+  headers on a real request); smoke checks for the same against the running stack.
+- README (the CORS paragraph), `docs/decisions.md`.
+
+**Done when:** a preflight from `http://localhost:3000` for `POST /api/auth/login` with
+`Content-Type` and for `GET /api/cart` with `Authorization` answers 200 with the allow headers;
+a preflight from another origin is refused; an authenticated cross-origin `GET /api/cart` returns
+200 with one `Access-Control-Allow-Origin`.
 
 ## Covered by an approved phase
 

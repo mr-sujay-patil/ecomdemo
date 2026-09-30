@@ -764,6 +764,21 @@ curl -s localhost:8080/v3/api-docs/catalog | python3 -m json.tool | head -40
 curl -s localhost:8084/v3/api-docs.yaml -o orders-api.yaml   # YAML: from a service's own port (here the app's)
 ```
 
+### Calling the API from a browser (CORS)
+
+A browser app served from another origin can call the gateway: it allows the origins in
+`CORS_ALLOWED_ORIGINS` (default `http://localhost:3000`, a frontend dev server), the methods
+`GET POST PUT DELETE OPTIONS`, the headers `Authorization`, `Content-Type` and `X-Correlation-Id`,
+and exposes `X-Correlation-Id`. Before a call with a token or a JSON body the browser sends a
+**preflight** (`OPTIONS`, never with a token); the gateway answers it before any authentication
+(KI-041), 200 for an allowed origin and 403 for any other. Every response to an allowed origin, a
+401 included, carries one `Access-Control-Allow-Origin`, so the app can read why a call was refused.
+
+```bash
+curl -si -X OPTIONS localhost:8080/api/auth/login -H 'Origin: http://localhost:3000' \
+  -H 'Access-Control-Request-Method: POST' -H 'Access-Control-Request-Headers: content-type' | head -1
+```
+
 ## Accounts and logging in
 
 Two kinds of account exist. **CUSTOMER** is what registration creates; **ADMIN** is seeded by
