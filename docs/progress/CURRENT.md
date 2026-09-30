@@ -5,7 +5,7 @@
 - **Updated:** 2026-09-30
 - **Fix:** KI-041 — CORS preflight refused at the gateway
 - **Branch:** fix/ki-041-cors-preflight (cut from `main` at `82e5149`)
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -18,18 +18,20 @@
   branch's housekeeping commit.
 
 ## Checklist (from KI-041's "Fix scope" and "Done when")
-- [ ] Reproduce first: gateway IT - preflight from an allowed origin (login with Content-Type,
+- [x] Reproduce first (`CorsIT`, 4/5 red: 401; commit `48a0a4b`): gateway IT - preflight from an allowed origin (login with Content-Type,
       cart with Authorization) gets 200 + allow headers; foreign origin refused (403);
       real authenticated request carries exactly one Access-Control-Allow-Origin
-- [ ] Fix: `.cors(...)` in `GatewaySecurityConfig`, built from the gateway's `globalcors` config
+- [x] Fix: `.cors(...)` in `GatewaySecurityConfig`, built from the gateway's `globalcors` config
       (one source: application.yml / `CORS_ALLOWED_ORIGINS`)
-- [ ] Smoke additions: the same three checks against the running stack
-- [ ] README CORS paragraph, `docs/decisions.md` (`[KI-041] Decision: ...`)
-- [ ] Testing protocol steps 1, 3, 4, 7, 8 + regression test; KI-041 → Fixed; PR; PR number in status
+- [x] Smoke additions: the same three checks against the running stack
+- [x] README CORS paragraph, `docs/decisions.md` (`[KI-041] Decision: ...`)
+- [x] Testing: verify 673 (506 unit, 167 IT) 0 failed; cold compose smoke 457/0/0; kind (9 Deployments
+      restarted) 413/0/7; cleaned up. KI-041 → Fixed
+- [ ] PR; PR number in KNOWN_ISSUES status
 
 ## Next action
-Housekeeping committed. Write the failing gateway IT (`CorsIT`, extends `GatewayTest`), show it
-red, commit it, then implement the fix.
+Tests passed. Open the PR `Fix KI-041: ...`, put its number in KI-041's status and here, commit,
+push, STOP for review.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification uses a COLD stack
