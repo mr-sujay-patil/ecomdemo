@@ -237,7 +237,9 @@ internal paths with the product name or order id as a *parameter*, never as a UR
   and JVM details. Recommended: scrape it on an internal port, or require a token.
 - ✅ **CSRF off** is deliberate. The API uses bearer tokens, not cookies, so a browser can't be
   tricked into sending credentials. The README's security section explains it.
-- ✅ **CORS:** an explicit origin list, methods and headers, and no credentials.
+- ✅ **CORS:** an explicit origin list, methods and headers, and no credentials. Since KI-041 the
+  gateway's security chain applies it first, so a preflight is answered (or refused, 403) before
+  authentication, from the same `globalcors` configuration the routes use.
 - ✅ **Least privilege in CI:** `contents: read` by default, `packages: write` only in `publish`.
 - ✅ **Containers:** non-root user, minimal JRE Alpine image, scanned.
 
