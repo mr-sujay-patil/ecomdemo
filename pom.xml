@@ -55,6 +55,8 @@
 	<properties>
 		<java.version>21</java.version>
 		<springdoc.version>3.1.1</springdoc.version>
+		<!-- The swagger-core release springdoc ${springdoc.version} is built against. Change the two together. -->
+		<swagger-core.version>2.2.55</swagger-core.version>
 
 		<!--
 			JaCoCo is not managed by the Spring Boot parent, so the version is pinned here.
@@ -158,6 +160,30 @@
 			**/dto/**
 		</sonar.coverage.exclusions>
 	</properties>
+
+	<!--
+		KI-001: the swagger annotations springdoc reads must be the version springdoc's swagger-core was
+		built against. Spring AI (catalog-service, assistant-service) brings swagger-annotations-jakarta
+		2.2.38 closer to the root than springdoc brings 2.2.55, so Maven's "nearest wins" picked the OLD
+		@Schema, and swagger-core failed on it with NoSuchMethodError (Schema.$dynamicRef()) the first
+		time anything built those services' /v3/api-docs. The OpenAI client also brings the non-jakarta
+		artifact, which holds the same package, so it is pinned too. Managed here, in the parent, so a
+		module that adds Spring AI later cannot bring the old one back.
+	-->
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>io.swagger.core.v3</groupId>
+				<artifactId>swagger-annotations-jakarta</artifactId>
+				<version>${swagger-core.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>io.swagger.core.v3</groupId>
+				<artifactId>swagger-annotations</artifactId>
+				<version>${swagger-core.version}</version>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<build>
 			<pluginManagement>

@@ -60,8 +60,9 @@
 				exists only for the reactive stack - is simply absent. The symptom is not an error; it
 				is an application that comes up healthy and routes nothing.
 
-				springdoc is excluded because it depends on the servlet starter and would drag it back
-				in. Nothing here is lost: this service has no controllers to document.
+				springdoc's WebMvc starter is excluded because it depends on the servlet starter and
+				would drag it back in. The gateway has no controllers of its own to document; it takes
+				springdoc's WEBFLUX UI starter instead (below), to host the Swagger UI (KI-001).
 
 				`common`'s own servlet classes remain on the classpath as bytecode - CorrelationIdFilter,
 				ApiErrorWriter, the exception handler - and are never loaded, because
@@ -87,6 +88,19 @@
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
+		</dependency>
+
+		<!--
+			KI-001: one Swagger UI for the whole system, at the one address a browser can reach.
+			Each service still builds its own OpenAPI document (only it knows its controllers); the
+			gateway routes /v3/api-docs/{service} to it, and this UI lists them in a dropdown. The
+			WebFlux flavour, because the gateway is reactive. Same version as the services' WebMvc
+			starter, so the UI and the documents come from one springdoc release.
+		-->
+		<dependency>
+			<groupId>org.springdoc</groupId>
+			<artifactId>springdoc-openapi-starter-webflux-ui</artifactId>
+			<version>${springdoc.version}</version>
 		</dependency>
 
 		<!--

@@ -31,7 +31,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 
 | ID | Issue | Severity | Since | Source | Status |
 |---|---|---|---|---|---|
-| KI-001 | Swagger UI and OpenAPI docs are unreachable since the monolith split (details below) | Medium | Phase 21 | `OpenApiDocumentationTest.java:163`, `security.md` API9 | Open |
+| KI-001 | Swagger UI and OpenAPI docs are unreachable since the monolith split (details below) | Medium | Phase 21 | `OpenApiDocumentationTest.java:163`, `security.md` API9 | Fixed (PR #52) |
 | KI-002 | Two outbox relays double-publish. catalog-service runs 2-4 pods in k8s (`k8s/hpa.yaml`, `minReplicas: 2`), and the relay takes no lock (`SELECT ... FOR UPDATE SKIP LOCKED` missing). Consumers may absorb it by `event_id`; confirm each one does | Medium | Phase 18, exposed by Phase 25 | `OutboxRelay.java:40` | Open |
 | KI-003 | compose publishes every port on all interfaces: 6 PostgreSQL databases (default passwords), Redis and Kafka (no auth) | Medium | Phase 10 | `security.md` API8 | Open |
 | KI-004 | No timeouts or circuit breaker on the app's inventory calls or on the gateway's `/api/products` route | Medium | Phase 22 | `security.md` API4, API10 | Open |
@@ -42,6 +42,8 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-009 | The README's "Known gaps (closed by later phases)" sections are stale: some items are closed, some still open, and the heading says all are closed. Replace them with a link to this file | Low | n/a | `README.md:3989` | Open |
 | KI-010 | notification-service keeps its own copy of the idempotent-consumer code instead of using `ProcessedEvents` from the library | Low | Phase 24 | `ProcessedEvents.java:21`, `saga.md` | Open |
 | KI-011 | Dead code: `InventoryGateway.reserve`/`release` and inventory's matching HTTP endpoints are no longer called by checkout | Low | Phase 24 | `architecture/saga.md` | Open |
+| KI-039 | compose's Kafka keeps nothing across `down`/`up`: the `kafka-data` volume is mounted at `/var/lib/kafka/data`, but the broker writes to `/tmp/kafka-logs`. Every topic, offset and consumer group is lost while the PostgreSQL volumes survive | Medium | Phase 17 | Phase 32 merge verification (2026-09-30): `kafka-log-dirs.sh` reports `/tmp/kafka-logs` | Open |
+| KI-040 | A dead letter is identified only by its Kafka address. `dead_letter_replay` is unique on `(dlt_topic, dlt_partition, dlt_offset)`, so once a DLT's offsets restart (topic recreated, or KI-039), a new dead letter at a reused offset is refused 409 "already replayed" and can never be replayed. Fails safe (never replays twice). Key it on the record's identity (e.g. the event ID) as well | Medium | Phase 32 | Phase 32 merge verification (2026-09-30): smoke with kept volumes 429/2 failed | Open |
 
 ### KI-001: Swagger UI and OpenAPI docs unreachable since the split
 

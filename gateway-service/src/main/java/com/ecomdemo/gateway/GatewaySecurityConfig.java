@@ -44,6 +44,13 @@ public class GatewaySecurityConfig {
                         .pathMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .pathMatchers(HttpMethod.POST, "/api/customers/register").permitAll()
 
+                        // KI-001: the API documentation - Swagger UI, its assets and configuration,
+                        // and each service's OpenAPI document. Open, because it describes the API's
+                        // shape rather than its data, and a reader needs it to learn how to get a
+                        // token. GET only: nothing here changes anything.
+                        .pathMatchers(HttpMethod.GET, "/swagger-ui.html", "/swagger-ui/**", "/webjars/swagger-ui/**",
+                                "/v3/api-docs", "/v3/api-docs/**").permitAll()
+
                         // Reading the catalogue is anonymous - a shop nobody can browse sells
                         // nothing - but WRITING it is an administrator's job. The order matters:
                         // the GET rule is narrower and must come first.

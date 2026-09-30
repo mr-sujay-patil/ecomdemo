@@ -61,6 +61,10 @@ public class SecurityConfig {
                         // rather than a literal "/actuator/**" because the base path is
                         // configurable and a literal silently stops matching when it moves.
                         .requestMatchers(EndpointRequest.to("health", "info", "prometheus")).permitAll()
+                        // KI-001: the OpenAPI document, which the gateway serves at /v3/api-docs/catalog. Open,
+                        // because it describes the API's shape, not its data, and a reader needs it to
+                        // learn how to authenticate. GET only, and only the JSON document.
+                        .requestMatchers(HttpMethod.GET, "/v3/api-docs").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Operations data about a backfill run: the gateway's ADMIN rule, mirrored.
                         // Placed before the GET rule because the first match wins.

@@ -246,10 +246,12 @@ internal paths with the product name or order id as a *parameter*, never as a UR
 - ✅ **One entry point.** The gateway's route list is the inventory of what is public. notification
   has no route on purpose, as it has no API.
 - ✅ **SBOMs:** every image's contents are recorded as a CycloneDX SBOM on every CI run.
-- 🟡 **OpenAPI** exists for the app only. catalog-service has no springdoc (a carried gap).
+- ✅ **OpenAPI** (KI-001): every service with a public API publishes its own document, and the
+  gateway serves them all in one Swagger UI. The documents are the inventory of the API, next to the
+  route list. payment and notification build none, so there is nothing to leak about `/internal/**`.
 - 🟡 **No API versioning** (`/api/v1`). There's one client and one version.
-- 🟡 **Swagger UI** is served by the app on its own port, fine for development. A production
-  profile should switch it off.
+- 🟡 **Swagger UI** is served by the gateway, anonymously (GET only), fine for development. A
+  production profile should switch it off (KI-027).
 
 ### API10 Unsafe Consumption of APIs ✅ / 🟡
 

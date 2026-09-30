@@ -83,9 +83,13 @@ class OpenApiDocumentationTest {
         // Given / When: the document fetched once for this class
         // Then
         assertThat(spec.path("openapi").asString("")).startsWith("3.");
-        assertThat(spec.path("info").path("title").asString("")).isEqualTo("EcomDemo API");
+        assertThat(spec.path("info").path("title").asString("")).isEqualTo("EcomDemo Orders API");
         assertThat(spec.path("info").path("version").asString("")).isEqualTo("v1");
         assertThat(spec.path("info").path("description").asString("")).isNotBlank();
+        // The only server is relative: it resolves to the gateway the document was fetched through, so
+        // "Try it out" goes through the same edge as a client, on any port.
+        assertThat(spec.path("servers").valueStream().map(server -> server.path("url").asString("")))
+                .containsExactly("/");
     }
 
     @ParameterizedTest
@@ -151,9 +155,8 @@ class OpenApiDocumentationTest {
 
     @Test
     void apiDocs_everyRequestSchemaProperty_carriesAnExample() {
-        // Given: the schemas a client has to fill in by hand
-        // ProductWrite left this list in Phase 21 along with the proxy that exposed it. See the
-        // note on the test below for where the catalogue's schema now is - and is not.
+        // Given: the schemas a client has to fill in by hand. The catalogue's own (ProductRequest)
+        // is catalog-service's to document, and its ApiDocsIT checks it.
         List<String> requestSchemas = List.of("AddCartItemRequest", "UpdateCartItemRequest");
 
         // When / Then
@@ -161,31 +164,6 @@ class OpenApiDocumentationTest {
                 .forEach(property -> assertThat(property.getValue().has("example"))
                         .as("%s.%s carries an example", name, property.getKey())
                         .isTrue()));
-    }
-
-    /**
-     * ⚠️ THE CATALOGUE'S SCHEMA IS NOW DOCUMENTED NOWHERE, and this test is the evidence.
-     *
-     * <p>It used to assert that {@code ProductWrite} carried its validation constraints into the
-     * document. That schema appeared in THIS application's spec only because the application proxied
-     * {@code /api/products}; the gateway routes it now, and {@code ProductWrite} is gone from here.
-     *
-     * <p>It has not reappeared elsewhere. Of the six modules only {@code ecomdemo-app} declares
-     * springdoc, so catalog-service publishes no OpenAPI document of its own and there is no document
-     * that describes the catalogue any more. A gateway can aggregate its services' specifications into
-     * one, which is the real fix and a piece of work in its own right.
-     *
-     * <p>So this asserts what is TRUE rather than what we would like: the schema is absent. A test that
-     * silently dropped the claim would leave the gap invisible; one that fails would block the phase
-     * over documentation. This one fails the day somebody adds it back, which is when this comment
-     * needs deleting.
-     */
-    @Test
-    void apiDocs_theCatalogueSchemaIsNoLongerThisApplicationsToDocument() {
-        assertThat(schema("ProductWrite").isMissingNode())
-                .as("ProductWrite belongs to catalog-service since Phase 21 - if this fails, the "
-                        + "catalogue is documented again and the follow-up is resolved")
-                .isTrue();
     }
 
     private JsonNode schema(String name) {
