@@ -98,4 +98,18 @@ class ServiceIdentityFilterTest {
                 .isGreaterThan(springSecurityChainOrder);
         assertThat(filter.getOrder()).isLessThan(Ordered.LOWEST_PRECEDENCE);
     }
+
+    @Test
+    @DisplayName("the token is fetched off the event loop, because fetching may be an HTTP call (Phase 33)")
+    void theTokenIsFetchedOnABoundedElasticThread() {
+        AtomicReference<String> fetchedOn = new AtomicReference<>();
+        when(serviceTokens.token()).thenAnswer(invocation -> {
+            fetchedOn.set(Thread.currentThread().getName());
+            return SERVICE_TOKEN;
+        });
+
+        filter.filter(MockServerWebExchange.from(MockServerHttpRequest.get("/api/products")), chain).block();
+
+        assertThat(fetchedOn.get()).startsWith("boundedElastic");
+    }
 }

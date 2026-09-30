@@ -150,10 +150,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-ecomdemo}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ecomdemo}
 
-      # The JWT signing key (Phase 9). Deliberately no default: an unset value reaches the
-      # application as empty, which makes it generate a random key and warn that tokens die with
-      # the container. Putting a real default here would be a signing key in Git.
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
+      # Its own identity when it calls another service: a token from customer-service, scoped.
+      SERVICE_TOKEN_URI: http://customer-service:8083/oauth2/token
+      SERVICE_CLIENT_SECRET: ${APP_CLIENT_SECRET:-}
 
       # Redis, reached by service name on the compose network — same reasoning as `db` above.
       SPRING_DATA_REDIS_HOST: cache
@@ -307,7 +308,19 @@ services:
       # only process that MINTS a user token. The others verify. With HS256 that is a convention
       # rather than a constraint - they hold the same key and could mint one - which is the honest
       # argument for asymmetric signing, recorded in docs/decisions.md.
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Phase 33: the ONLY signing key in the system (RSA, PKCS#8 base64 on one line; .env.example has
+      # the openssl command). No default on purpose: a key in Git is a key everyone has. Unset, the
+      # service generates one per run and warns that every token dies with the container.
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:-}
+      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:-key-1}
+      # Rotation: the next key is published before it signs (see SigningKeyProperties).
+      JWT_NEXT_SIGNING_KEY: ${JWT_NEXT_SIGNING_KEY:-}
+      JWT_NEXT_SIGNING_KEY_ID: ${JWT_NEXT_SIGNING_KEY_ID:-key-2}
+      JWT_ACTIVE_KEY_ID: ${JWT_ACTIVE_KEY_ID:-}
+      # The services allowed to ask /oauth2/token for a token; each caller holds the matching secret.
+      GATEWAY_CLIENT_SECRET: ${GATEWAY_CLIENT_SECRET:-}
+      APP_CLIENT_SECRET: ${APP_CLIENT_SECRET:-}
+      CATALOG_CLIENT_SECRET: ${CATALOG_CLIENT_SECRET:-}
       JWT_EXPIRY: ${JWT_EXPIRY:-15m}
     ports:
       - "${CUSTOMER_PORT:-8083}:8083"
@@ -374,7 +387,8 @@ services:
       NOTIFICATION_DB_USER: ${NOTIFICATION_DB_USER:-notification}
       NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-notification}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
     ports:
       # Published only so the smoke test can read its health and metrics. It has no business API:
       # its SecurityConfig answers denyAll on every other path.
@@ -440,7 +454,8 @@ services:
       PAYMENT_DB_USER: ${PAYMENT_DB_USER:-payment}
       PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
       # Orders with a total ABOVE this are declined - the way to force the saga's failure path.
       PAYMENT_DECLINE_ABOVE: ${PAYMENT_DECLINE_ABOVE:-10000.00}
     ports:
@@ -537,7 +552,11 @@ services:
       # The same secret every other service holds, because HMAC verifies with the key it signs
       # with. That is the honest argument for asymmetric signing in a real deployment, and it is
       # recorded in docs/decisions.md rather than pretended away.
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
+      # Its own identity when it calls another service: a token from customer-service, scoped.
+      SERVICE_TOKEN_URI: http://customer-service:8083/oauth2/token
+      SERVICE_CLIENT_SECRET: ${CATALOG_CLIENT_SECRET:-}
 
       # Phase 27: the language model behind POST /api/products/{id}/generate-description. `none`
       # (the default) starts the service without one, and that endpoint answers 503. The key comes
@@ -605,11 +624,10 @@ services:
       INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:-inventory}
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
 
-      # The SAME secret the application verifies with, because HMAC signs and verifies with one
-      # key. That is also the honest argument for asymmetric signing in a real deployment: five
-      # services each holding the signing key is five places it can leak. Recorded in
-      # docs/decisions.md rather than pretended away.
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Until Phase 33 every service held the same HS256 secret, and so could mint tokens as well
+      # as check them. Now only customer-service holds a (private) key.
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
     ports:
       - "${INVENTORY_PORT:-8082}:8082"
     healthcheck:
@@ -659,7 +677,8 @@ services:
       CATALOG_BASE_URL: http://catalog-service:8081
       APP_BASE_URL: http://app:8080
 
-      JWT_SECRET: ${JWT_SECRET:-}
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
 
       AI_CHAT_PROVIDER: ${AI_CHAT_PROVIDER:-none}
       AI_EMBEDDING_PROVIDER: ${AI_EMBEDDING_PROVIDER:-none}
@@ -740,9 +759,12 @@ services:
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379
 
-      # The same secret as everyone else: the edge VALIDATES tokens, and customer-service remains
-      # the only service that issues them.
-      JWT_SECRET: ${JWT_SECRET:-}
+      # The edge VALIDATES tokens; customer-service is the only service that issues them.
+      # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
+      JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
+      # Its own identity when it calls another service: a token from customer-service, scoped.
+      SERVICE_TOKEN_URI: http://customer-service:8083/oauth2/token
+      SERVICE_CLIENT_SECRET: ${GATEWAY_CLIENT_SECRET:-}
     ports:
       - "${GATEWAY_PORT:-8080}:8080"
     healthcheck:

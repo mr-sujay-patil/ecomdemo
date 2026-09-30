@@ -54,7 +54,7 @@ class AuthControllerTest {
     @DisplayName("login is reachable with no credentials at all, and returns a token")
     void login_whenCredentialsAreValid_returns200WithAToken() {
         // Given
-        when(authService.login(any(LoginRequest.class))).thenReturn(TOKEN);
+        when(authService.login(any(LoginRequest.class), any())).thenReturn(TOKEN);
 
         // When / Then
         assertThat(mvc.post().uri("/api/auth/login")
@@ -73,7 +73,7 @@ class AuthControllerTest {
     @DisplayName("the response never echoes the password")
     void login_whenSuccessful_neverEchoesThePassword() throws Exception {
         // Given
-        when(authService.login(any(LoginRequest.class))).thenReturn(TOKEN);
+        when(authService.login(any(LoginRequest.class), any())).thenReturn(TOKEN);
 
         // When
         String body = mvc.post().uri("/api/auth/login")
@@ -91,7 +91,7 @@ class AuthControllerTest {
     @DisplayName("wrong credentials are a 401 in the standard error shape")
     void login_whenCredentialsAreWrong_returns401() {
         // Given
-        when(authService.login(any(LoginRequest.class))).thenThrow(new BadCredentialsException("Bad credentials"));
+        when(authService.login(any(LoginRequest.class), any())).thenThrow(new BadCredentialsException("Bad credentials"));
 
         // When / Then: the message deliberately does not say which half was wrong. Spring
         // Security's own wording is dropped for the same reason.
@@ -109,7 +109,7 @@ class AuthControllerTest {
     @DisplayName("an unknown username gets the identical 401, so accounts cannot be enumerated")
     void login_whenTheAccountDoesNotExist_returnsTheSameBody() {
         // Given
-        when(authService.login(any(LoginRequest.class)))
+        when(authService.login(any(LoginRequest.class), any()))
                 .thenThrow(new org.springframework.security.core.userdetails.UsernameNotFoundException(
                         "No account named nobody"));
 
@@ -133,6 +133,41 @@ class AuthControllerTest {
                         .content("""
                                 {"username":"asha"}"""))
                 .hasStatus(BAD_REQUEST);
-        verify(authService, never()).login(any());
+        verify(authService, never()).login(any(), any());
+    }
+
+    @Test
+    @DisplayName("Phase 33: a throttled login is 429 with Retry-After, and the same number in the message")
+    void login_whenThrottled_returns429WithRetryAfter() {
+        when(authService.login(any(LoginRequest.class), any()))
+                .thenThrow(new com.ecomdemo.auth.throttle.LoginThrottledException(java.time.Duration.ofMillis(29_400)));
+
+        assertThat(mvc.post().uri("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"asha","password":"wrong-password"}"""))
+                .hasStatus(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS)
+                // Rounded UP: a client that waits exactly this long is allowed again.
+                .hasHeader(org.springframework.http.HttpHeaders.RETRY_AFTER, "30")
+                .bodyJson()
+                .isLenientlyEqualTo("""
+                        {"status":429,"message":"Too many failed logins. Try again in 30 seconds."}
+                        """);
+    }
+
+    @Test
+    @DisplayName("Phase 33: the client is the LAST X-Forwarded-For hop, the one our gateway appended")
+    void login_countsTheGatewaysHopNotWhatTheClientClaims() {
+        when(authService.login(any(LoginRequest.class), any())).thenReturn(TOKEN);
+
+        mvc.post().uri("/api/auth/login")
+                .header("X-Forwarded-For", "1.2.3.4, 203.0.113.7")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("""
+                        {"username":"asha","password":"correct-horse-battery-staple"}""")
+                .exchange();
+
+        // "1.2.3.4" is whatever the client put in the header; the gateway appended 203.0.113.7.
+        verify(authService).login(any(LoginRequest.class), org.mockito.ArgumentMatchers.eq("203.0.113.7"));
     }
 }

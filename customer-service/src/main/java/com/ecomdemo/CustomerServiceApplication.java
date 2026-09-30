@@ -41,7 +41,7 @@ import org.springframework.context.annotation.Import;
         "com.ecomdemo.shared",
         "com.ecomdemo.tracing"
 })
-@ConfigurationPropertiesScan(basePackages = {"com.ecomdemo.customer", "com.ecomdemo.clients", "com.ecomdemo.jwt"})
+@ConfigurationPropertiesScan(basePackages = {"com.ecomdemo.customer", "com.ecomdemo.auth", "com.ecomdemo.clients", "com.ecomdemo.jwt"})
 @Import(MetricsConfig.class)
 public class CustomerServiceApplication {
 

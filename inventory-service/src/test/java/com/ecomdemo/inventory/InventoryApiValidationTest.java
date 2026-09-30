@@ -1,13 +1,12 @@
 package com.ecomdemo.inventory;
 
+import com.ecomdemo.jwt.ServiceTokens;
+import com.ecomdemo.support.TestJwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecomdemo.jwt.JwtProperties;
-import com.ecomdemo.jwt.ServiceTokenProvider;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
-import javax.crypto.SecretKey;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -16,7 +15,6 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -46,8 +44,6 @@ class InventoryApiValidationTest {
     @Autowired
     private MockMvc mvc;
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
@@ -56,9 +52,7 @@ class InventoryApiValidationTest {
 
     @BeforeEach
     void mintACallerToken() {
-        token = new ServiceTokenProvider(
-                new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey)), jwtProperties, "ecomdemo-app")
-                .token();
+        token = TestJwt.service("ecomdemo-app", ServiceTokens.INVENTORY_READ, ServiceTokens.INVENTORY_WRITE);
     }
 
     @Test

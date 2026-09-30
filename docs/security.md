@@ -109,20 +109,25 @@ Can a user reach *another user's* object by changing an id?
   can't see more than the customer could. It even reports 403 and 404 identically, so the
   customer can't learn which order ids exist.
 
-### API2 Broken Authentication 🟡 / ⚠️
+### API2 Broken Authentication ✅ / 🟡 (hardened in Phase 33)
 
 - ✅ Passwords are stored with **BCrypt** (8-72 characters, as BCrypt reads at most 72 bytes).
-- ✅ JWTs are **HS256**, the algorithm is fixed on the verifying side, issuer is checked, they
-  last 15 minutes, and a secret shorter than 256 bits fails startup (`JwtKeyConfig`).
-- 🟡 **One shared HMAC secret.** Every service that can verify a token can also *mint* one. The
-  fix is asymmetric signing (RS256/ES256), where only customer-service holds the private key. It
-  has been carried since Phase 21.
+- ✅ JWTs are **RS256** (Phase 33): customer-service alone holds the RSA private key; every other
+  service verifies with its PUBLIC keys from `/oauth2/jwks`, so verifying no longer means being
+  able to mint. The algorithm is fixed on the verifying side, the issuer is checked, tokens last
+  15 minutes, and every token names its key (`kid`), so a key rotates without downtime
+  (`JwksKeyRotationTest`). Until Phase 33 one shared HS256 secret sat in every service.
 - 🟡 **No refresh tokens and no revocation.** A stolen token works until it expires, up to 15
   minutes.
-- ⚠️ **Login throttling is only the general rate limit** (50 requests/s per client IP, burst 100).
-  That's roughly 4 million password guesses a day from one address. Recommended: a much stricter
-  limit on `POST /api/auth/login` per username and per IP, plus a lockout or backoff after
-  repeated failures.
+- ✅ **Logins are throttled** (Phase 33): 5 failures per username or 20 per client address in
+  15 minutes block further attempts for 30 s, doubling up to 15 minutes, with `429` and
+  `Retry-After`. Counted in PostgreSQL (every replica sees the same counts), checked before BCrypt.
+  Throttling, not lockout, so nobody can lock an account by typing its name wrong. Before, only the
+  general rate limit applied: roughly 4 million guesses a day from one address.
+  (`LoginThrottleIT`, the smoke test.)
+- 🟡 The per-client counter trusts the last `X-Forwarded-For` hop, which our gateway appends. A
+  caller that reaches customer-service's port directly (published in compose, KI-003) can forge it;
+  in Kubernetes the port is internal.
 
 ### API3 Broken Object Property Level Authorization ✅
 
@@ -196,19 +201,28 @@ How far it reached depended on how the stack was run:
 
 **The fix** is defence in depth: each service now repeats the gateway's rule for its own paths.
 
-- **catalog-service:** any valid token may read. Writes and the embedding backfill need ADMIN or
-  SERVICE. The SERVICE identity is the app's batch import, and the gateway's own token for
-  anonymous browsing, which is read-only because the gateway refuses anonymous writes first.
-- **inventory-service:** every path needs ADMIN or SERVICE. No shopper has a reason to call it at
-  all; checkout and catalog call it with their SERVICE token.
+- **catalog-service:** a person's token may read. Writes and the embedding backfill need ADMIN or
+  a service scope (below). The gateway's own token for anonymous browsing may only read.
+- **inventory-service:** every path needs ADMIN or a service scope. No shopper has a reason to call
+  it at all; checkout and catalog call it with their service tokens.
 - **Tests:**
   - `InventorySecurityTest`: a CUSTOMER gets 403 on read, write and reserve; an ADMIN may write.
   - `ProductApiIT`: a CUSTOMER may read but gets 403 on create, delete and the backfill; an ADMIN
     and the SERVICE identity may write.
 
-🟡 **What remains:** a SERVICE token is powerful, and with the shared HMAC secret (API2) any
-service can mint one. Scoped service identities (which service may call what) come with
-asymmetric signing.
+✅ **Scoped service identities (Phase 33).** Until then one SERVICE role let any service call
+anything any service could, and with the shared HMAC secret (API2) any service could mint it.
+Now each service gets its token from customer-service with its own client secret (OAuth2 client
+credentials), carrying only its scopes, and each callee checks them:
+
+| Caller | Scopes | Refused, for example |
+|---|---|---|
+| gateway-service | `catalog:read` | writing the catalogue, reading stock, settling a payment |
+| catalog-service | `inventory:read inventory:write` | reading or writing the catalogue as a service, settling a payment |
+| ecomdemo-app | `catalog:read catalog:write inventory:read inventory:write payment:settle` | - |
+
+Proven by `InventorySecurityTest`, `ProductApiIT` and `PaymentSecurityTest` (an out-of-scope token
+gets 403) and by the smoke test, which asks for the gateway's real token inside its container.
 
 ### API6 Unrestricted Access to Sensitive Business Flows 🟡
 

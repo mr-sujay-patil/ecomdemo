@@ -8,6 +8,7 @@ import org.springframework.web.server.ServerWebExchange;
 import org.springframework.web.server.WebFilter;
 import org.springframework.web.server.WebFilterChain;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Gives an anonymous request the gateway's own identity before forwarding it.
@@ -66,15 +67,14 @@ class ServiceIdentityFilter implements WebFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        // Minted per request. A token is a signature over a few claims and costs microseconds, but a
-        // gateway is the one place in this system where "per request" is worth saying out loud: if
-        // this ever shows up in a profile, the fix is to cache one until shortly before it expires,
-        // not to lengthen its life.
-        String token = serviceTokens.token();
-        ServerWebExchange identified = exchange.mutate()
-                .request(request -> request.headers(
-                        headers -> headers.setBearerAuth(token)))
-                .build();
-        return chain.filter(identified);
+        // Since Phase 33 the token comes from customer-service (client credentials, cached for its
+        // lifetime), so fetching one can mean an HTTP call. It runs on the bounded-elastic scheduler,
+        // never on this Netty event-loop thread: a blocking call there would stall every other
+        // connection the thread is serving. A cache hit costs a thread hop and nothing more.
+        return Mono.fromCallable(serviceTokens::token)
+                .subscribeOn(Schedulers.boundedElastic())
+                .flatMap(token -> chain.filter(exchange.mutate()
+                        .request(request -> request.headers(headers -> headers.setBearerAuth(token)))
+                        .build()));
     }
 }

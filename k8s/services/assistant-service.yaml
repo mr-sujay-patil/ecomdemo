@@ -8,6 +8,8 @@ metadata:
   labels:
     app.kubernetes.io/name: assistant-service
 data:
+  # Phase 33: verify tokens with customer-service's public keys.
+  JWT_JWK_SET_URI: "http://customer-service:8083/oauth2/jwks"
   LOG_FORMAT: "ecs"
   TRACING_SAMPLING_PROBABILITY: "1.0"
   SPRING_DATA_REDIS_HOST: "cache"

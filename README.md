@@ -8,6 +8,23 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 33: Authentication Hardening — only one service can issue a token, and passwords can't be
+guessed at speed.** Until now every service held the same HS256 secret, so any of them could mint a
+token for any administrator, and every service token carried one all-powerful SERVICE role. Now:
+- **customer-service alone signs**, with an RSA private key (RS256). Everyone else verifies with its
+  PUBLIC keys, published at `/oauth2/jwks`. A key can be rotated with no downtime: the new key is
+  published before it signs, and a verifier refetches the set when it meets an unknown `kid`.
+- **Service identities are scoped.** A service gets its token from customer-service with its own
+  secret (OAuth2 client credentials), and the token carries only what that service needs: the
+  gateway `catalog:read`, catalog-service the stock it keeps in step with the catalogue, the application the rest. Each service
+  checks the scope its endpoint requires.
+- **Logins are throttled** per username (5 failures) and per client address (20), with a block that
+  starts at 30 s and doubles: `429` with `Retry-After`. Counted in PostgreSQL, before the password
+  is checked.
+
+See [Signing, service identities and login throttling](#signing-service-identities-and-login-throttling-phase-33)
+and [`docs/test-reports/phase-33.md`](docs/test-reports/phase-33.md).
+
 **Phase 32: Saga Timeouts and Reconciliation — no order stays PENDING for ever.** Until now, a saga
 message that could not be processed was dead-lettered and its order waited for ever, sometimes
 with stock held. Now the order service owns the saga's clock. Every 10 s it finds orders PENDING
@@ -137,8 +154,8 @@ Still true from Phase 20, and worth knowing:
 - **Nothing guarantees a cart belongs to a real account any more** — a foreign key cannot span two
   databases.
 - **The CSV import is a distributed write** with no shared transaction; restartable and idempotent.
-- Tokens are **HS256 with a shared key**: only customer-service issues them by convention, not by
-  constraint. Asymmetric keys and a JWKS endpoint are the honest fix.
+- Tokens were **HS256 with a shared key**: only customer-service issued them by convention, not by
+  constraint. Phase 33 made it a constraint: RS256, and a JWKS endpoint of public keys.
 
 See [`docs/test-reports/phase-24.md`](docs/test-reports/phase-24.md) and, for Phase 25,
 [`docs/test-reports/phase-25.md`](docs/test-reports/phase-25.md).
@@ -370,7 +387,7 @@ loop when you are editing code.
 ### The whole system, in one command
 
 ```bash
-cp .env.example .env            # then put a real JWT_SECRET in it
+cp .env.example .env            # then add the signing key and client secrets (command in .env.example)
 docker compose up --build       # add -d to detach
 ```
 
@@ -414,14 +431,15 @@ containers, so `up` again finds the schema already migrated. Only `-v` throws it
 that there are now **five** volumes, one per database, which `down -v` removes together.
 
 **`.env` is gitignored**; `.env.example` is the documented template. Every value has a working
-default, so an empty `.env` starts a usable stack — but set `JWT_SECRET` (at least 32 characters;
-`openssl rand -base64 48` will do), or every restart invalidates every token that was issued.
+default, so an empty `.env` starts a usable stack. Since Phase 33 the values worth setting are
+customer-service's signing key (`JWT_SIGNING_KEY`) and the three service-client secrets
+(`GATEWAY_CLIENT_SECRET`, `APP_CLIENT_SECRET`, `CATALOG_CLIENT_SECRET`). `.env.example` has one
+command that generates all four and appends them to `.env` without printing them.
 
-**`JWT_SECRET` now matters more than it did.** Both services verify with it, so leaving it unset
-means each generates a *different* random key and a token issued by one is rejected by the other —
-a failure that looks like a bug rather than like missing configuration. HS256 signs and verifies
-with the same key, which also means every service holding it can mint tokens as well as check them;
-that is a known and deliberate limitation, recorded in `docs/decisions.md`.
+Without the signing key, customer-service generates one per start and warns: every token dies with
+the container. Without the client secrets, the gateway, the application and catalog-service cannot
+get their service tokens, so anonymous browsing and checkout fail with a message naming the missing
+variable. `JWT_SECRET` is no longer read by anything.
 
 ### Or from source
 
@@ -445,7 +463,7 @@ docker rm -f ecomdemo-postgres          # delete it AND its data, to start clean
 Then:
 
 ```bash
-JWT_SECRET='at-least-32-characters-of-random-text' ./mvnw spring-boot:run
+./mvnw spring-boot:run
 ```
 
 On the first start **Flyway** finds an empty database, applies V1–V6 in order and records them;
@@ -835,7 +853,12 @@ docker exec -i ecomdemo-db psql -U ecomdemo -d ecomdemo \
 
 ### The signing key
 
-Tokens are signed with HMAC-SHA256, and the key comes from the environment:
+> **Phase 33 replaced what this section describes.** Tokens are now signed RS256 by customer-service
+> alone, and nobody else holds a key; see
+> [Signing, service identities and login throttling](#signing-service-identities-and-login-throttling-phase-33).
+> What follows is the Phase 9 design, kept because the reasoning is still the lesson.
+
+Tokens were signed with HMAC-SHA256, and the key came from the environment:
 
 ```bash
 JWT_SECRET='at-least-32-characters-of-random-text' ./mvnw spring-boot:run
@@ -1524,8 +1547,8 @@ HEALTHCHECK ... CMD wget -q -O /dev/null http://localhost:8080/actuator/health/r
 ### What is exposed, and to whom
 
 `management.endpoints.web.exposure.include` is an explicit allow-list — never `*`. That list, not
-an authorization rule, is why `/actuator/env`, which would print the environment including
-`JWT_SECRET`, is a **404 even for an administrator**.
+an authorization rule, is why `/actuator/env`, which would print the environment including every
+secret, is a **404 even for an administrator**.
 
 | Endpoint | Who | Why |
 |---|---|---|
@@ -3828,8 +3851,8 @@ Two things follow, and they are the whole model:
    verification fails. That is what makes it safe to authorize from claims without looking
    anything up, and it is also why the header being signed matters: it stops an attacker
    rewriting `alg` to `none` and presenting an unsigned token, the classic JWT vulnerability. The
-   decoder is additionally pinned to HS256, so even a validly signed token using some other
-   algorithm is refused.
+   decoder is additionally pinned to one algorithm (HS256 until Phase 33, RS256 since), so even a
+   validly signed token using some other algorithm is refused.
 
 ### Stateless vs session-based
 
@@ -3855,7 +3878,8 @@ wrong choice: handing that service the key to verify with also hands it the powe
 
 RS256 splits the two — a private key that signs, a public key that anyone may hold and verify
 with. That is why every real identity provider publishes a JWKS endpoint of public keys and no
-secrets at all, and it is the change to make when this monolith becomes several services.
+secrets at all, and it is the change to make when this monolith becomes several services. Phase 33
+made it.
 
 ### Expiry, refresh and revocation
 
@@ -3943,6 +3967,58 @@ reached with the wrong argument beats one that has to be remembered in five plac
 
 The database backs it up: `uq_cart_user` makes "one cart per account" a rule it enforces rather
 than an assumption the code makes.
+
+### Signing, service identities and login throttling (Phase 33)
+
+**Only customer-service can sign.** It holds RSA private keys (`JWT_SIGNING_KEY`, PKCS#8 base64 on
+one line); every token names its key in the `kid` header. Every other service, the gateway
+included, verifies with the PUBLIC keys at `http://customer-service:8083/oauth2/jwks` and caches
+them. A public key verifies and cannot sign, so a compromised catalog-service can no longer mint an
+administrator's token.
+
+**Rotating the key without downtime** takes three configuration changes to customer-service:
+
+1. Put the new key in the next slot (`JWT_NEXT_SIGNING_KEY` + `_ID`). It is published; nothing signs
+   with it yet, and verifiers already accept it.
+2. Set `JWT_ACTIVE_KEY_ID` to the new id. New tokens use it; tokens signed with the old key still
+   verify, because the old key is still published.
+3. After one token lifetime (15 minutes) no old-key token is alive: make the new key the first slot
+   and clear the old one.
+
+A verifier that meets a `kid` it has not cached fetches the key set again, so none of them is
+restarted or reconfigured. `JwksKeyRotationTest` proves it.
+
+**Service identities are scoped.** A service that calls another gets its token from customer-service
+with the OAuth2 *client credentials* grant: `POST /oauth2/token`, authenticated with its own client
+id and secret (HTTP Basic). The token's `sub` is the service and its `scope` is what customer-service
+has on record for it, and nothing else:
+
+| Service (client id) | Scopes | Why |
+|---|---|---|
+| `gateway-service` | `catalog:read` | anonymous browsing |
+| `ecomdemo-app` | `catalog:read catalog:write inventory:read inventory:write payment:settle` | checkout, the saga, the CSV import |
+| `catalog-service` | `inventory:read inventory:write` | stock lookups, and the stock of a product created, updated or deleted |
+
+Each callee checks the scope it needs: catalog reads need a person or `catalog:read`, writes
+`catalog:write`; inventory reads `inventory:read`, changes `inventory:write`; payment's settlement
+`payment:settle`. Until Phase 33 every service token carried one SERVICE role that allowed all of it.
+The token endpoint and the JWKS are not routed by the gateway: services reach them on the internal
+network. This is a deliberately minimal part of OAuth2, two endpoints, not an authorization server.
+
+**Logins are throttled.** customer-service counts failed logins per username and per client address
+(the last `X-Forwarded-For` hop, which the gateway appends) in the `login_throttle` table:
+
+| Counter | Limit (15-minute window) | Stops |
+|---|---|---|
+| username | 5 failures | guessing one person's password |
+| client address | 20 failures | credential stuffing: one machine, many accounts |
+
+Reaching a limit blocks further attempts for 30 s, doubling with every further failure up to
+15 minutes: `429` with `Retry-After` and the same number in the message. A blocked attempt is
+refused before BCrypt runs, so a flood of guesses costs this service almost nothing. A correct
+password clears the username's count. It is throttling, not lockout: a block always ends by itself,
+because a permanent lockout would let anyone lock any account by typing its name five times.
+Metrics: `ecomdemo_auth_login_failures_total` and `ecomdemo_auth_login_throttled_total{key}`.
 
 ## Tests
 
@@ -4167,9 +4243,8 @@ cost a container start each time.
   built. Without it, a short expiry means users log in again every fifteen minutes — which is
   exactly the discomfort a refresh token exists to remove: a second, longer-lived, revocable
   credential whose only power is to mint a new access token.
-- **Signing is symmetric (HS256).** One key both signs and verifies, which is fine while a single
-  application does both. A second service that needed to accept these tokens would have to be
-  given the power to issue them, so that is the point to move to RS256 and a published public key.
+- ~~**Signing is symmetric (HS256).**~~ Closed by Phase 33: RS256, with the private key in
+  customer-service only and the public keys at `/oauth2/jwks`.
 - **The application is its own authorization server.** A textbook OAuth2 deployment separates the
   two. Nothing here implements OAuth2 flows, scopes or OIDC; it issues plain JWTs.
 - **Passwords cannot be changed through the API.** A password change needs rules of its own

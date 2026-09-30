@@ -1,24 +1,18 @@
 package com.ecomdemo.support;
 
+import com.ecomdemo.jwt.ServiceTokens;
 import com.ecomdemo.jwt.JwtProperties;
-import com.ecomdemo.jwt.ServiceTokenProvider;
 import com.ecomdemo.shared.TokenClaims;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import javax.crypto.SecretKey;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.context.annotation.Import;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
@@ -76,19 +70,13 @@ public abstract class CatalogIntegrationTest {
         rest = asService();
     }
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
 
     /** A caller identifying itself the way the application does. */
     protected TestRestTemplate asService() {
-        String token = new ServiceTokenProvider(
-                new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey)),
-                jwtProperties,
-                "ecomdemo-app")
-                .token();
+        String token = TestJwt.service("ecomdemo-app", ServiceTokens.CATALOG_READ, ServiceTokens.CATALOG_WRITE);
         return withToken(token);
     }
 
@@ -106,13 +94,11 @@ public abstract class CatalogIntegrationTest {
                 .claim(TokenClaims.USER_ID, userId)
                 .claim(TokenClaims.ROLES, List.of(roles))
                 .build();
-        String token = new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        String token = TestJwt.sign(claims);
         return withToken(token);
     }
 
-    private TestRestTemplate withToken(String token) {
+    protected TestRestTemplate withToken(String token) {
         // Built from a bare TestRestTemplate rather than through RestTemplateBuilder, which is not
         // on this module's classpath: catalog-service uses RestClient to call inventory-service and
         // has no reason to carry the RestTemplate starter into production just to shape a test.

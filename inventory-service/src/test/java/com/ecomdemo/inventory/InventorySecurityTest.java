@@ -1,17 +1,16 @@
 package com.ecomdemo.inventory;
 
+import com.ecomdemo.jwt.ServiceTokens;
+import com.ecomdemo.support.TestJwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ecomdemo.jwt.JwtProperties;
-import com.ecomdemo.jwt.ServiceTokenProvider;
 import com.ecomdemo.shared.TokenClaims;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Instant;
 import java.util.List;
-import javax.crypto.SecretKey;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,11 +18,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -55,8 +50,6 @@ class InventorySecurityTest {
     @Autowired
     private MockMvc mvc;
 
-    @Autowired
-    private SecretKey jwtSigningKey;
 
     @Autowired
     private JwtProperties jwtProperties;
@@ -73,12 +66,8 @@ class InventorySecurityTest {
         // The same shape of token, signed with a different key. This is the assertion that would
         // fail if the decoder were ever built without the issuer and signature validators - a
         // token nobody in this system minted must not be usable.
-        SecretKey otherKey = new javax.crypto.spec.SecretKeySpec(
-                "a-completely-different-32-byte-key!!".getBytes(java.nio.charset.StandardCharsets.UTF_8),
-                "HmacSHA256");
-        String forged = new ServiceTokenProvider(
-                new NimbusJwtEncoder(new ImmutableSecret<>(otherKey)), jwtProperties, "impostor")
-                .token();
+        String forged = TestJwt.serviceSignedBy(TestJwt.generate("impostor-key"), "impostor",
+                ServiceTokens.INVENTORY_READ, ServiceTokens.INVENTORY_WRITE);
 
         mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + forged))
                 .andExpect(status().isUnauthorized());
@@ -87,9 +76,7 @@ class InventorySecurityTest {
     @Test
     @DisplayName("a service token is accepted, for reads and for writes alike")
     void acceptsAServiceToken() throws Exception {
-        String token = new ServiceTokenProvider(
-                new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey)), jwtProperties, "ecomdemo-app")
-                .token();
+        String token = TestJwt.service("ecomdemo-app", ServiceTokens.INVENTORY_READ, ServiceTokens.INVENTORY_WRITE);
 
         mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk());
@@ -106,6 +93,34 @@ class InventorySecurityTest {
                 // was understood; 401 or 403 would mean it never arrived. What the stock rules
                 // then decide belongs to the tests that own them.
                 .andExpect(status().isConflict());
+    }
+
+    /**
+     * Phase 33: least privilege between services. A token holding {@code inventory:read} alone may
+     * look stock up and never set it. Until Phase 33 every service token carried the same SERVICE
+     * role, and any service could have emptied the stock of any product.
+     */
+    @Test
+    @DisplayName("a read-only service token can read stock but not change it")
+    void aReadScopeCannotWrite() throws Exception {
+        String readOnly = TestJwt.service("read-only-client", ServiceTokens.INVENTORY_READ);
+
+        mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + readOnly))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/inventory/1/reserve")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + readOnly)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"units\":1,\"productName\":\"Anything\"}"))
+                .andExpect(status().isForbidden());
+    }
+
+    @Test
+    @DisplayName("a service token with no inventory scope cannot even read")
+    void aForeignScopeCannotRead() throws Exception {
+        String gateways = TestJwt.service("gateway-service", ServiceTokens.CATALOG_READ);
+
+        mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + gateways))
+                .andExpect(status().isForbidden());
     }
 
     /**
@@ -165,9 +180,7 @@ class InventorySecurityTest {
                 .claim(TokenClaims.USER_ID, userId)
                 .claim(TokenClaims.ROLES, List.of(roles))
                 .build();
-        return new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey))
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
-                .getTokenValue();
+        return TestJwt.sign(claims);
     }
 
     @Test

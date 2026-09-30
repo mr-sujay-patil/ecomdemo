@@ -1,22 +1,9 @@
 package com.ecomdemo.gateway.support;
 
-import com.ecomdemo.jwt.JwtProperties;
-import com.ecomdemo.shared.TokenClaims;
 import com.ecomdemo.support.RedisContainerConfig;
-import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
-import javax.crypto.SecretKey;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
-import org.springframework.security.oauth2.jwt.JwsHeader;
-import org.springframework.security.oauth2.jwt.JwtClaimsSet;
-import org.springframework.security.oauth2.jwt.JwtEncoder;
-import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
-import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -113,32 +100,8 @@ public abstract class GatewayTest {
                 .build();
     }
 
-    @Autowired
-    private SecretKey jwtSigningKey;
-
-    @Autowired
-    private JwtProperties jwtProperties;
-
-    /**
-     * A token carrying exactly the roles asked for.
-     *
-     * <p>Signed with the same secret the gateway verifies with, and carrying the same {@code iss} it
-     * requires — so a test that wants to be REJECTED has to break one of those on purpose rather than
-     * rely on an accident.
-     */
+    /** A person's token, signed with the test key the gateway's test decoder trusts (Phase 33). */
     protected String tokenWithRoles(String username, String... roles) {
-        JwtEncoder encoder = new NimbusJwtEncoder(new ImmutableSecret<>(jwtSigningKey));
-        Instant now = Instant.now();
-        Duration expiry = jwtProperties.expiry() == null ? FALLBACK_EXPIRY : jwtProperties.expiry();
-        JwtClaimsSet claims = JwtClaimsSet.builder()
-                .issuer(jwtProperties.issuer())
-                .subject(username)
-                .issuedAt(now)
-                .expiresAt(now.plus(expiry))
-                .claim(TokenClaims.USER_ID, 4242)
-                .claim(TokenClaims.ROLES, List.of(roles))
-                .build();
-        JwsHeader header = JwsHeader.with(MacAlgorithm.HS256).build();
-        return encoder.encode(JwtEncoderParameters.from(header, claims)).getTokenValue();
+        return com.ecomdemo.support.TestJwt.user(username, 4242, roles);
     }
 }

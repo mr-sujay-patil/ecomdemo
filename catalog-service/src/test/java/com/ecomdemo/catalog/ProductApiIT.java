@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.catalog.dto.ProductResponse;
+import com.ecomdemo.jwt.ServiceTokens;
 import com.ecomdemo.support.CatalogIntegrationTest;
+import com.ecomdemo.support.TestJwt;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
@@ -209,6 +211,29 @@ class ProductApiIT extends CatalogIntegrationTest {
 
         assertThat(customer.getForEntity("/api/products/embeddings/1", ApiError.class).getStatusCode())
                 .as("a backfill's progress is operations data, ADMIN only at the gateway and here")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    /**
+     * Phase 33: service tokens carry scopes, and this chain checks them. The gateway's token
+     * ({@code catalog:read}) browses and cannot write; catalog-service's own token
+     * ({@code inventory:read} only) cannot even read here. Until Phase 33 both carried the one SERVICE
+     * role, which could write the catalogue.
+     */
+    @Test
+    @DisplayName("a service token must carry the scope: catalog:read reads, nothing else writes")
+    void serviceTokensNeedTheirScope() {
+        TestRestTemplate gateway = withToken(TestJwt.service("gateway-service", ServiceTokens.CATALOG_READ));
+        TestRestTemplate outOfScope = withToken(TestJwt.service("catalog-service", ServiceTokens.INVENTORY_READ));
+
+        assertThat(gateway.getForEntity("/api/products", ProductResponse[].class).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        ProductRequest body = new ProductRequest("IT Scope Write", "1.00", new BigDecimal("1.00"), 1, "IT");
+        assertThat(gateway.postForEntity("/api/products", body, ApiError.class).getStatusCode())
+                .as("catalog:read is not catalog:write")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(outOfScope.getForEntity("/api/products", ApiError.class).getStatusCode())
+                .as("a token with no catalog scope")
                 .isEqualTo(HttpStatus.FORBIDDEN);
     }
 

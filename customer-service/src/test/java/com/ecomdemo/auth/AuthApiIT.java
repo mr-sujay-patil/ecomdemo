@@ -23,7 +23,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
+import com.ecomdemo.security.SigningKeys;
+import org.springframework.security.oauth2.jose.jws.SignatureAlgorithm;
 import org.springframework.security.oauth2.jwt.JwsHeader;
 import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
@@ -48,6 +49,9 @@ class AuthApiIT extends CustomerIntegrationTest {
 
     @Autowired
     private JwtEncoder jwtEncoder;
+
+    @Autowired
+    private SigningKeys signingKeys;
 
     @Autowired
     private JwtDecoder jwtDecoder;
@@ -141,7 +145,7 @@ class AuthApiIT extends CustomerIntegrationTest {
                 .claim(TokenClaims.ROLES, List.of("CUSTOMER"))
                 .build();
         String expired = jwtEncoder
-                .encode(JwtEncoderParameters.from(JwsHeader.with(MacAlgorithm.HS256).build(), claims))
+                .encode(JwtEncoderParameters.from(JwsHeader.with(SignatureAlgorithm.RS256).keyId(signingKeys.active().getKeyID()).build(), claims))
                 .getTokenValue();
 
         // When

@@ -56,6 +56,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/customers/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
 
+                        // Phase 33: the public keys, and the token endpoint for SERVICES. The token
+                        // endpoint checks the client's own id and secret itself (HTTP Basic, in the
+                        // controller), so the chain lets it through. Neither is routed by the gateway.
+                        .requestMatchers(HttpMethod.GET, "/oauth2/jwks").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/oauth2/token").permitAll()
+
                         // Compose's healthcheck has no credentials, and neither has the Prometheus
                         // scraper. EndpointRequest rather than a literal path, because the base path
                         // is configurable and a literal stops matching when it moves.

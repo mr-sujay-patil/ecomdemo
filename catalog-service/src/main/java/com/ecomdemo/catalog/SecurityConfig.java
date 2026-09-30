@@ -31,10 +31,13 @@ import org.springframework.security.web.SecurityFilterChain;
  * stays the first check; this is the second, so one misconfigured port is not the whole defence.
  *
  * <p>Since Phase 21 the token arriving here IS the caller's: the gateway relays a user's token
- * untouched and gives anonymous browsing its own SERVICE identity, and the application's batch
- * import writes with its SERVICE token. So the rule can be the gateway's own: reads for any valid
- * token, writes and the embedding backfill for ADMIN or SERVICE. {@code CatalogSecurityTest}
- * proves a CUSTOMER gets 403.
+ * untouched and gives anonymous browsing its own service identity, and the application's batch
+ * import writes with its own. Since Phase 33 a service token carries SCOPES, not one shared SERVICE
+ * role, so each rule names exactly which service may do it: reads for a person (CUSTOMER or ADMIN)
+ * or {@code catalog:read} (the gateway, the application); writes and the embedding backfill for
+ * ADMIN or {@code catalog:write} (only the application). catalog-service's own token, which holds
+ * inventory scopes only, cannot even read here. {@code CatalogSecurityTest} proves
+ * a CUSTOMER and an out-of-scope service get 403.
  *
  * <p>Note what that means for reads: the public product listing is public on the APPLICATION, not
  * here. Every path on this service needs a token, including the GETs, because the only caller is
@@ -42,6 +45,11 @@ import org.springframework.security.web.SecurityFilterChain;
  */
 @Configuration
 public class SecurityConfig {
+
+    private static final String CUSTOMER = JwtAuthorities.ROLE_PREFIX + "CUSTOMER";
+    private static final String ADMIN = JwtAuthorities.ROLE_PREFIX + "ADMIN";
+    private static final String READ = ServiceTokens.authority(ServiceTokens.CATALOG_READ);
+    private static final String WRITE = ServiceTokens.authority(ServiceTokens.CATALOG_WRITE);
 
     @Bean
     SecurityFilterChain filterChain(
@@ -68,12 +76,13 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // Operations data about a backfill run: the gateway's ADMIN rule, mirrored.
                         // Placed before the GET rule because the first match wins.
-                        .requestMatchers("/api/products/embeddings/**").hasAnyRole("ADMIN", ServiceTokens.ROLE)
-                        // Reading the catalogue: any valid token (a shopper's, or the gateway's
-                        // SERVICE identity for anonymous browsing).
-                        .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**").authenticated()
+                        .requestMatchers("/api/products/embeddings/**").hasAnyAuthority(ADMIN, WRITE)
+                        // Reading the catalogue: a person's token, or a service holding catalog:read
+                        // (the gateway for anonymous browsing, the application).
+                        .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/**")
+                                .hasAnyAuthority(CUSTOMER, ADMIN, READ)
                         // Everything else under /api/products changes the catalogue.
-                        .requestMatchers("/api/products", "/api/products/**").hasAnyRole("ADMIN", ServiceTokens.ROLE)
+                        .requestMatchers("/api/products", "/api/products/**").hasAnyAuthority(ADMIN, WRITE)
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(JwtAuthorities.converter()))

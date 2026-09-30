@@ -1,5 +1,8 @@
 package com.ecomdemo.auth;
 
+import com.ecomdemo.auth.throttle.LoginThrottleService;
+import com.ecomdemo.auth.throttle.LoginThrottledException;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -37,6 +40,11 @@ class AuthServiceTest {
     @Mock
     private TokenService tokenService;
 
+    @Mock
+    private LoginThrottleService throttle;
+
+    private static final String CLIENT = "203.0.113.7";
+
     @InjectMocks
     private AuthService authService;
 
@@ -56,7 +64,7 @@ class AuthServiceTest {
         when(tokenService.issueFor(asha)).thenReturn(expected);
 
         // When
-        TokenResponse actual = authService.login(REQUEST);
+        TokenResponse actual = authService.login(REQUEST, CLIENT);
 
         // Then
         assertThat(actual).isSameAs(expected);
@@ -80,7 +88,7 @@ class AuthServiceTest {
         // When / Then: the exception is left to propagate. GlobalExceptionHandler turns every
         // AuthenticationException into one identical 401, which is what keeps a wrong password
         // and an unknown username indistinguishable.
-        assertThatThrownBy(() -> authService.login(REQUEST)).isInstanceOf(BadCredentialsException.class);
+        assertThatThrownBy(() -> authService.login(REQUEST, CLIENT)).isInstanceOf(BadCredentialsException.class);
         verify(tokenService, never()).issueFor(any());
     }
 
@@ -96,7 +104,7 @@ class AuthServiceTest {
         // otherwise a constructor that started validating its arguments would satisfy this
         // assertion without login() ever being reached.
         LoginRequest unknownAccount = new LoginRequest("nobody", "whatever-password");
-        assertThatThrownBy(() -> authService.login(unknownAccount))
+        assertThatThrownBy(() -> authService.login(unknownAccount, CLIENT))
                 .isInstanceOf(UsernameNotFoundException.class);
         verify(tokenService, never()).issueFor(any());
     }
@@ -107,5 +115,40 @@ class AuthServiceTest {
         // A record's generated toString() includes every component, and a DTO is exactly the
         // kind of object that ends up in a debug log or an exception message.
         assertThat(REQUEST.toString()).contains("asha").doesNotContain("correct-horse-battery-staple");
+    }
+
+    @Test
+    @DisplayName("Phase 33: a wrong password is counted against the username and the client")
+    void countsAFailure() {
+        when(authenticationManager.authenticate(any())).thenThrow(new BadCredentialsException("Bad credentials"));
+
+        assertThatThrownBy(() -> authService.login(REQUEST, CLIENT)).isInstanceOf(BadCredentialsException.class);
+        verify(throttle).recordFailure("asha", CLIENT);
+        verify(throttle, never()).recordSuccess(any());
+    }
+
+    @Test
+    @DisplayName("Phase 33: a correct password clears the username's failures")
+    void clearsFailuresOnSuccess() {
+        AppUserDetails asha = new AppUserDetails(TestData.user(7L, "asha", Role.CUSTOMER));
+        when(authenticationManager.authenticate(any()))
+                .thenReturn(UsernamePasswordAuthenticationToken.authenticated(asha, null, asha.getAuthorities()));
+
+        authService.login(REQUEST, CLIENT);
+
+        verify(throttle).recordSuccess("asha");
+        verify(throttle, never()).recordFailure(any(), any());
+    }
+
+    @Test
+    @DisplayName("Phase 33: a throttled attempt never reaches the password check")
+    void aThrottledAttemptSkipsBcrypt() {
+        org.mockito.Mockito.doThrow(new LoginThrottledException(java.time.Duration.ofSeconds(30)))
+                .when(throttle).checkAllowed("asha", CLIENT);
+
+        assertThatThrownBy(() -> authService.login(REQUEST, CLIENT)).isInstanceOf(LoginThrottledException.class);
+        // No BCrypt, no counting, no token: a flood of blocked guesses costs this service nothing.
+        verify(authenticationManager, never()).authenticate(any());
+        verify(throttle, never()).recordFailure(any(), any());
     }
 }

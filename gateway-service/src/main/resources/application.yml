@@ -183,9 +183,16 @@ server:
 
 ecomdemo:
   jwt:
-    # Validates at the edge; issues nothing. customer-service remains the only issuer.
-    secret: ${JWT_SECRET:}
+    # Validates at the edge; issues nothing. customer-service is the only issuer, and since Phase 33
+    # the only holder of a signing key: this gateway verifies with its PUBLIC keys, from its JWKS.
+    jwk-set-uri: ${JWT_JWK_SET_URI:http://localhost:8083/oauth2/jwks}
     issuer: ecomdemo
+    expiry: 15m
+  # Phase 33: the gateway's own identity for anonymous browsing. It asks customer-service for a token
+  # with its own secret; customer-service gives it catalog:read and nothing else.
+  service-identity:
+    token-uri: ${SERVICE_TOKEN_URI:http://localhost:8083/oauth2/token}
+    client-secret: ${SERVICE_CLIENT_SECRET:}
   metrics:
     # Read by MetricsConfig in `common`, imported explicitly by GatewayApplication. Without it this
     # service's http_server_requests meters would merge with another's under an untagged name.

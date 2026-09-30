@@ -87,34 +87,59 @@ rm -f "$IMAGE_TAR"
 
 step "Namespace and Secrets"
 k apply -f k8s/namespace.yaml
-# The JWT signing key comes from .env, the same one compose uses (never printed, never in Git).
-JWT_SECRET="${JWT_SECRET:-$(sed -n 's/^JWT_SECRET=//p' .env 2>/dev/null | tail -1)}"
-if [ -z "$JWT_SECRET" ]; then
-    echo "JWT_SECRET is not set and not in .env (see .env.example)" >&2
-    exit 1
-fi
-# One Secret per service. A database password is GENERATED the first time and then kept: the
-# database initialises itself with it on first start and stores it on its volume, so replacing the
-# Secret later would lock the service out of its own database.
-make_secret() { # make_secret <service> [DB_PASSWORD_KEY]
-    local name="$1-secrets" key="${2:-}"
-    if k -n "$NS" get secret "$name" >/dev/null 2>&1; then
-        echo "secret/$name exists (kept)"
-        return
-    fi
-    local args=(--from-literal=JWT_SECRET="$JWT_SECRET")
-    [ -n "$key" ] && args+=(--from-literal="$key=$(openssl rand -hex 16)")
-    k -n "$NS" create secret generic "$name" "${args[@]}" >/dev/null
-    echo "secret/$name created"
+# Phase 33: no shared JWT secret any more. customer-service holds the only signing key (RSA) and
+# the three service-client secrets; each calling service holds only its own client secret.
+#
+# Every value is taken from .env when it is set there (the same one compose uses), else KEPT from the
+# Secret already in the cluster, else generated once. Nothing is ever printed.
+env_value() { sed -n "s/^$1=//p" .env 2>/dev/null | tail -1; }
+secret_value() { # secret_value <secret> <key> -> the stored value, or nothing
+    k -n "$NS" get secret "$1" -o "jsonpath={.data.$2}" 2>/dev/null | base64 -d 2>/dev/null || true
 }
-make_secret app POSTGRES_PASSWORD
-make_secret catalog-service CATALOG_DB_PASSWORD
-make_secret customer-service CUSTOMER_DB_PASSWORD
-make_secret inventory-service INVENTORY_DB_PASSWORD
-make_secret notification-service NOTIFICATION_DB_PASSWORD
-make_secret payment-service PAYMENT_DB_PASSWORD
-make_secret assistant-service
-make_secret gateway-service
+# ensure_key <secret> <key> <value>: sets the key only when the secret or the key is missing, so a
+# value already in the cluster (a database password above all: the database stored it on first start)
+# is never replaced. That also upgrades a cluster created before Phase 33 in place.
+ensure_key() {
+    if ! k -n "$NS" get secret "$1" >/dev/null 2>&1; then
+        k -n "$NS" create secret generic "$1" --from-literal="$2=$3" >/dev/null
+        echo "secret/$1 created ($2)"
+    elif [ -z "$(secret_value "$1" "$2")" ]; then
+        k -n "$NS" patch secret "$1" --type merge -p "{\"stringData\":{\"$2\":\"$3\"}}" >/dev/null
+        echo "secret/$1 gained $2"
+    fi
+}
+pick() { # pick <.env name> <secret> <key> <generator>: .env, else the cluster's, else a new one
+    local value; value="$(env_value "$1")"
+    [ -z "$value" ] && value="$(secret_value "$2" "$3")"
+    [ -z "$value" ] && value="$(eval "$4")"
+    printf '%s' "$value"
+}
+NEW_SECRET='openssl rand -hex 32'
+NEW_RSA_KEY='openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0'
+SIGNING_KEY="$(pick JWT_SIGNING_KEY customer-service-secrets JWT_SIGNING_KEY "$NEW_RSA_KEY")"
+GATEWAY_SECRET="$(pick GATEWAY_CLIENT_SECRET customer-service-secrets GATEWAY_CLIENT_SECRET "$NEW_SECRET")"
+APP_SECRET="$(pick APP_CLIENT_SECRET customer-service-secrets APP_CLIENT_SECRET "$NEW_SECRET")"
+CATALOG_SECRET="$(pick CATALOG_CLIENT_SECRET customer-service-secrets CATALOG_CLIENT_SECRET "$NEW_SECRET")"
+
+ensure_key customer-service-secrets JWT_SIGNING_KEY "$SIGNING_KEY"
+ensure_key customer-service-secrets GATEWAY_CLIENT_SECRET "$GATEWAY_SECRET"
+ensure_key customer-service-secrets APP_CLIENT_SECRET "$APP_SECRET"
+ensure_key customer-service-secrets CATALOG_CLIENT_SECRET "$CATALOG_SECRET"
+ensure_key gateway-service-secrets SERVICE_CLIENT_SECRET "$GATEWAY_SECRET"
+ensure_key app-secrets SERVICE_CLIENT_SECRET "$APP_SECRET"
+ensure_key catalog-service-secrets SERVICE_CLIENT_SECRET "$CATALOG_SECRET"
+# A database password is GENERATED the first time and then kept: the database initialises itself
+# with it on first start and stores it on its volume, so replacing it later would lock the service
+# out of its own database.
+ensure_key app-secrets POSTGRES_PASSWORD "$(openssl rand -hex 16)"
+ensure_key catalog-service-secrets CATALOG_DB_PASSWORD "$(openssl rand -hex 16)"
+ensure_key customer-service-secrets CUSTOMER_DB_PASSWORD "$(openssl rand -hex 16)"
+ensure_key inventory-service-secrets INVENTORY_DB_PASSWORD "$(openssl rand -hex 16)"
+ensure_key notification-service-secrets NOTIFICATION_DB_PASSWORD "$(openssl rand -hex 16)"
+ensure_key payment-service-secrets PAYMENT_DB_PASSWORD "$(openssl rand -hex 16)"
+# Services with nothing secret of their own still get their (empty-able) Secret: the manifests
+# reference it. A placeholder key keeps `kubectl create secret` happy.
+ensure_key assistant-service-secrets PHASE33_NO_SECRETS "none"
 
 step "Manifests (kubectl apply -k k8s/)"
 k apply -k k8s/

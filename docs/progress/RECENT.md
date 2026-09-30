@@ -12,6 +12,35 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 33: Authentication Hardening (tag: phase-33-complete, PR #54)
+**What exists now:** customer-service alone signs tokens, RS256 with a `kid`; everyone else verifies
+with its public keys from `/oauth2/jwks` (no shared secret anywhere). Services get their own tokens
+from `POST /oauth2/token` (client credentials, own secret) with scopes: gateway `catalog:read`,
+catalog-service `inventory:read inventory:write`, ecomdemo-app all five. Logins are throttled per
+username (5) and per client (20) in 15 min: 429 + Retry-After, block 30 s doubling to 15 min.
+**Key code:** common `jwt`: `JwtKeyConfig` (JWKS decoder, only if `ecomdemo.jwt.jwk-set-uri`),
+`JwtAuthorities.authorities()` (roles → ROLE_, scope → SCOPE_), `ServiceTokens` (scope constants,
+`authority()`), `ServiceTokenProvider` (interface) + `ClientCredentialsTokenProvider` (cached).
+customer: `security.SigningKeys`/`SigningKeyProperties`/`JwtConfig`, `auth.OAuth2Controller`,
+`ServiceClientProperties`, `auth.throttle.*` (V2 `login_throttle`). Gateway: reactive JWKS decoder in
+`GatewayJwtConfig`; `ServiceIdentityFilter` fetches on boundedElastic.
+**Config & infrastructure:** customer: `JWT_SIGNING_KEY` (PKCS#8 base64), `JWT_SIGNING_KEY_ID`,
+`JWT_NEXT_SIGNING_KEY(_ID)`, `JWT_ACTIVE_KEY_ID`, `GATEWAY/APP/CATALOG_CLIENT_SECRET`. Others:
+`JWT_JWK_SET_URI`; callers also `SERVICE_TOKEN_URI`, `SERVICE_CLIENT_SECRET`; app client id
+`ecomdemo-app`. k8s-up.sh: .env → kept → generated, patches missing keys into existing Secrets.
+Meters `ecomdemo_auth_login_failures_total`, `ecomdemo_auth_login_throttled_total{key}`.
+**Tests:** 697 (521 unit, 176 IT). Test-jar `TestJwt` (per-JVM RSA key; `user`, `service`, `sign`,
+`*SignedBy`) + `TestJwtAutoConfiguration` (@Primary decoders, not in customer-service; fixed service
+token). New: `ClientCredentialsTokenProviderTest`, `JwksKeyRotationTest`, `OAuth2ApiIT`,
+`LoginThrottleIT`, `ServiceClientRegistryTest`; scope tests in Inventory/PaymentSecurityTest,
+ProductApiIT. Smoke section "Authentication hardening": compose 467/0/0, kind 423/0/7.
+**Gotchas:** a new service call needs its scope in customer-service's `service-clients` AND
+`ServiceClientRegistryTest`; catalog's in-memory inventory hides scope mistakes (only the compose
+smoke found `inventory:write`). Web slices import `TestJwtAutoConfiguration` via `WithSecurityRules`.
+Smoke checks that need a service token run inside a container (BusyBox wget).
+**Follow-ups (not done):** refresh tokens and revocation (KI-017); per-client throttle trusts the last
+X-Forwarded-For hop, forgeable on a published customer port (KI-003); KI-039, KI-040 still open.
+
 ## Phase 32: Saga Timeouts and Reconciliation (tag: phase-32-complete, PR #51)
 **What exists now:** the order service owns the saga's clock. `SagaDeadlineSweeper` (@Scheduled, every
 `ecomdemo.saga.sweep-interval` 10s) reconciles orders PENDING longer than `ecomdemo.saga.deadline` (1m,
@@ -38,28 +67,3 @@ V there. A `@DataJpaTest` importing `InventoryService` needs `OrderLocks` too. A
 PostgreSQL-only: inventory's close/reserve can't run on H2.
 **Follow-ups (not done):** KI-037 (a dead-lettered StockRejected is cancelled with the void's reason);
 KI-038 (sweep in every instance, safe); KI-001 Swagger/OpenAPI fix next; restore cart on cancel (KI-019).
-
-## Phase 31: Security Scanning (tag: phase-31-complete, PR #48)
-**What exists now:** CI jobs `dependency-scan` (OWASP Dependency-Check 13.0.0, NVD, CVSS >= 7 fails,
-test scope skipped) and `image-scan` (all 8 images built in one job, Trivy 0.74.0 by digest,
-HIGH/CRITICAL fail, CycloneDX SBOM artifact per image); `publish` needs both. `docs/security.md` =
-scan findings + OWASP API Top 10 (2023) review. catalog/inventory now enforce roles themselves.
-**Key code:** root pom: `dependency-check-maven` in pluginManagement (run explicitly:
-`NVD_API_KEY=... ./mvnw org.owasp:dependency-check-maven:aggregate`), security version overrides
-`tomcat.version` 11.0.25, `jackson-bom.version` 3.1.6, `jackson-2-bom.version` 2.21.6 (REMOVE when Boot
-manages >= these). `dependency-check-suppressions.xml` (2 false positives, until 2027-03-31),
-`.trivyignore.yaml` (empty). catalog `SecurityConfig`: GET any token, writes + `/embeddings/**`
-ADMIN|SERVICE; inventory: everything ADMIN|SERVICE (`ServiceTokens.ROLE`).
-**Config & infrastructure:** GitHub secret `NVD_API_KEY` (set from the user's `.env`); NVD data cached
-in CI (`~/.cache/dependency-check`, first download ~26 min in CI, ~40 min locally); locally the key
-is read from `.env` (never print it). `trivy-reports/` gitignored.
-**Tests:** +4: `InventorySecurityTest` (CUSTOMER 403 on read/write/reserve, ADMIN ok), `ProductApiIT`
-(CUSTOMER reads but 403 on create/delete/backfill; ADMIN writes). CI blocking proven on PR #48 with
-a temporary commons-text 1.9 commit, then reverted.
-**Gotchas:** Dependency-Check 13 will not run without an NVD key. CPE matching is product-wide:
-Kotlin build-tool CVEs hit kotlin-stdlib; pgvector extension CVEs hit the Java client. Dependency-Check
-groups related jars (kotlin-reflect under kotlin-stdlib). Trivy writes root-owned files through the
-docker socket mount (delete via a container).
-**Follow-ups (not done):** login throttling per username; asymmetric JWT + scoped service identities;
-bind compose ports to 127.0.0.1; gateway `/actuator/prometheus` not public; pagination on
-`GET /api/products`; Trivy config/IaC scanning of Dockerfile and k8s manifests; Dependabot/Renovate.
