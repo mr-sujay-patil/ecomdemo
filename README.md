@@ -460,8 +460,9 @@ In a second terminal, against either way of running it:
 scripts/smoke-test.sh           # 156 end-to-end checks against the running app
 ```
 
-Swagger UI is at <http://localhost:8080/swagger-ui.html> — every endpoint is listed with its
-parameters, example bodies and error responses, and *Try it out* calls the running application.
+Swagger UI is at <http://localhost:8080/swagger-ui.html>, served by the gateway, with one document
+per service in its dropdown. Every endpoint is listed with its parameters, example bodies and error
+responses, and *Try it out* calls the running system through the gateway.
 
 ### Configuration
 
@@ -733,11 +734,21 @@ the token is fine and the account still may not do this.
 
 The table above is a summary; the API describes itself in full:
 
-| Path | What it serves |
+| Path (on the gateway, port 8080) | What it serves |
 |---|---|
-| `/swagger-ui.html` | Swagger UI — every endpoint, browsable and callable |
-| `/v3/api-docs` | The OpenAPI 3 document as JSON |
-| `/v3/api-docs.yaml` | The same document as YAML |
+| `/swagger-ui.html` | Swagger UI — pick a service in the top-right dropdown; every endpoint, browsable and callable |
+| `/v3/api-docs/catalog` | catalog-service's OpenAPI 3 document (products, search) |
+| `/v3/api-docs/customer` | customer-service's (register, log in, profile) — start here for a token |
+| `/v3/api-docs/inventory` | inventory-service's (stock; ADMIN) |
+| `/v3/api-docs/app` | ecomdemo-app's (cart, checkout, orders, admin batch and dead letters) |
+| `/v3/api-docs/assistant` | assistant-service's (the shopping assistant) |
+
+**One UI, one document per service** (since KI-001). Each service builds its own document — only it
+knows its controllers — and serves it at its own `/v3/api-docs`. The gateway routes
+`/v3/api-docs/<service>` to it and hosts the one Swagger UI a browser can reach, with a dropdown of
+the five. Every document names a *relative* server, `/`, which resolves to the gateway it was fetched
+through, so *Try it out* goes through the same edge a real client uses, on whatever port the gateway
+is published. payment-service and notification-service have no public API and build no document.
 
 The document is **generated from the code** at startup, not hand-written: springdoc scans the
 controllers for `@Tag`, `@Operation` and `@ApiResponse`, the DTO records for `@Schema`, and the
@@ -749,8 +760,8 @@ it earns its keep when several teams have to agree on an API before anyone write
 Feed the document to anything that speaks OpenAPI:
 
 ```bash
-curl -s localhost:8080/v3/api-docs | python3 -m json.tool | head -40
-curl -s localhost:8080/v3/api-docs.yaml -o ecomdemo-api.yaml   # e.g. for a generated client
+curl -s localhost:8080/v3/api-docs/catalog | python3 -m json.tool | head -40
+curl -s localhost:8084/v3/api-docs.yaml -o orders-api.yaml   # YAML: from a service's own port (here the app's)
 ```
 
 ## Accounts and logging in
