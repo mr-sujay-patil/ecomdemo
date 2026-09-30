@@ -5,10 +5,10 @@
 - **Updated:** 2026-09-30
 - **Fix:** KI-041 — CORS preflight refused at the gateway
 - **Branch:** fix/ki-041-cors-preflight (cut from `main` at `82e5149`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #53 https://github.com/mr-sujay-patil/ecomdemo/pull/53
+- **Waiting for user:** YES (review of PR #53)
 
 ## Merge verification before this fix — PASSED (tag `ki-001-fixed` on `82e5149`)
 - KI-001: PR #52 `82e5149`, merge commit (2 parents). 0 missing commits, 0 diffs, branch alive
@@ -27,11 +27,13 @@
 - [x] README CORS paragraph, `docs/decisions.md` (`[KI-041] Decision: ...`)
 - [x] Testing: verify 673 (506 unit, 167 IT) 0 failed; cold compose smoke 457/0/0; kind (9 Deployments
       restarted) 413/0/7; cleaned up. KI-041 → Fixed
-- [ ] PR; PR number in KNOWN_ISSUES status
+- [x] PR #53; KI-041 status "Fixed (PR #53)"
 
 ## Next action
-Tests passed. Open the PR `Fix KI-041: ...`, put its number in KI-041's status and here, commit,
-push, STOP for review.
+PR #53 is open. STOP: wait for the user's review. After the merge: merge verification (git checks,
+CI on main, `./mvnw clean verify` + cold `down -v` smoke on main), tag `ki-041-fixed`, then ask the
+user what is next (Phase 33, KI-039, KI-040). Tell the frontend (ecomdemo-web) that backend
+`ki-041-fixed` exists: cross-origin browser calls work from then on.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - No resource rationing: tests may run with the stack up. Verification uses a COLD stack
