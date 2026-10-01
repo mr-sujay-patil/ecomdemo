@@ -2223,6 +2223,16 @@ topic_message_count() {
 if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/null 2>&1; then
     TOPICS="$(kafka kafka-topics.sh --list)"
 
+    # KI-039: the broker writes to the volume it mounts. compose mounted kafka-data and left the
+    # broker's log directory at the image's default under /tmp, inside the container, so every
+    # `docker compose down` deleted every topic, offset and message (the databases kept theirs).
+    # Asked of the RUNNING broker, so it holds on compose and on Kubernetes alike, and a drift in
+    # either file fails here. ComposeKafkaPersistenceIT is the proof that the data then survives.
+    KAFKA_LOG_DIR="$(kafka kafka-log-dirs.sh --describe --topic-list orders.placed \
+        | grep '^{' | python3 -c "import json,sys; print(json.load(sys.stdin)['brokers'][0]['logDirs'][0]['logDir'])" 2>/dev/null)"
+    check "the broker's log directory is the mounted volume, not the container's own filesystem" \
+        "/var/lib/kafka/data" "$KAFKA_LOG_DIR"
+
     check "the orders.placed topic exists" "True" \
         "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed' && echo True || echo False)"
 

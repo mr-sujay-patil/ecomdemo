@@ -422,13 +422,16 @@ docker compose logs -f inventory-service
 docker compose logs -f customer-service
 docker compose logs -f notification-service
 docker compose --profile tools up -d    # ...and Kafka UI on :8090, which costs 242 MiB
-docker compose down                     # stop and remove, KEEPING both databases
-docker compose down -v                  # ...and delete both volumes too
+docker compose down                     # stop and remove, KEEPING every named volume
+docker compose down -v                  # ...and delete them all too
 ```
 
-`docker compose down` is not destructive: the database lives in a named volume that outlives the
-containers, so `up` again finds the schema already migrated. Only `-v` throws it away — and note
-that there are now **five** volumes, one per database, which `down -v` removes together.
+`docker compose down` is not destructive: the data lives in named volumes that outlive the
+containers, so `up` again finds the schemas already migrated **and Kafka's topics, messages and
+consumer-group offsets still there** (since KI-039; until then the broker wrote inside its container
+and `down` silently emptied it). Only `-v` throws it away, and it removes all 13 volumes together:
+the six databases, Kafka's log, the batch files, and Prometheus, Grafana, Loki, Tempo and Alloy's data.
+A clean start, the way every verification here begins, is `down -v` then `up --build --wait`.
 
 **`.env` is gitignored**; `.env.example` is the documented template. Every value has a working
 default, so an empty `.env` starts a usable stack. Since Phase 33 the values worth setting are
