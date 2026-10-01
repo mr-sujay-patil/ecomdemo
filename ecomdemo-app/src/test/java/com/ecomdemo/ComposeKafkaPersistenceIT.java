@@ -4,12 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
+import com.github.dockerjava.api.model.Bind;
+import com.github.dockerjava.api.model.Volume;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.DockerClientFactory;
-import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Container.ExecResult;
 import org.testcontainers.utility.DockerImageName;
@@ -105,10 +107,12 @@ class ComposeKafkaPersistenceIT {
         GenericContainer<?> container = new GenericContainer<>(DockerImageName.parse(compose.image()));
         compose.environment().forEach(container::withEnv);
         container.withEnv("KAFKA_HEAP_OPTS", "-Xmx256m -Xms256m");
-        // A volume NAME rather than a host path, so Docker creates the volume and gives it the image's
-        // ownership of the directory: the broker runs as a non-root user, and a bind-mounted host
-        // directory would not be writable by it.
-        container.withFileSystemBind(VOLUME, compose.dataMount(), BindMode.READ_WRITE);
+        // A real Docker NAMED volume, as compose creates, not a host path. withFileSystemBind() would
+        // treat the name as a relative host path, make a root-owned directory of it next to the code,
+        // and the broker (which runs as a non-root user) could not write there. A Bind whose source is
+        // a bare name is a named volume: Docker creates it and gives it the image's ownership of the
+        // mount point, so the broker can write to it.
+        container.setBinds(List.of(new Bind(VOLUME, new Volume(compose.dataMount()))));
         // The environment's advertised listener and controller quorum say "kafka": resolve it to itself.
         container.withCreateContainerCmdModifier(command -> command.withHostName("kafka"));
         return container;
