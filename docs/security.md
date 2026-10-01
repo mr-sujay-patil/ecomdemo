@@ -67,12 +67,20 @@ Trivy.
 | CVE-2026-65182, CVE-2026-65905, CVE-2026-68525 | `tomcat-embed-core` 11.0.24 (7 images) | CRITICAL | Trivy | **Fixed**: `tomcat.version` 11.0.25 |
 | CVE-2026-68497 | `tools.jackson.core:jackson-databind` 3.1.5 (8 images) | HIGH | Trivy | **Fixed**: `jackson-bom.version` 3.1.6 |
 | CVE-2026-68497 | `com.fasterxml.jackson.core:jackson-databind` 2.21.5 (7 images) | HIGH | Trivy | **Fixed**: `jackson-2-bom.version` 2.21.6 |
+| CVE-2026-91776, CVE-2026-91777 | `tools.jackson.core:jackson-databind` 3.1.6 (8 images) | HIGH | Trivy (CI on `main`, 2026-10-01) | **Fixed** (KI-042): `jackson-bom.version` 3.1.7 |
+| CVE-2026-91776, CVE-2026-91777 | `com.fasterxml.jackson.core:jackson-databind` 2.21.6 (8 images) | HIGH | Trivy (CI on `main`, 2026-10-01) | **Fixed** (KI-042): `jackson-2-bom.version` 2.21.7 |
 | CVE-2026-53914 (9.8) | `kotlin-stdlib` 2.3.21, `kotlin-stdlib-common` 1.9.10, `kotlin-reflect` 2.3.21 | CRITICAL | Dependency-Check | **Suppressed, false positive**: the CVE is in Kotlin's *build cache* (compiler tooling), and the CPE covers the whole product, so every Kotlin jar matches. Only the runtime libraries ship here (via OkHttp and the OpenAI client); Trivy doesn't flag them. Expires 2027-03-31 |
 | CVE-2026-18022 (8.8) | `com.pgvector:pgvector` 0.1.6 (Java client) | HIGH | Dependency-Check | **Suppressed, false positive**: the CVE is in the PostgreSQL *extension's* IVFFlat build, on 32-bit only. The jar has no index code, and the running extension was checked: 0.8.6 (fixed), HNSW index, 64-bit. Expires 2027-03-31 |
 
 All three overrides are for versions Spring Boot 4.1.1 (the newest release) manages. Each is one
 patch release in the same line, and each should be removed when a Boot release catches up. The
 comment in the root pom says so.
+
+**A scan that passes today can fail tomorrow with no code change.** The two Jackson properties
+have each been raised twice: the second pair of advisories (KI-042) was published about ten hours
+after Phase 33 merged with a green scan, and showed up on the next push to `main`, a docs-and-tests
+PR. The image scan runs only on pushes and pull requests (the scheduled workflow just refreshes the
+NVD cache), so a new disclosure is noticed by whoever merges next. Running it daily is KI-044.
 
 After the fixes, **all 8 images scan clean** at HIGH/CRITICAL, and the Alpine base had no
 HIGH/CRITICAL findings to begin with. **Dependency-Check** covered 142 dependencies and passes

@@ -45,6 +45,8 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-039 | compose's Kafka keeps nothing across `down`/`up`: the `kafka-data` volume is mounted at `/var/lib/kafka/data`, but the broker writes to `/tmp/kafka-logs`. Every topic, offset and consumer group is lost while the PostgreSQL volumes survive | Medium | Phase 17 | Phase 32 merge verification (2026-09-30): `kafka-log-dirs.sh` reports `/tmp/kafka-logs` | Fixed (PR #55) |
 | KI-040 | A dead letter is identified only by its Kafka address. `dead_letter_replay` is unique on `(dlt_topic, dlt_partition, dlt_offset)`, so once a DLT's offsets restart (topic recreated, or KI-039), a new dead letter at a reused offset is refused 409 "already replayed" and can never be replayed. Fails safe (never replays twice). Key it on the record's identity (e.g. the event ID) as well **Reachability after KI-039's fix (2026-10-01):** a smoke run on kept volumes now passes (470/0/0), because the broker keeps its offsets across `down`/`up`; the defect is still there, now reachable only when a dead-letter topic's offsets restart while `dead_letter_replay` keeps its rows (a topic recreated, or only `kafka-data` removed). | Medium | Phase 32 | Phase 32 merge verification (2026-09-30): smoke with kept volumes 429/2 failed | Open |
 | KI-041 | The gateway answers every CORS preflight (`OPTIONS`) with 401, so a browser app on another origin cannot log in or send any authenticated request (details below) | Medium | Phase 21 | Found 2026-09-30 while writing the frontend integration guide: `curl -X OPTIONS` with `Origin: http://localhost:3000` → 401, no `Access-Control-Allow-*` | Fixed (PR #53) |
+| KI-042 | CI's image scan fails on two new HIGH CVEs in jackson-databind, in all 8 images, so `publish` is skipped on `main` (details below) | High | Phase 31 (the scanner); CVEs disclosed after 2026-09-30 | CI run 36815366837 on the PR #55 merge: `Image scan (Trivy)`, step "Scan every image" | Fixed (PR #56) |
+| KI-043 | `scripts/smoke-test.sh` does not check that the stack it hits is this checkout's own: it only follows `BASE_URL`. Against another stack it creates accounts, products and orders and, in its failure scenarios, stops Kafka, catalog-service and payment-service. compose's fixed container names and ports make that easy to hit: the frontend team's clone (`~/projects/ecomdemo-backend-readonly`) shares them | Medium | Phase 1 (the smoke test); the shared names since Phase 10 | Found 2026-10-01 during KI-039's merge verification: my `compose up` collided with their stack, and the smoke then ran against it for several minutes before I stopped it | Open |
 
 ### KI-001: Swagger UI and OpenAPI docs unreachable since the split
 
@@ -106,6 +108,37 @@ gateway's origin, or proxy `/api` through the frontend's dev server.
 a preflight from another origin is refused; an authenticated cross-origin `GET /api/cart` returns
 200 with one `Access-Control-Allow-Origin`.
 
+### KI-042: two HIGH CVEs in jackson-databind block the image scan
+
+**Found:** 2026-10-01, in merge verification of PR #55 (KI-039): CI on `main` was red although the
+PR changed no dependency. The same scan passed on the Phase 33 merge about ten hours earlier.
+**Branch:** `fix/ki-042-jackson-cves`.
+
+**What's broken:** Trivy (HIGH and CRITICAL fail the job, fixable or not) reports four findings in
+every one of the eight images, all in application jars and none in OS packages:
+
+| CVE | Library | Installed | Fixed in |
+|---|---|---|---|
+| CVE-2026-91776 `TypeDeserializerBase._findDeserializer()` | `com.fasterxml.jackson.core:jackson-databind` | 2.21.6 | 2.21.7 (also 2.18.11, 2.22.3) |
+| CVE-2026-91777 forward-reference completion for `@JsonIdentityInfo` object IDs | same | 2.21.6 | same |
+| CVE-2026-91776 | `tools.jackson.core:jackson-databind` | 3.1.6 | 3.1.7 (also 3.2.3) |
+| CVE-2026-91777 | same | 3.1.6 | same |
+
+`publish` needs the scan, so no image has been published to GHCR for any push to `main` since. The
+library parses every request body, so this is not a theoretical dependency. OWASP Dependency-Check
+passed on the same run (the NVD has not scored these at 7 or more yet); it may flag them later.
+
+**Fix scope:**
+- Raise `jackson-bom.version` 3.1.6 → 3.1.7 and `jackson-2-bom.version` 2.21.6 → 2.21.7 in the parent
+  pom: Phase 31's mechanism, a patch release of the same line (Spring Boot 4.1.1 is still the newest
+  release and manages the old versions). Extend the pom's comment, `docs/security.md`'s findings
+  table and `docs/decisions.md`.
+- Reproduce first: run CI's own scan locally (same pinned Trivy, same `scan/<module>:ci` images,
+  `.trivyignore.yaml`) on the unfixed tree: 4 HIGH per image. The CI gate stays as the regression test.
+
+**Done when:** the same local scan reports no HIGH or CRITICAL finding in all 8 images, CI's `Image scan`
+and `Dependency scan` pass on the PR, and the build and smoke tests pass.
+
 ## Covered by an approved phase
 
 | ID | Issue | Phase | Status |
@@ -128,6 +161,7 @@ a preflight from another origin is refused; an authenticated cross-origin `GET /
 | KI-022 | Performance: stock check outside the checkout transaction, pipelined outbox sends, shorter poll delay, push order status (SSE), gateway cost per request and replicas, a soak test, a separate load machine | `performance.md` |
 | KI-023 | Trivy config/IaC scanning of the Dockerfile and k8s manifests; Dependabot for Docker base images and compose images (Maven and GitHub Actions are already covered, `.github/dependabot.yml`) | `RECENT.md` (Phase 31) |
 | KI-024 | Tempo retention and object storage; span metrics (traces to metrics) | README "Known gaps" |
+| KI-044 | Run the image scan (and the dependency scan) on a daily schedule, as `nvd-data.yml` already runs for the NVD cache, so a newly disclosed CVE shows up on its own and not on the next unrelated push (KI-042 turned a docs-and-tests merge red) | KI-042 |
 
 ## Accepted limits
 
