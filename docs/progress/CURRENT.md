@@ -5,10 +5,10 @@
 - **Updated:** 2026-10-01
 - **Fix:** KI-042 — two HIGH CVEs in jackson-databind block the image scan
 - **Branch:** fix/ki-042-jackson-cves (cut from `main` at `e81c44b`)
-- **Step:** BRANCHED
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #56 https://github.com/mr-sujay-patil/ecomdemo/pull/56
+- **Waiting for user:** YES (review of PR #56; and the compose smoke needs the frontend stack down)
 
 ## Merge verification before this fix — PASSED WITH TWO NOTED GAPS (tag `ki-039-fixed` on `e81c44b`)
 - KI-039: PR #55 merge commit (2 parents). 0 missing commits, 0 diffs, branch alive. On main
@@ -24,19 +24,23 @@
   show). main's tree is byte-identical to the PR branch's tip, where the full smoke passed: cold
   468/0/0, kept volumes 470/0/0, kind 424/0/7.
 
-## Checklist (KI-042: scope in its KNOWN_ISSUES detail section)
-- [ ] Reproduce first: CI's own scan, locally (pinned Trivy 0.74.0 digest, `scan/<module>:ci` images
-      built as CI builds them, `.trivyignore.yaml`) on the unfixed tree: expect 4 HIGH x 8 images
-- [ ] Fix: `jackson-bom.version` 3.1.7, `jackson-2-bom.version` 2.21.7 in the parent pom; comment updated
-- [ ] The same local scan after the fix: 0 HIGH/CRITICAL in all 8 images
-- [ ] `docs/security.md` findings table, `docs/decisions.md`, KI-042 → Fixed
-- [ ] Testing protocol steps 1, 3, 4, 7, 8: verify; the app run (compose needs THEIR stack stopped,
-      see below; kind does not conflict) + smoke; PR; PR number in the KI status
+## Checklist (KI-042)
+- [x] Reproduce first: CI's scan run locally (pinned Trivy, scan/<module>:ci images) on the unfixed
+      tree: 32 findings = 4 HIGH x 8 images (script: ~/.cache/ecomdemo-claude/trivy-local.sh, not committed)
+- [x] Fix: `jackson-bom.version` 3.1.7, `jackson-2-bom.version` 2.21.7; pom comment extended
+- [x] The same scan after the fix: 0 findings across all 8 images
+- [x] `docs/security.md` (2 rows + a note), `docs/decisions.md` (2), KI-042 Fixed (PR #56), KI-043 and
+      KI-044 logged
+- [x] verify 701 (524 unit, 177 IT) 0 failed; kind (images rebuilt, 9 Deployments restarted) 424/0/7,
+      running pods hold jackson-databind 2.21.7 and 3.1.7
+- [ ] Compose cold smoke: NOT run (the frontend team's stack holds the fixed container names and ports)
 
 ## Next action
-Housekeeping committed. Build the 8 images from this (unfixed) tree and scan them locally with the
-pinned Trivy to reproduce the 4 findings per image. Then bump the two properties. Script for the local
-scan: `~/.cache/ecomdemo-claude/trivy-local.sh` (not committed; a candidate to commit later).
+PR #56 is open. STOP: wait for the user's review, and ask the user to get the frontend team's compose
+stack stopped before merge verification (it needs a cold compose smoke on main; I must not stop their
+stack). After the merge: merge verification (git checks, CI on main incl. `Image scan`, `./mvnw clean
+verify`, cold `down -v` smoke), tag `ki-042-fixed`. Then ask what is next: KI-043 (smoke guard), KI-040,
+KI-044, or KI-002..011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
