@@ -1034,6 +1034,16 @@ services:
       # somebody typos a name, and the typo then looks like it worked.
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
       CLUSTER_ID: ecomdemo-kraft-cluster
+
+      # WHERE THE BROKER WRITES - and it must be where the volume below is mounted (KI-039).
+      # Mounting a volume does not move anything: the broker writes where ITS configuration says, and
+      # the image's default is a directory under /tmp, inside the container. Until this line existed
+      # `kafka-data` was mounted and empty, every `docker compose down` removed the container and
+      # with it every topic, every consumer group's offset and every message, while the PostgreSQL
+      # volumes next to it survived. Nothing failed and nothing logged: the broker just started empty.
+      # Kubernetes had always set this (k8s/data/kafka.yaml); KafkaStorageConfigTest keeps the two
+      # in step and ComposeKafkaPersistenceIT proves the broker honours it.
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
     volumes:
       - kafka-data:/var/lib/kafka/data
     ports:
