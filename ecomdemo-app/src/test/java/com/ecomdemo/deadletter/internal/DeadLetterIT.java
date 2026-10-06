@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpMethod;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.ConsumerFactory;
@@ -49,6 +50,9 @@ class DeadLetterIT extends IntegrationTest {
 
     @Autowired
     private ConsumerFactory<?, ?> consumerFactory;
+
+    @Autowired
+    private JdbcTemplate jdbc;
 
     private Map<String, Object> kafka() {
         Map<String, Object> properties = new HashMap<>(consumerFactory.getConfigurationProperties());
@@ -148,6 +152,59 @@ class DeadLetterIT extends IntegrationTest {
                 "/api/admin/dead-letters/replays", HttpMethod.GET, null, new ParameterizedTypeReference<>() {});
         assertThat(log.getBody()).anyMatch(entry -> entry.dltTopic().equals(DLT)
                 && entry.dltOffset() == at.offset() && entry.key().equals(key));
+    }
+
+    /** An audit row for an address, as an earlier replay (or an earlier life of the topic) left it. */
+    private void earlierReplayAt(RecordMetadata at, Instant writtenAt, Instant replayedAt) {
+        jdbc.update("INSERT INTO dead_letter_replay (dlt_topic, dlt_partition, dlt_offset, dlt_timestamp, "
+                        + "original_topic, record_key, replayed_by, replayed_at) "
+                        + "VALUES (?, ?, ?, ?, ?, 'earlier', 'admin', ?)",
+                DLT, at.partition(), at.offset(), writtenAt == null ? null : java.sql.Timestamp.from(writtenAt),
+                ORIGINAL, java.sql.Timestamp.from(replayedAt));
+    }
+
+    @Test
+    @DisplayName("KI-040: a new record at an address an earlier life of the topic used can be replayed")
+    void aReusedAddressIsANewRecord() throws Exception {
+        String key = String.valueOf(900_000 + (int) (Math.random() * 99_999));
+        RecordMetadata at = deadLetter(key, "{\"orderId\":" + key + "}");
+        // The same topic, partition and offset replayed back when the topic was an earlier one.
+        Instant earlier = Instant.ofEpochMilli(at.timestamp()).minus(Duration.ofDays(3));
+        earlierReplayAt(at, earlier, earlier.plusSeconds(60));
+
+        assertThat(listing().stream().filter(view -> view.offset() == at.offset()
+                        && view.partition() == at.partition() && view.topic().equals(DLT)))
+                .as("not shown as replayed: it is another record")
+                .noneMatch(DeadLetterView::replayed);
+        assertThat(asAdmin().postForEntity(replayUrl(at), null, String.class).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(asAdmin().postForEntity(replayUrl(at), null, String.class).getStatusCode())
+                .as("and that record, once, is still once")
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    @DisplayName("KI-040: an audit row from before V21 (no timestamp) blocks the record it may have replayed")
+    void aRowWithoutATimestampBlocksARecordItCouldHaveReplayed() throws Exception {
+        String key = String.valueOf(900_000 + (int) (Math.random() * 99_999));
+        RecordMetadata at = deadLetter(key, "{\"orderId\":" + key + "}");
+        // Replayed after the record was written: it may well be this record, so it stays replayed once.
+        earlierReplayAt(at, null, Instant.now().plusSeconds(1));
+
+        assertThat(asAdmin().postForEntity(replayUrl(at), null, String.class).getStatusCode())
+                .isEqualTo(HttpStatus.CONFLICT);
+    }
+
+    @Test
+    @DisplayName("KI-040: an audit row from before V21 does not block a record written after that replay")
+    void aRowWithoutATimestampDoesNotBlockALaterRecord() throws Exception {
+        String key = String.valueOf(900_000 + (int) (Math.random() * 99_999));
+        RecordMetadata at = deadLetter(key, "{\"orderId\":" + key + "}");
+        // A replay can only follow the write it replays, so this one was of an earlier record.
+        earlierReplayAt(at, null, Instant.ofEpochMilli(at.timestamp()).minus(Duration.ofDays(3)));
+
+        assertThat(asAdmin().postForEntity(replayUrl(at), null, String.class).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
     }
 
     @Test

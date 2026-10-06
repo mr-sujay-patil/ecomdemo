@@ -26,6 +26,10 @@ public class DeadLetterReplay {
     @Column(name = "dlt_offset", nullable = false, updatable = false)
     private long dltOffset;
 
+    /** When the record was written to the dead-letter topic; null on rows from before V21. */
+    @Column(name = "dlt_timestamp", updatable = false)
+    private Instant dltTimestamp;
+
     @Column(name = "original_topic", nullable = false, length = 200, updatable = false)
     private String originalTopic;
 
@@ -43,11 +47,12 @@ public class DeadLetterReplay {
     }
 
     DeadLetterReplay(
-            String dltTopic, int dltPartition, long dltOffset, String originalTopic, String recordKey,
-            String replayedBy, Instant replayedAt) {
+            String dltTopic, int dltPartition, long dltOffset, Instant dltTimestamp, String originalTopic,
+            String recordKey, String replayedBy, Instant replayedAt) {
         this.dltTopic = dltTopic;
         this.dltPartition = dltPartition;
         this.dltOffset = dltOffset;
+        this.dltTimestamp = dltTimestamp;
         this.originalTopic = originalTopic;
         this.recordKey = recordKey;
         this.replayedBy = replayedBy;
@@ -68,6 +73,10 @@ public class DeadLetterReplay {
 
     public long getDltOffset() {
         return dltOffset;
+    }
+
+    public Instant getDltTimestamp() {
+        return dltTimestamp;
     }
 
     public String getOriginalTopic() {
