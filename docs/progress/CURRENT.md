@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-06
 - **Fix:** KI-043 — `scripts/smoke-test.sh` does not check the stack it hits is this checkout's own
 - **Branch:** fix/ki-043-smoke-stack-guard (cut from `main` at `a926ba3`)
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -15,17 +15,19 @@ KI-042: PR #56 merged as a merge commit (`a926ba3`), tag `ki-042-fixed` exists. 
 on main was not run (frontend team's stack held the ports then; `docker ps` now shows no compose stack).
 
 ## Checklist (KI-043)
-- [ ] Reproduce first: a scripted test (fake `docker` on PATH reporting a foreign compose working dir)
-      that fails on the unfixed script: it must refuse before any HTTP call or container stop
-- [ ] Fix: a guard before "Readiness" on the compose platform: `ecomdemo-*` containers must carry
-      `com.docker.compose.project.working_dir` equal to this checkout; else exit 2, no traffic.
-      Override `SMOKE_ALLOW_FOREIGN_STACK=1`
-- [ ] Run the guard test + shellcheck-level syntax check; real smoke only if no foreign stack is up
-- [ ] testing protocol steps 1, 3, 4, 7, 8; docs (decisions `[KI-043]`, development-environment note);
-      KI-043 Fixed; PR
+- [x] Reproduce first: `scripts/test-smoke-guard.sh` (fake `docker`/`curl` on PATH); failed 4/6 on the unfixed script
+- [x] Fix: guard before any container/network call; exit 2 if `ecomdemo-app`/`ecomdemo-gateway` label
+      `com.docker.compose.project.working_dir` is another checkout; `SMOKE_ALLOW_FOREIGN_STACK=1` overrides
+- [x] Guard test 6/6; `./mvnw clean verify` 701 tests, 0 failed, 0 skipped (with Maven 3.10.0 from #57)
+- [x] Cold compose smoke on this branch (own stack, `down -v` + `up --build --wait`): 468/0/0, no REFUSING;
+      stack taken down afterwards
+- [x] Docs: decisions `[KI-043]` x2, development-environment note, KI-043 Fixed
+- [ ] Push, PR "Fix KI-043", add PR number to the KI row
 
 ## Next action
-Write the regression test `scripts/test-smoke-guard.sh`, see it fail, then add the guard.
+Push, `gh pr create --base main`, set KI-043 to "Fixed (PR #n)", STOP for review. Merge main (#57) was merged
+into this branch (no rebase). Side finding: `mvnw.cmd` in main has line endings that disagree with
+`.gitattributes` (`*.cmd eol=crlf`): worktree shows a whitespace-only diff; not committed here (KI candidate).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
