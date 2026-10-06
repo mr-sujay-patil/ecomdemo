@@ -2803,7 +2803,10 @@ curl -s localhost:8080/api/admin/dead-letters/replays -H "Authorization: Bearer 
 
 Replay is safe for two reasons. Every consumer ignores an event id it has already handled, and an
 order the deadline has decided is fenced on both sides. Every replay is recorded in
-`dead_letter_replay`, including who did it and when.
+`dead_letter_replay`, including who did it and when. A record is identified by its address
+(topic, partition, offset) **and the time it was written there**: if a dead-letter topic is recreated, or
+its volume wiped while the database survives, offsets restart and a new record at a reused address
+is a new record, replayable once (KI-040, V21).
 
 The smoke test's **Saga deadline and dead letters** section is the scripted failure scenario. It
 stops payment-service, places an order, and moves the order's StockReserved to the dead-letter topic

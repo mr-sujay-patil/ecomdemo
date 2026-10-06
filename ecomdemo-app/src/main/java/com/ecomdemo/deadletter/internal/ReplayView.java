@@ -10,6 +10,8 @@ public record ReplayView(
                 String dltTopic,
         @Schema(description = "Its partition there", example = "0") int dltPartition,
         @Schema(description = "Its offset there", example = "3") long dltOffset,
+        @Schema(description = "When it was written there: with the address, what identifies the record. "
+                + "Null for a replay from before the field existed") Instant dltTimestamp,
         @Schema(description = "The topic it was replayed to", example = "inventory.stock-reserved")
                 String originalTopic,
         @Schema(description = "The record key (the order id)", example = "4812") String key,
@@ -18,7 +20,8 @@ public record ReplayView(
 
     static ReplayView of(DeadLetterReplay replay) {
         return new ReplayView(
-                replay.getDltTopic(), replay.getDltPartition(), replay.getDltOffset(), replay.getOriginalTopic(),
+                replay.getDltTopic(), replay.getDltPartition(), replay.getDltOffset(), replay.getDltTimestamp(),
+                replay.getOriginalTopic(),
                 replay.getRecordKey(), replay.getReplayedBy(), replay.getReplayedAt());
     }
 }

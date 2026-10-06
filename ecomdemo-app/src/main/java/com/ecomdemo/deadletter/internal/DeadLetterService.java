@@ -173,19 +173,22 @@ public class DeadLetterService implements DisposableBean {
         if (!SAGA_DEAD_LETTER_TOPICS.contains(dltTopic)) {
             throw new NotFoundException("Not a saga dead-letter topic: " + dltTopic);
         }
-        if (replays.existsByDltTopicAndDltPartitionAndDltOffset(dltTopic, partition, offset)) {
-            throw new ConflictException(
-                    "%s/%d/%d has already been replayed; see the replay log".formatted(dltTopic, partition, offset));
-        }
+        // Fetched first: the record's write time is part of its identity (KI-040), and only the
+        // record knows it.
         ConsumerRecord<String, byte[]> record = fetch(dltTopic, partition, offset)
                 .orElseThrow(() -> new NotFoundException(
                         "No record at %s/%d/%d".formatted(dltTopic, partition, offset)));
+        if (replays.isReplayed(dltTopic, partition, offset, Instant.ofEpochMilli(record.timestamp()))) {
+            throw new ConflictException(
+                    "%s/%d/%d has already been replayed; see the replay log".formatted(dltTopic, partition, offset));
+        }
         String originalTopic = originalTopic(record);
 
         DeadLetterReplay audit;
         try {
             audit = replays.saveAndFlush(new DeadLetterReplay(
-                    dltTopic, partition, offset, originalTopic, record.key(), replayedBy, Instant.now()));
+                    dltTopic, partition, offset, Instant.ofEpochMilli(record.timestamp()), originalTopic, record.key(),
+                    replayedBy, Instant.now()));
         } catch (DataIntegrityViolationException raced) {
             throw new ConflictException(
                     "%s/%d/%d has already been replayed; see the replay log".formatted(dltTopic, partition, offset));
@@ -256,8 +259,8 @@ public class DeadLetterService implements DisposableBean {
                 header(record, KafkaHeaders.DLT_EXCEPTION_FQCN),
                 header(record, KafkaHeaders.DLT_EXCEPTION_MESSAGE),
                 payload,
-                replays.existsByDltTopicAndDltPartitionAndDltOffset(
-                        record.topic(), record.partition(), record.offset()));
+                replays.isReplayed(
+                        record.topic(), record.partition(), record.offset(), Instant.ofEpochMilli(record.timestamp())));
     }
 
     /** The topic the record failed on: the recoverer's header, or the DLT's name without its suffix. */

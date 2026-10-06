@@ -98,13 +98,13 @@ class FlywayMigrationTest {
     }
 
     @Test
-    @DisplayName("V1 to V20 are applied, in order, with nothing pending or failed")
+    @DisplayName("V1 to V21 are applied, in order, with nothing pending or failed")
     void allMigrationsAreApplied() {
         List<MigrationInfo> applied = List.of(flyway.info().applied());
 
         assertThat(applied)
                 .extracting(info -> info.getVersion().getVersion())
-                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20");
+                .containsExactly("1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16", "17", "18", "19", "20", "21");
         assertThat(applied)
                 .extracting(MigrationInfo::getState)
                 .allMatch(MigrationState::isApplied)
@@ -158,7 +158,8 @@ class FlywayMigrationTest {
                 "outbox event trace parent",
                 "processed event for saga replies",
                 "order saga states",
-                "dead letter replay");
+                "dead letter replay",
+                "dead letter replay record timestamp");
     }
 
     @Test
@@ -385,17 +386,22 @@ class FlywayMigrationTest {
     }
 
     @Test
-    @DisplayName("V20 records dead-letter replays, and a record's position can be replayed only once")
+    @DisplayName("V20/V21 record dead-letter replays: a record (address and write time) is replayed once, "
+            + "and a new record at a reused address is another")
     void deadLetterReplayIsAnAuditTrailWithOneReplayPerRecord() {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         String insert = "INSERT INTO dead_letter_replay "
-                + "(dlt_topic, dlt_partition, dlt_offset, original_topic, record_key, replayed_by, replayed_at) "
-                + "VALUES ('flyway-test-dlt', 0, 7, 'flyway-test', '1', 'admin', CURRENT_TIMESTAMP)";
+                + "(dlt_topic, dlt_partition, dlt_offset, dlt_timestamp, original_topic, record_key, replayed_by, "
+                + "replayed_at) VALUES ('flyway-test-dlt', 0, 7, ?, 'flyway-test', '1', 'admin', "
+                + "CURRENT_TIMESTAMP)";
         try {
-            assertThat(jdbc.update(insert)).isEqualTo(1);
-            assertThatThrownBy(() -> jdbc.update(insert))
-                    .as("uq_dead_letter_replay_record: the same DLT position twice")
+            assertThat(jdbc.update(insert, java.sql.Timestamp.from(java.time.Instant.parse("2026-10-01T10:00:00Z")))).isEqualTo(1);
+            assertThatThrownBy(() -> jdbc.update(insert, java.sql.Timestamp.from(java.time.Instant.parse("2026-10-01T10:00:00Z"))))
+                    .as("uq_dead_letter_replay_record: the same record twice")
                     .isInstanceOf(DuplicateKeyException.class);
+            assertThat(jdbc.update(insert, java.sql.Timestamp.from(java.time.Instant.parse("2026-10-05T10:00:00Z"))))
+                    .as("the same address, written later (the topic was recreated): another record")
+                    .isEqualTo(1);
         } finally {
             jdbc.update("DELETE FROM dead_letter_replay WHERE dlt_topic = 'flyway-test-dlt'");
         }
