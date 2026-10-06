@@ -6,8 +6,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.micrometer.tracing.Tracer;
@@ -54,6 +56,8 @@ class OutboxBatchPublisherTest {
 
     @BeforeEach
     void setUp() {
+        // This instance's relay is the one that publishes, unless a test says another one is.
+        lenient().when(outbox.tryLockRelay(OutboxEventRepository.RELAY_LOCK_KEY)).thenReturn(true);
         publisher =
                 new OutboxBatchPublisher(
                         outbox,
@@ -90,6 +94,17 @@ class OutboxBatchPublisherTest {
     private void sendFailsWith(String message) {
         when(sender.send(anyString(), anyString(), anyString()))
                 .thenReturn(CompletableFuture.failedFuture(new IllegalStateException(message)));
+    }
+
+    @Test
+    @DisplayName("yields, reading and sending nothing, while another instance's relay holds the lock (KI-002)")
+    void yieldsToAnotherRelay() {
+        when(outbox.tryLockRelay(OutboxEventRepository.RELAY_LOCK_KEY)).thenReturn(false);
+
+        assertThat(publisher.publishPendingBatch()).isZero();
+
+        verify(outbox, never()).findByPublishedAtIsNullOrderByIdAsc(any());
+        verifyNoInteractions(sender);
     }
 
     @Nested

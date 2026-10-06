@@ -21,7 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
  * impossible for a later edit to turn this into a self-call that silently runs with no
  * transaction.
  *
- * <h2>Read, send, mark — in one transaction</h2>
+ * <h2>Lock, read, send, mark — in one transaction</h2>
  *
  * <p>The batch is read, published and marked inside a single transaction. That ordering gives the
  * guarantee the phase is named for, and it is worth being exact about which way it can fail:
@@ -82,6 +82,12 @@ class OutboxBatchPublisher {
      */
     @Transactional
     int publishPendingBatch() {
+        // One relay per database at a time (KI-002): see OutboxRelay. Taken first, in this
+        // transaction, so it is held until the marks below are committed.
+        if (!outbox.tryLockRelay(OutboxEventRepository.RELAY_LOCK_KEY)) {
+            log.debug("Another instance's outbox relay is publishing; this one waits for the next tick");
+            return 0;
+        }
         List<OutboxEvent> pending =
                 outbox.findByPublishedAtIsNullOrderByIdAsc(Limit.of(properties.batchSize()));
         if (pending.isEmpty()) {
