@@ -31,7 +31,13 @@ public record ProductResponse(
         @Schema(description = "Optional catalogue category. Null for products created before "
                 + "the category column existed, or created without one.",
                 example = "PERIPHERALS", nullable = true)
-        String category) {
+        String category,
+
+        @Schema(description = "Where to fetch this product's image: a path relative to the gateway origin, "
+                + "to be requested by a browser <img> with no Authorization header. Null when the product "
+                + "has no image, which is valid and must be handled (show a placeholder).",
+                example = "/api/products/1/image", nullable = true)
+        String imageUrl) {
 
     /**
      * Builds the response from a product and the stock somebody else supplied.
@@ -54,6 +60,12 @@ public record ProductResponse(
                 product.getDescription(),
                 product.getPrice(),
                 stockQuantity,
-                product.getCategory());
+                product.getCategory(),
+                imageUrl(product));
+    }
+
+    /** The gateway-relative path of the image endpoint, or null if the product names no image file. */
+    private static String imageUrl(Product product) {
+        return product.getImageFile() == null ? null : "/api/products/" + product.getId() + "/image";
     }
 }

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img">
+<title>Noise-Cancelling Headphones</title>
+<rect width="400" height="300" rx="16" fill="#f6e6e1"/>
+<path d="M110 190v-40a90 90 0 0 1 180 0v40" fill="none" stroke="#5b2a24" stroke-width="16" stroke-linecap="round"/>
+<rect x="88" y="170" width="46" height="80" rx="18" fill="#8a4034"/>
+<rect x="266" y="170" width="46" height="80" rx="18" fill="#8a4034"/>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img">
+<title>Laptop Stand</title>
+<rect width="400" height="300" rx="16" fill="#f3eedd"/>
+<path d="M110 220l90-120 90 120" fill="none" stroke="#6b5a2a" stroke-width="14" stroke-linejoin="round"/>
+<rect x="100" y="90" width="200" height="14" rx="7" fill="#8a7632" transform="rotate(-12 200 97)"/>
+<rect x="90" y="224" width="220" height="12" rx="6" fill="#6b5a2a"/>
+</svg>

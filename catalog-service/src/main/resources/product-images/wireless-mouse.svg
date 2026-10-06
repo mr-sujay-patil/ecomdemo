@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img">
+<title>Wireless Mouse</title>
+<rect width="400" height="300" rx="16" fill="#e3f1e6"/>
+<path d="M200 60c45 0 70 30 70 75v45c0 40-30 65-70 65s-70-25-70-65v-45c0-45 25-75 70-75z" fill="#3d5a45"/>
+<rect x="196" y="75" width="8" height="55" rx="4" fill="#e3f1e6"/>
+</svg>
