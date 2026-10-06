@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-06
 - **Phase:** 34 — Product Images (requested by the web team's KI-002; approved 2026-10-06: yes, seed-only)
 - **Branch:** feature/phase-34-product-images (cut from `main` at `8e929fa`)
-- **Step:** BRANCHED
+- **Step:** TESTING
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
 - **PR:** none yet
 - **Waiting for user:** NO
@@ -15,13 +15,13 @@ Phase 33 and fixes KI-039, KI-042, KI-043 are verified in `main` (tags `phase-33
 `ki-042-fixed`, `ki-043-fixed`). CI on `8e929fa` all green; `./mvnw clean verify` 701 tests, 0 failed.
 
 ## Checklist (Phase 34)
-- [ ] V5 migration: nullable `product.image_file`; set for some seeded products (others stay null)
-- [ ] Seed images: small original SVGs from a script in `scripts/`, shipped as classpath resources
-- [ ] `ProductResponse.imageUrl` (additive, nullable, gateway-relative `/api/products/{id}/image`); search follows
-- [ ] `GET /api/products/{id}/image`: allow-listed types, 404 unknown/imageless, ETag + 304, Cache-Control,
+- [x] V5 migration: nullable `product.image_file`; set for some seeded products (others stay null)
+- [x] Seed images: small original SVGs from a script in `scripts/`, shipped as classpath resources
+- [x] `ProductResponse.imageUrl` (additive, nullable, gateway-relative `/api/products/{id}/image`); search follows
+- [x] `GET /api/products/{id}/image`: allow-listed types, 404 unknown/imageless, ETag + 304, Cache-Control,
       nosniff, CORP cross-origin, CSP on SVG; no client-supplied paths; size cap test
-- [ ] Anonymous through the gateway proven by a test (no gateway change expected)
-- [ ] Smoke additions; OpenAPI; README, `docs/security.md`, `docs/decisions.md`
+- [x] Anonymous through the gateway proven by a test (no gateway change expected)
+- [x] Smoke additions; OpenAPI; README, `docs/security.md`, `docs/decisions.md`
 - [ ] Testing protocol in full, `docs/test-reports/phase-34.md`, RECENT.md rotated, tracker 🔵, PR
 
 ## Next action
