@@ -3,6 +3,7 @@ package com.ecomdemo.auth;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecomdemo.auth.dto.LoginRequest;
+import com.ecomdemo.support.ClientAddresses;
 import com.ecomdemo.support.CustomerIntegrationTest;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
@@ -23,8 +24,7 @@ import org.springframework.http.ResponseEntity;
 class LoginThrottleIT extends CustomerIntegrationTest {
 
     private static String address() {
-        // TEST-NET-3 (RFC 5737): an address reserved for documentation, so it is nobody's.
-        return "203.0.113." + (1 + Math.floorMod(UUID.randomUUID().hashCode(), 250));
+        return ClientAddresses.next();
     }
 
     /** The body as text: a success is a token, a failure an ApiError, and one type fits both. */
