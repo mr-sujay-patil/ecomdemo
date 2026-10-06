@@ -3,22 +3,25 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-06
-- **Fix:** KI-046, flaky `LoginThrottleIT.blocksAClientTryingManyUsernames` (cause: `address()` collided, 1 run in 250)
-- **Branch:** fix/ki-046-login-throttle-flake (cut from `main` at `40020ef`)
+- **Fix:** KI-045, `mvnw.cmd` blob had CRLF against `.gitattributes` (`*.cmd text eol=crlf`), so every checkout showed it modified
+- **Branch:** fix/ki-045-mvnw-cmd-eol (cut from `main` at `aa84638`)
 - **Step:** PR_OPEN
-- **PR:** #61 https://github.com/mr-sujay-patil/ecomdemo/pull/61
-- **Waiting for user:** YES (review of PR #61)
+- **PR:** #62 https://github.com/mr-sujay-patil/ecomdemo/pull/62
+- **Waiting for user:** YES (review of PR #62)
+
+## Merge verification of KI-046 (done 2026-10-06)
+PR #61 merged as `aa84638`; tip in `main`, CI on `main` all green (incl. scans and publish); tag `ki-046-fixed`.
 
 ## Done
-- Root cause found by reading the code, confirmed by forcing a collision (constant address): 429 where 401/200 expected.
-- `ClientAddressesTest` written first and seen failing; `support/ClientAddresses` (counter, random start); `LoginThrottleIT` uses it.
-- `./mvnw clean verify` exit 0; `LoginThrottleIT` 3/3, `ClientAddressesTest` 2/2.
+- `git add --renormalize mvnw.cmd` in its own commit: blob is LF, checkout CRLF (`i/lf w/crlf`). Content unchanged
+  (empty diff with `--ignore-space-at-eol`). Nothing else in the repo needed renormalizing.
+- A fresh clone of the branch shows no modified files; so does this working tree.
 
 ## Next action
-STOP: wait for the user's review of PR #61. After `approved, merge it`: merge verification (branch tip in `main`, CI on
-`main` incl. scans and publish, `./mvnw clean verify`), tag `ki-046-fixed`. No compose smoke needed: test-only change.
-Not yet confirmed: CI on `main` for `40020ef` (PR #60 merge) was still running when this fix was started.
-Still open: KI-040, KI-044, KI-045 (mvnw.cmd eol; `stash@{0}`), KI-002..011.
+STOP: wait for the user's review of PR #62. After `approved, merge it`: verify the merge (tip in `main`, CI on `main`),
+tag `ki-045-fixed`. No smoke test: line endings only. `stash@{0}` ("KI-045 mvnw.cmd eol noise") is now obsolete; it is
+the user's to drop (dropping is irreversible, so ask first).
+Still open: KI-040, KI-044, KI-002..011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
