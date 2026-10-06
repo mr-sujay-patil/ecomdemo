@@ -35,20 +35,28 @@ import org.springframework.stereotype.Component;
  * An idle outbox behaves exactly as before: one empty query per {@code pollDelay}. Each batch
  * still commits on its own, so a crash halfway through a drain keeps the progress made.
  *
- * <h2>One instance, and what happens with two</h2>
+ * <h2>Many instances, one relay at a time</h2>
  *
- * <p>This is a timer inside this JVM, like {@code SalesReportScheduler}: run two instances of the
- * application and both relays poll the same table. Two relays can read the same pending row and
- * both publish it, because nothing here takes a lock.
+ * <p>This is a timer inside this JVM, and a service can run several instances (catalog-service
+ * runs two to four pods behind its autoscaler). Until KI-002 every instance's relay polled the
+ * same table and nothing stopped two of them reading the same pending row and both publishing it:
+ * duplicate sends, absorbed by {@code processed_event} on the consumer side, but waste, and
+ * noise.
  *
- * <p>That is survivable rather than broken, and only because of the work Phase 17 did first: the
- * duplicate carries the same {@code event_id}, and {@code processed_event} on the consumer side
- * refuses it. The cost of running two relays is duplicate <em>sends</em>, not duplicate
- * notifications. The proper fix is {@code SELECT ... FOR UPDATE SKIP LOCKED}, which hands each
- * relay a disjoint set of rows; it is left out here because it is a PostgreSQL-flavoured query
- * that the H2 unit suite could not run, and because a lock is the wrong thing to introduce in the
- * phase whose subject is durability. It is recorded in {@code docs/decisions.md} as deferred, not
- * as solved.
+ * <p>Now each batch starts by taking a PostgreSQL transaction-level advisory lock
+ * ({@link OutboxEventRepository#tryLockRelay}). The relay that gets it publishes the batch; any
+ * other one finds the lock taken, publishes nothing, and tries again next tick. The lock is
+ * released by the commit that marks the batch, by a rollback, or by the death of the connection,
+ * so a crashed instance cannot leave the others locked out.
+ *
+ * <p>Not {@code SELECT ... FOR UPDATE SKIP LOCKED}, which the first version of this note proposed,
+ * because that hands each relay a DISJOINT set of rows, and the relays then publish concurrently:
+ * a relay that failed on event N rolls it back while another has already published N+1, and two
+ * events of one order reach the topic in the wrong order. The publisher stops its batch at the
+ * first failure for exactly that reason. A single holder keeps the order, and costs nothing that
+ * was being gained: the relay's throughput is bounded by the broker's acknowledgements, not by
+ * how many relays ask. The one remaining duplicate is the documented crash seam (sent, process
+ * died before the commit), which {@code processed_event} absorbs as before.
  */
 @Component
 class OutboxRelay {

@@ -35,8 +35,9 @@ import org.springframework.stereotype.Component;
  * <h2>Why no idempotency ledger</h2>
  *
  * Re-embedding the current state twice produces the same row twice: harmless. Two relays (there
- * are two catalog pods in Kubernetes) can send an event twice; the cost is one extra embedding
- * call, not a wrong index. The consumer GROUP is shared by all pods, so each event is handled by
+ * are two catalog pods in Kubernetes) used to be able to send an event twice, and a relay that
+ * crashes after sending still can (KI-002 made only one relay publish at a time); the cost is one
+ * extra embedding call, not a wrong index. The consumer GROUP is shared by all pods, so each event is handled by
  * one of them - unlike the cache evictor's group, where every pod must hear every event.
  *
  * <h2>Failures</h2>

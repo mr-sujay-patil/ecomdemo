@@ -27,6 +27,20 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
      */
     List<OutboxEvent> findByPublishedAtIsNullOrderByIdAsc(Limit limit);
 
+    /** The advisory-lock key of the one relay allowed to publish at a time: "outbox" in ASCII. */
+    long RELAY_LOCK_KEY = 0x6F7574626F78L;
+
+    /**
+     * Tries to become THE relay for this database, for the rest of the current transaction.
+     *
+     * <p>A PostgreSQL transaction-level advisory lock: it is released by the commit, the rollback
+     * or the death of the connection, so a relay that crashes can never leave the others locked
+     * out, and there is nothing to unlock. {@code false} means another instance's relay holds it
+     * right now. Must be called inside a transaction.
+     */
+    @Query(value = "select pg_try_advisory_xact_lock(:key)", nativeQuery = true)
+    boolean tryLockRelay(@Param("key") long key);
+
     /** How many events are waiting. Read by the relay's logging and by the smoke test. */
     long countByPublishedAtIsNull();
 
