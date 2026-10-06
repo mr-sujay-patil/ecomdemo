@@ -23,6 +23,16 @@ on:
   # what publishes the image — see the publish job.
   push:
     branches: [main]
+  # Daily, for the two scans only (KI-044). A CVE is disclosed on its own day, not on the day
+  # somebody pushes: without this, a newly disclosed one stayed invisible until the next merge,
+  # and then turned an unrelated docs-and-tests PR red (KI-042). A scheduled run builds and
+  # tests nothing and publishes nothing: see the `if:` on `build` and on `publish`.
+  schedule:
+    # 04:43 UTC, an hour after nvd-data.yml has refreshed the NVD copy (03:17), and not on the
+    # hour: scheduled workflows queue up at :00 across GitHub. It runs on main's latest commit.
+    - cron: '43 4 * * *'
+  # Run the scans by hand (Actions > CI > Run workflow), on any branch: the same two jobs.
+  workflow_dispatch:
 
 # Least privilege, set at the top and widened per job. GITHUB_TOKEN is minted per run and expires
 # with it; a workflow that only reads code should not hold a token that can write packages.
@@ -31,8 +41,11 @@ permissions:
 
 # Pushing a second commit to a PR cancels the run still working on the first. The result would be
 # thrown away anyway, and runner minutes are not free. Never applied to main: those runs publish.
+# Scheduled and manual runs have a group of their own: they run on main's ref too, and GitHub
+# cancels an older PENDING run of a group when a newer one queues, so a scan must never be able
+# to cancel a queued publish (or the reverse).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.event_name || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -42,6 +55,8 @@ jobs:
   # -------------------------------------------------------------------------------------------
   build:
     name: Build and test
+    # Not on a schedule or a manual scan run: the code has not changed since its last green run.
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
     runs-on: ubuntu-latest
     # `./mvnw verify` starts a PostgreSQL container through Testcontainers. GitHub's ubuntu
     # runners ship a working Docker daemon, so this needs no service container and no extra
