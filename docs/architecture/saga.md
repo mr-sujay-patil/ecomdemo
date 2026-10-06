@@ -237,7 +237,8 @@ both questions are idempotent.
 **Dead letters.** `GET /api/admin/dead-letters` lists the five saga DLTs (read from the beginning
 with an assigned consumer, so nothing is "consumed"). `POST .../{topic}/{partition}/{offset}/replay`
 sends a record back to its original topic byte for byte, recorded in `dead_letter_replay`, and only
-once per record. Replay is safe because of `processed_event` and the fences above.
+once per record. A record is its address plus the time it was written there (V21), so a topic whose
+offsets restart (recreated, or its volume wiped) does not make a new record look already replayed. Replay is safe because of `processed_event` and the fences above.
 
 **Known limits** (in `docs/KNOWN_ISSUES.md`):
 - An order whose **StockRejected** is dead-lettered is cancelled with the void's reason, not the
