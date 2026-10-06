@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 34: Product Images (tag: phase-34-complete, PR #TBD)
+## Phase 34: Product Images (tag: phase-34-complete, PR #59)
 **What exists now:** `ProductResponse.imageUrl` (nullable, additive; also in search hits via `ProductSearchHit.product`)
 is the gateway-relative path `/api/products/{id}/image`. The endpoint is public through the gateway, with
 ETag/304, `Cache-Control: public, max-age=86400`, nosniff, CORP cross-origin, a CSP on SVG. Seed-only: 8 of

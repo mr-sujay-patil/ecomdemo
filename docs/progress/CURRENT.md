@@ -5,10 +5,10 @@
 - **Updated:** 2026-10-06
 - **Phase:** 34 — Product Images (requested by the web team's KI-002; approved 2026-10-06: yes, seed-only)
 - **Branch:** feature/phase-34-product-images (cut from `main` at `8e929fa`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #59 https://github.com/mr-sujay-patil/ecomdemo/pull/59
+- **Waiting for user:** YES (review of PR #59)
 
 ## Merge verification before this phase
 Phase 33 and fixes KI-039, KI-042, KI-043 are verified in `main` (tags `phase-33-complete`, `ki-039-fixed`,
@@ -22,12 +22,14 @@ Phase 33 and fixes KI-039, KI-042, KI-043 are verified in `main` (tags `phase-33
       nosniff, CORP cross-origin, CSP on SVG; no client-supplied paths; size cap test
 - [x] Anonymous through the gateway proven by a test (no gateway change expected)
 - [x] Smoke additions; OpenAPI; README, `docs/security.md`, `docs/decisions.md`
-- [ ] Testing protocol in full, `docs/test-reports/phase-34.md`, RECENT.md rotated, tracker 🔵, PR
+- [x] Testing protocol in full, `docs/test-reports/phase-34.md`, RECENT.md rotated, tracker 🔵, PR
 
 ## Next action
-Write the failing tests first (imageUrl on ProductResponse, the image endpoint, 304, 404), then V5 + the
-seed images + the controller. Read `ProductController`, `ProductService`, `Product`, and how Phase 33's
-tests wire security in catalog-service before editing.
+PR #59 is open. STOP: wait for the user's review. After the merge: merge verification (git checks, CI on main
+incl. `Image scan` and publish, `./mvnw clean verify`, cold compose smoke if no foreign stack is up), tag
+`phase-34-complete`, mark the tracker row ✅. Then tell the user to relay to the web team: tag
+`phase-34-complete`, `imageUrl` is a path relative to the gateway origin. Still open: KI-040, KI-044,
+KI-045 (mvnw.cmd eol; `stash@{0}` holds the noise), KI-002..011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
