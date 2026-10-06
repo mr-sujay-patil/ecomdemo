@@ -24,6 +24,7 @@
 # credentials and can be overridden: SMOKE_ADMIN_PASSWORD, SMOKE_CUSTOMER_PASSWORD.
 #
 #   BASE_URL overrides the target, e.g. BASE_URL=http://localhost:9090 scripts/smoke-test.sh
+#   SMOKE_ALLOW_FOREIGN_STACK=1 runs against a compose stack started from another checkout (KI-043).
 #
 # The script is re-runnable: it empties the cart before starting, so it does not care whether
 # the application was just started or has been used already.
@@ -160,6 +161,36 @@ restore_payment() {
     fi
 }
 trap 'rm -f "$BODY" "$SCRAPE"; restore_kafka; restore_catalog; restore_payment; rm -rf "$CTR_REPLICAS_DIR"' EXIT
+
+# --------------------------------------------------------------------------------------------
+# Is this stack MINE? (KI-043)
+# --------------------------------------------------------------------------------------------
+# compose gives the containers fixed names (ecomdemo-*) and fixed host ports, so another clone of
+# this repo on the same machine (the frontend team's) is the same stack as far as BASE_URL and
+# `docker exec` can tell. This script writes accounts, products and orders, and its failure
+# scenarios STOP Kafka, catalog-service and payment-service; run against someone else's stack
+# that is vandalism. Compose labels every container with the directory its project was started
+# from, so refuse unless that is this checkout. It runs before anything else touches a container or the network.
+#   SMOKE_ALLOW_FOREIGN_STACK=1 skips the check, for a stack you really did start elsewhere.
+# k8s runs name their own cluster and namespace, so they cannot collide this way.
+if [ "$SMOKE_PLATFORM" = "compose" ] && [ "${SMOKE_ALLOW_FOREIGN_STACK:-0}" != "1" ] \
+    && command -v docker >/dev/null 2>&1; then
+    THIS_CHECKOUT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+    for _ctr in ecomdemo-app ecomdemo-gateway; do
+        STACK_DIR="$(docker inspect "$_ctr" \
+            --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' 2>/dev/null)"
+        # No such container, or not started by compose (a hand-started `docker run`): nothing to compare.
+        [ -n "$STACK_DIR" ] || continue
+        STACK_REAL="$(cd "$STACK_DIR" 2>/dev/null && pwd -P || echo "$STACK_DIR")"
+        if [ "$STACK_REAL" != "$THIS_CHECKOUT" ]; then
+            printf '  \033[31mREFUSING\033[0m  container %s belongs to another checkout:\n' "$_ctr"
+            printf '        its compose project:  %s\n        this checkout:        %s\n' "$STACK_REAL" "$THIS_CHECKOUT"
+            printf '\nThis script creates data and stops Kafka, catalog-service and payment-service.\n'
+            printf 'Stop that stack (or ask its owner to), or set SMOKE_ALLOW_FOREIGN_STACK=1.\n'
+            exit 2
+        fi
+    done
+fi
 
 PASSED=0
 FAILED=0

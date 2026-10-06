@@ -106,6 +106,12 @@ chosen so five JVMs fit into 3.8 GB — no longer apply, and were re-measured ra
 | `scripts/smoke-test.sh`, cold stack | about 5 minutes |
 | JVM non-heap per service | 107 – 179 MiB — a fixed cost, which is why the heap share is 50%, not 75% |
 
+**Two clones share one compose stack's names and ports.** Every container is `ecomdemo-*` and every host
+port is fixed, so a second checkout on the machine (the frontend team's) collides with yours. Since KI-043
+`scripts/smoke-test.sh` reads the `com.docker.compose.project.working_dir` label of `ecomdemo-app` and
+`ecomdemo-gateway` and exits 2 if it names another checkout; `SMOKE_ALLOW_FOREIGN_STACK=1` overrides it.
+`scripts/test-smoke-guard.sh` is its regression test. Still run `docker ps` before `docker compose up`.
+
 **Running with the stack up found a real test defect.** Every build until the workstation had the stack
 down, so nothing listened on `localhost:8081-8084`. `EdgeSecurityIT` depended on that silently: its
 routes pointed there, and with the stack up the "empty" upstream was catalog-service answering 401.
