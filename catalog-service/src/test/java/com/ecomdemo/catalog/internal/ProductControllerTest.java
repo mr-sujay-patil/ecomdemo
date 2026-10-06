@@ -66,7 +66,7 @@ class ProductControllerTest {
     private ProductService productService;
 
     private static final ProductResponse KEYBOARD =
-            new ProductResponse(1L, "Keyboard", "Tactile switches", new BigDecimal("8999.00"), 25, "PERIPHERALS");
+            new ProductResponse(1L, "Keyboard", "Tactile switches", new BigDecimal("8999.00"), 25, "PERIPHERALS", null);
 
     private static final String VALID_BODY =
             """

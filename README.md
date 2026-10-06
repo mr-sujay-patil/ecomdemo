@@ -8,6 +8,18 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 34: Product Images — the catalogue API can now say where a product's picture is.** The web
+team's storefront needs real pictures, and an `<img>` tag cannot send a bearer token. So:
+- Every product response (the list, one product, and the semantic-search hits) has an **`imageUrl`**:
+  a path relative to the gateway origin, `/api/products/{id}/image`, or `null` when the product has
+  no image. It is an additive change: no existing field moved. Clients must keep handling `null`.
+- `GET /api/products/{id}/image` is **public through the gateway** and cached: a strong `ETag`
+  (`If-None-Match` gives `304`), `Cache-Control: public, max-age=86400`, `nosniff`, and
+  `Cross-Origin-Resource-Policy: cross-origin` so a storefront on another origin may embed it.
+- Images are **seed-only** (there is no upload): eight of the ten seeded products have a small SVG
+  shipped inside catalog-service, two have none on purpose. See
+  [Product images](#product-images-phase-34) and [`docs/test-reports/phase-34.md`](docs/test-reports/phase-34.md).
+
 **Phase 33: Authentication Hardening — only one service can issue a token, and passwords can't be
 guessed at speed.** Until now every service held the same HS256 secret, so any of them could mint a
 token for any administrator, and every service token carried one all-powerful SERVICE role. Now:
@@ -711,6 +723,7 @@ is the trade, and the retry budget is what makes it honest.
 | `PUT` | `/api/customers/me` | any account | Change your own display name |
 | `GET` | `/api/products` | anyone | List the catalogue |
 | `GET` | `/api/products/{id}` | anyone | One product |
+| `GET` | `/api/products/{id}/image` | anyone | That product's image, from its `imageUrl` (Phase 34); 404 if it has none |
 | `POST` | `/api/products` | **ADMIN** | Create a product (201 + `Location`) |
 | `PUT` | `/api/products/{id}` | **ADMIN** | Replace a product |
 | `DELETE` | `/api/products/{id}` | **ADMIN** | Delete a product (204) |
@@ -738,6 +751,30 @@ would leave nowhere to report the common case: a run that completed with rows sk
 An ADMIN is refused on the cart and orders, and that is deliberate: those endpoints act on "my"
 cart and "my" orders, and an administrator has neither. Nothing about being an admin implies
 being a customer, and quietly granting both is how a role system stops meaning anything.
+
+### Product images (Phase 34)
+
+`imageUrl` is a **path, not the bytes and not an absolute URL.** A product list that embedded images
+would be megabytes of JSON the client did not ask for, and could not be cached per image. A path
+relative to the gateway origin (`http://localhost:8080` here) also stays right on every host
+the system runs on, so nobody has to know which one.
+
+| Question | Answer |
+|---|---|
+| Value | `"/api/products/1/image"`, or `null` (no image) |
+| Who may fetch it | anyone, no `Authorization` header: the gateway permits `GET /api/products/**` |
+| Formats | SVG, PNG, WebP, JPEG (an allow-list by file extension). The seed uses SVG |
+| Size | each file at most 256 KiB (a test enforces it); no thumbnail variants, SVG scales |
+| Cache | `Cache-Control: public, max-age=86400`, strong `ETag`, `304` on `If-None-Match` |
+| Hardening | `X-Content-Type-Options: nosniff`; SVGs also carry a `Content-Security-Policy` that forbids everything |
+| CORS / CORP | an `<img>` is not subject to CORS; `Cross-Origin-Resource-Policy: cross-origin` lets another origin embed it |
+| Where the files live | `catalog-service/src/main/resources/product-images/`, written by `scripts/generate-product-images.py` |
+| How a product gets one | Flyway `V5` names a file in `product.image_file`; the API cannot set it, so a product created through the API has `null` |
+
+The stored name is treated as untrusted even though only a migration writes it: a plain file name
+with an allow-listed extension, or the request fails (a path like `../x` is never opened). A day
+of caching, not a year, because the URL carries no version: a replaced image has to reach clients
+within a bounded time.
 
 Errors always come back as `{ "status": ..., "message": ... }`: **404** for a missing entity,
 **400** for a request that fails validation, **409** for a valid request that conflicts with the

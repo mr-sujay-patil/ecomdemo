@@ -72,6 +72,16 @@ public class Product {
      * <p>There is no getter on purpose. Nothing outside persistence has any business reading it,
      * and the tests that need to see it read the field or the column directly.
      */
+    /**
+     * File name of this product's image in {@code product-images/} on the classpath, or null.
+     *
+     * <p>Seed-only (Phase 34): set by migration {@code V5}, never by the API, so there is no setter
+     * and no constructor argument. A name, not a path or a URL; see {@link ProductImageService} for
+     * what is allowed to be opened.
+     */
+    @Column(name = "image_file", length = 100)
+    private String imageFile;
+
     @Version
     @Column(nullable = false)
     private long version;
@@ -93,6 +103,10 @@ public class Product {
 
     public Long getId() {
         return id;
+    }
+
+    public String getImageFile() {
+        return imageFile;
     }
 
     public String getName() {

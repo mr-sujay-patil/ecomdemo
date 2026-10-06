@@ -12,6 +12,27 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 34: Product Images (tag: phase-34-complete, PR #59)
+**What exists now:** `ProductResponse.imageUrl` (nullable, additive; also in search hits via `ProductSearchHit.product`)
+is the gateway-relative path `/api/products/{id}/image`. The endpoint is public through the gateway, with
+ETag/304, `Cache-Control: public, max-age=86400`, nosniff, CORP cross-origin, a CSP on SVG. Seed-only: 8 of
+the 10 seeded products have an SVG, products 9 and 10 have none; products created via the API have none.
+**Key code:** catalog-service `Product.imageFile` (V5 `image_file`, no setter), `dto.ProductResponse.imageUrl`,
+`ProductImageService` (plain-name + extension allow-list, classpath `product-images/`, SHA-256 ETag, cached),
+`ProductImage` record, `internal.ProductImageController` (`WebRequest.checkNotModified`).
+**Config & infrastructure:** none new. Images: `catalog-service/src/main/resources/product-images/`, written
+by `scripts/generate-product-images.py`. No gateway or security-rule change: `GET /api/products/**` was already public.
+**Tests:** 724 (542 unit, 182 IT). New: `ProductResponseTest`, `ProductImageServiceTest`, `ProductImageFilesTest`
+(type, 256 KiB cap, inert SVG, V5 names only shipped files), `ProductImageControllerTest`; image tests in
+`ProductApiIT` and `EdgeSecurityIT`. Smoke section "Product images" (12 checks): compose cold 480/0/0, kept volumes
+482/0/0, kind 436/0/7.
+**Gotchas:** catalog-service is internal: its image path needs a token, anonymous access is the gateway's
+(tests say so). A new image file needs a V-migration naming it AND the extension on the allow-list. `ProductResponse`
+is cached in Redis (product 10 min, list 2 min): after deploying onto a warm Redis, entries written before
+this phase read `imageUrl` as null until they expire. Self-heals; a cold stack (`down -v`) never sees it.
+**Follow-ups (not done):** admin upload of images (storage, size and content validation, cleanup); thumbnails or
+`srcset` variants if raster images arrive; a versioned URL so caching could be `immutable`.
+
 ## Phase 33: Authentication Hardening (tag: phase-33-complete, PR #54)
 **What exists now:** customer-service alone signs tokens, RS256 with a `kid`; everyone else verifies
 with its public keys from `/oauth2/jwks` (no shared secret anywhere). Services get their own tokens
@@ -40,30 +61,3 @@ smoke found `inventory:write`). Web slices import `TestJwtAutoConfiguration` via
 Smoke checks that need a service token run inside a container (BusyBox wget).
 **Follow-ups (not done):** refresh tokens and revocation (KI-017); per-client throttle trusts the last
 X-Forwarded-For hop, forgeable on a published customer port (KI-003); KI-039, KI-040 still open.
-
-## Phase 32: Saga Timeouts and Reconciliation (tag: phase-32-complete, PR #51)
-**What exists now:** the order service owns the saga's clock. `SagaDeadlineSweeper` (@Scheduled, every
-`ecomdemo.saga.sweep-interval` 10s) reconciles orders PENDING longer than `ecomdemo.saga.deadline` (1m,
-env `ORDER_SAGA_DEADLINE`): payment `settle` → COMPLETED confirms; FAILED/VOIDED → inventory `close`
-→ cancel; no answer → DEFERRED (stays PENDING). Admin DLT list/replay with audit. Two alerts.
-**Key code:** app `order.internal.saga`: `SagaReconciler`, `SagaDeadlineSweeper`, `OrderDecisions`
-(confirm/cancel shared with `OrderSagaHandler`), `SagaParticipants` + `HttpSagaParticipants` (own
-RestClients, 1s/5s timeouts), `SagaProperties`, `SagaMetrics` (public, for DashboardMetricsTest). New
-module `deadletter` (`DeadLetterService`, `/api/admin/dead-letters`, V20 `dead_letter_replay`).
-payment: `POST /internal/saga/orders/{id}/settle` (SERVICE only, 2nd security chain `@Order(1)`),
-status VOIDED (V2). inventory: `POST /api/inventory/orders/{id}/close`, `closed_order` (V4),
-`OrderLocks` (pg_advisory_xact_lock per order) taken by `reserveForOrder` and `closeOrder`.
-**Config & infrastructure:** app env `PAYMENT_BASE_URL` (compose + k8s), `ORDER_SAGA_DEADLINE`. Meters
-`saga_orders_overdue`, `saga_reconciliations_total{outcome=confirmed|cancelled|deferred|already_decided}`.
-Alerts `SagaOrdersStuck` (10m), `SagaDeadlineResolvingOrders` (fires ~15m after any smoke run).
-**Tests:** 651 (505 unit, 146 IT). +`SagaReconcilerTest`, `SagaDeadlineIT` (FakeSagaParticipants can
-LOSE_ORDER_CREATED / LOSE_STOCK_RESERVED / LOSE_PAYMENT_REPLY, PAYMENT_UNREACHABLE; its `Settlement`
-is @Primary `SagaParticipants`), `DeadLetterIT`, payment/inventory settle/close/fence/race tests.
-Smoke section "Saga deadline and dead letters" (stops payment, forges a DLT with kafka CLI, resets
-the payment-service group offset): compose 429/0/0, kind 385/0/7.
-**Gotchas:** `it`/`test` profiles set `ecomdemo.saga.sweep-enabled=false`; tests call
-`sweep(Instant)`. `FlywayMigrationTest` and the smoke test PIN the app's migration list: add each new
-V there. A `@DataJpaTest` importing `InventoryService` needs `OrderLocks` too. Advisory locks are
-PostgreSQL-only: inventory's close/reserve can't run on H2.
-**Follow-ups (not done):** KI-037 (a dead-lettered StockRejected is cancelled with the void's reason);
-KI-038 (sweep in every instance, safe); KI-001 Swagger/OpenAPI fix next; restore cart on cancel (KI-019).

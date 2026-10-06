@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300" role="img">
+<title>Desk Mat</title>
+<rect width="400" height="300" rx="16" fill="#efe6da"/>
+<rect x="40" y="80" width="320" height="150" rx="14" fill="#7a6a58"/>
+<rect x="52" y="92" width="296" height="126" rx="8" fill="none" stroke="#efe6da" stroke-width="3" stroke-dasharray="10 8"/>
+</svg>

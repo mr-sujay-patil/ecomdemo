@@ -16,7 +16,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -251,4 +254,65 @@ class ProductApiIT extends CatalogIntegrationTest {
         createdIds.add(created.getBody().id());
     }
 
+
+    // ---- Phase 34: product images -------------------------------------------------------------
+
+    @Test
+    @DisplayName("a seeded product carries imageUrl, and the URL serves the image with caching headers and a 304")
+    void seededProductImageIsServed() {
+        ProductResponse keyboard = rest.getForEntity("/api/products/1", ProductResponse.class).getBody();
+        assertThat(keyboard).isNotNull();
+        assertThat(keyboard.imageUrl()).isEqualTo("/api/products/1/image");
+
+        ResponseEntity<byte[]> image = rest.getForEntity(keyboard.imageUrl(), byte[].class);
+
+        assertThat(image.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(image.getHeaders().getContentType()).isEqualTo(MediaType.valueOf("image/svg+xml"));
+        assertThat(new String(image.getBody())).startsWith("<svg");
+        assertThat(image.getHeaders().getCacheControl()).contains("public").contains("max-age=86400");
+        assertThat(image.getHeaders().getFirst("X-Content-Type-Options")).isEqualTo("nosniff");
+        assertThat(image.getHeaders().getFirst("Cross-Origin-Resource-Policy")).isEqualTo("cross-origin");
+        String etag = image.getHeaders().getETag();
+        assertThat(etag).isNotBlank();
+
+        HttpHeaders conditional = new HttpHeaders();
+        conditional.setIfNoneMatch(etag);
+        ResponseEntity<byte[]> again = rest.exchange(
+                keyboard.imageUrl(), HttpMethod.GET, new HttpEntity<>(conditional), byte[].class);
+        assertThat(again.getStatusCode()).isEqualTo(HttpStatus.NOT_MODIFIED);
+    }
+
+    @Test
+    @DisplayName("the list carries imageUrl too, and some seeded products have none (null stays valid)")
+    void listCarriesImageUrl() {
+        ProductResponse[] all = rest.getForEntity("/api/products", ProductResponse[].class).getBody();
+
+        assertThat(all).isNotNull();
+        assertThat(all).anyMatch(p -> p.imageUrl() != null);
+        assertThat(all).anyMatch(p -> p.imageUrl() == null);
+        for (ProductResponse p : all) {
+            if (p.imageUrl() != null) {
+                assertThat(p.imageUrl()).isEqualTo("/api/products/" + p.id() + "/image");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a product created through the API has no image, and its /image is a 404")
+    void createdProductHasNoImage() {
+        ProductResponse created = create("Imageless", "10.00", 1, null);
+
+        assertThat(created.imageUrl()).isNull();
+        ResponseEntity<ApiError> missing = rest.getForEntity("/api/products/" + created.id() + "/image", ApiError.class);
+        assertThat(missing.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("an unknown product's /image is a 404; the image needs a token like every other path here")
+    void unknownProductAndNoToken() {
+        assertThat(rest.getForEntity("/api/products/999999/image", ApiError.class).getStatusCode())
+                .isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(anonymous.getForEntity("/api/products/1/image", String.class).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
 }

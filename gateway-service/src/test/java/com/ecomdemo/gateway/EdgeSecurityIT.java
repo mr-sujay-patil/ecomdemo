@@ -116,6 +116,20 @@ class EdgeSecurityIT extends GatewayTest {
                 .jsonPath("$.message").isEqualTo(AuthMessages.NO_TOKEN);
     }
 
+    /** Phase 34: a browser {@code <img>} cannot send a bearer token, so the image path must be as public as the list. */
+    @Test
+    @DisplayName("a product image is readable anonymously, and nobody but an ADMIN may write to that path")
+    void productImagesArePublicToRead() {
+        web.get().uri("/api/products/1/image")
+                .exchange()
+                .expectStatus().is5xxServerError();
+
+        web.put().uri("/api/products/1/image")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + tokenWithRoles("shopper", "CUSTOMER"))
+                .exchange()
+                .expectStatus().isForbidden();
+    }
+
     @Test
     @DisplayName("but a customer may still browse - opening writes to ADMIN closed nothing else")
     void aCustomerMayStillBrowseTheCatalogue() {

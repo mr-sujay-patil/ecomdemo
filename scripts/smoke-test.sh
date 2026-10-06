@@ -3643,6 +3643,61 @@ customer_psql_query "DELETE FROM login_throttle WHERE throttle_key = 'user:$THRO
 # --------------------------------------------------------------------------------------------
 # LLM integration (Phase 27)
 # --------------------------------------------------------------------------------------------
+# Product images (Phase 34): a browser <img> cannot send a bearer token, so every request in this
+# section is ANONYMOUS and goes through the gateway, exactly as the storefront's tags do.
+# --------------------------------------------------------------------------------------------
+section "Product images"
+
+as_anonymous
+IMG_LIST="$(curl -sS "$BASE_URL/api/products")"
+check "every product in the list still has its old fields and now an imageUrl key" "True" \
+    "$(python3 -c "
+import json, sys
+keys = {'id','name','description','price','stockQuantity','category','imageUrl'}
+items = json.loads(sys.argv[1])
+print(bool(items) and all(keys <= set(p) for p in items))" "$IMG_LIST" 2>/dev/null)"
+
+IMG_PRODUCT="$(python3 -c "
+import json, sys
+hit = [p for p in json.loads(sys.argv[1]) if p.get('imageUrl')]
+print('%s %s' % (hit[0]['id'], hit[0]['imageUrl']) if hit else '')" "$IMG_LIST" 2>/dev/null)"
+IMG_ID="${IMG_PRODUCT%% *}"
+IMG_URL="${IMG_PRODUCT#* }"
+check "a seeded product's imageUrl is a path relative to the gateway origin" "/api/products/$IMG_ID/image" "$IMG_URL"
+
+IMG_HEADERS="$(mktemp)"
+IMG_STATUS="$(curl -sS -o /dev/null -D "$IMG_HEADERS" -w '%{http_code}' "$BASE_URL$IMG_URL")"
+sed -i 's/\r$//' "$IMG_HEADERS"
+check "the image is fetched with no Authorization header: 200" "200" "$IMG_STATUS"
+check "with an image content type" "image/svg+xml" \
+    "$(header_of content-type < "$IMG_HEADERS" | head -1 | sed 's/;.*//')"
+check "nosniff" "nosniff" "$(header_of x-content-type-options < "$IMG_HEADERS" | head -1)"
+check "public caching for a day" "True" \
+    "$(header_of cache-control < "$IMG_HEADERS" | python3 -c "import sys; v=sys.stdin.read(); print('public' in v and 'max-age=86400' in v)")"
+check "cross-origin embedding allowed" "cross-origin" \
+    "$(header_of cross-origin-resource-policy < "$IMG_HEADERS" | head -1)"
+IMG_ETAG="$(header_of etag < "$IMG_HEADERS" | head -1)"
+check "and a validator (ETag)" "True" "$([ -n "$IMG_ETAG" ] && echo True || echo False)"
+check "the same request with If-None-Match is 304" "304" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -H "If-None-Match: $IMG_ETAG" "$BASE_URL$IMG_URL")"
+rm -f "$IMG_HEADERS"
+
+NO_IMG_ID="$(python3 -c "
+import json, sys
+hit = [p for p in json.loads(sys.argv[1]) if not p.get('imageUrl')]
+print(hit[0]['id'] if hit else '')" "$IMG_LIST" 2>/dev/null)"
+if [ -n "$NO_IMG_ID" ]; then
+    check "a product with no image answers 404 on /image" "404" \
+        "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/products/$NO_IMG_ID/image")"
+else
+    skip "a product with no image answers 404 on /image" "every product in this catalogue has an image"
+fi
+check "an unknown product answers 404 on /image" "404" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/products/999999999/image")"
+check "nobody can write to the image path anonymously" "401" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -X PUT "$BASE_URL/api/products/$IMG_ID/image")"
+
+# --------------------------------------------------------------------------------------------
 # POST /api/products/{id}/generate-description asks catalog-service's configured chat model for a
 # description, tags and an SEO title. Whether a model is configured is the operator's choice
 # (AI_CHAT_PROVIDER), so this section checks what must hold EITHER way - who may call it, a 404

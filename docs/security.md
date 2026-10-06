@@ -232,6 +232,26 @@ credentials), carrying only its scopes, and each callee checks them:
 Proven by `InventorySecurityTest`, `ProductApiIT` and `PaymentSecurityTest` (an out-of-scope token
 gets 403) and by the smoke test, which asks for the gateway's real token inside its container.
 
+#### Public by design: product images (Phase 34)
+
+`GET /api/products/{id}/image` is readable with no token, like the rest of the catalogue's reads: a
+browser `<img>` cannot send one, and a picture of something for sale is the shop window. The
+gateway permits it (`GET /api/products/**`) and presents its own `catalog:read` token to
+catalog-service, which stays internal; a request straight to catalog-service without a token is
+`401`. Writing to that path is ADMIN-only at the edge, and no endpoint writes images at all.
+Why serving a file is safe here:
+- **No client-supplied path.** The product id selects a row, the row's `image_file` selects the
+  file. Even that name is re-checked: a plain file name (no separator, so no `../`) with an
+  allow-listed extension (`svg png webp jpg jpeg`), else a 500 and a log line, never an open.
+- **The type comes from the extension, not the bytes**, and `X-Content-Type-Options: nosniff` stops
+  the browser guessing another one.
+- **SVG can carry script.** The shipped files are inert (a test rejects `<script`, event handlers,
+  links and external references), and every SVG response carries
+  `Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox`, so opening
+  one as a document runs nothing.
+- **Embedding is intended**, so `Cross-Origin-Resource-Policy: cross-origin`; nothing sensitive is
+  in an image. Rate limiting is the gateway's, per client, like every route (API4).
+
 ### API6 Unrestricted Access to Sensitive Business Flows 🟡
 
 - Nothing limits **how many orders** one account places, or how fast beyond the general rate
