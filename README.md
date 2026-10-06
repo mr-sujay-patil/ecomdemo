@@ -3312,7 +3312,9 @@ numbers are for comparing runs, not for promising capacity.
 
 ## Security scanning
 
-Every pull request runs two scanners, and a HIGH or CRITICAL finding (CVSS 7.0 or more) fails it:
+Every pull request runs two scanners, and a HIGH or CRITICAL finding (CVSS 7.0 or more) fails it. They also
+run **every day at 04:43 UTC** on `main` (and on demand, Actions > CI > Run workflow), so a newly disclosed
+CVE turns a run red on its own day and not on the next unrelated merge:
 
 | CI job | Tool | Looks at |
 |---|---|---|

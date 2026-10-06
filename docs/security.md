@@ -79,8 +79,11 @@ comment in the root pom says so.
 **A scan that passes today can fail tomorrow with no code change.** The two Jackson properties
 have each been raised twice: the second pair of advisories (KI-042) was published about ten hours
 after Phase 33 merged with a green scan, and showed up on the next push to `main`, a docs-and-tests
-PR. The image scan runs only on pushes and pull requests (the scheduled workflow just refreshes the
-NVD cache), so a new disclosure is noticed by whoever merges next. Running it daily is KI-044.
+PR. Until KI-044 the scans ran only on pushes and pull requests, so a new disclosure was noticed by
+whoever merged next. Now `ci.yml` also runs **both scans daily at 04:43 UTC** (an hour after
+`nvd-data.yml` refreshes the NVD copy) and on demand (Actions > CI > Run workflow): a scheduled run
+builds, tests and publishes nothing. A red scheduled run is how a new CVE shows up on its own day;
+GitHub emails whoever last changed the schedule, and the run's page lists the failing findings.
 
 After the fixes, **all 8 images scan clean** at HIGH/CRITICAL, and the Alpine base had no
 HIGH/CRITICAL findings to begin with. **Dependency-Check** covered 142 dependencies and passes
