@@ -162,7 +162,7 @@ and `Dependency scan` pass on the PR, and the build and smoke tests pass.
 | KI-022 | Performance: stock check outside the checkout transaction, pipelined outbox sends, shorter poll delay, push order status (SSE), gateway cost per request and replicas, a soak test, a separate load machine | `performance.md` |
 | KI-023 | Trivy config/IaC scanning of the Dockerfile and k8s manifests; Dependabot for Docker base images and compose images (Maven and GitHub Actions are already covered, `.github/dependabot.yml`) | `RECENT.md` (Phase 31) |
 | KI-024 | Tempo retention and object storage; span metrics (traces to metrics) | README "Known gaps" |
-| KI-044 | Run the image scan (and the dependency scan) on a daily schedule, as `nvd-data.yml` already runs for the NVD cache, so a newly disclosed CVE shows up on its own and not on the next unrelated push (KI-042 turned a docs-and-tests merge red) | KI-042 |
+| KI-044 | Run the image scan (and the dependency scan) on a daily schedule, as `nvd-data.yml` already runs for the NVD cache, so a newly disclosed CVE shows up on its own and not on the next unrelated push (KI-042 turned a docs-and-tests merge red) | KI-042. **Fixed (PR #64)** |
 | KI-045 | `mvnw.cmd` on `main` (from Dependabot PR #57) has line endings that disagree with `.gitattributes` (`*.cmd text eol=crlf`): a fresh checkout shows it modified, with a whitespace-only diff of the whole file. Renormalize it (`git add --renormalize mvnw.cmd`) in its own commit | KI-043 (seen when merging #57). **Fixed (PR #62)** |
 
 ## Accepted limits
