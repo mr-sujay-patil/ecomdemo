@@ -32,7 +32,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | ID | Issue | Severity | Since | Source | Status |
 |---|---|---|---|---|---|
 | KI-001 | Swagger UI and OpenAPI docs are unreachable since the monolith split (details below) | Medium | Phase 21 | `OpenApiDocumentationTest.java:163`, `security.md` API9 | Fixed (PR #52) |
-| KI-002 | Two outbox relays double-publish. catalog-service runs 2-4 pods in k8s (`k8s/hpa.yaml`, `minReplicas: 2`), and the relay takes no lock (`SELECT ... FOR UPDATE SKIP LOCKED` missing). Consumers may absorb it by `event_id`; confirm each one does | Medium | Phase 18, exposed by Phase 25 | `OutboxRelay.java:40` | Open |
+| KI-002 | Two outbox relays double-publish. catalog-service runs 2-4 pods in k8s (`k8s/hpa.yaml`, `minReplicas: 2`), and the relay takes no lock (`SELECT ... FOR UPDATE SKIP LOCKED` missing). Consumers may absorb it by `event_id`; confirm each one does | Medium | Phase 18, exposed by Phase 25 | `OutboxRelay.java:40` | Fixed (PR #65) |
 | KI-003 | compose publishes every port on all interfaces: 6 PostgreSQL databases (default passwords), Redis and Kafka (no auth) | Medium | Phase 10 | `security.md` API8 | Open |
 | KI-004 | No timeouts or circuit breaker on the app's inventory calls or on the gateway's `/api/products` route | Medium | Phase 22 | `security.md` API4, API10 | Open |
 | KI-005 | No load shedding at checkout: under overload, requests wait 10 s for a connection instead of failing fast with 503 + `Retry-After` | Medium | Phase 30 | `security.md` API4, `performance.md` | Open |

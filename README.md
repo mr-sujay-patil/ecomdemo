@@ -2220,11 +2220,14 @@ shared namespace. Adding a bean is not a local change.
 
 ### What this deliberately does not solve
 
-**Two instances would both publish.** The relay takes no lock, so two application instances polling
-the same table can read the same row and both send it. Survivable — the consumer dedupes — but the
-proper fix is `SELECT ... FOR UPDATE SKIP LOCKED`, left out because it is a PostgreSQL-flavoured
-query the H2 unit suite could not run, and because a lock is the wrong thing to introduce in the
-phase about durability.
+**Two instances would both publish (closed by KI-002).** Phase 18 shipped the relay without a lock, so
+two application instances polling the same table could read the same row and both send it:
+survivable, because the consumer dedupes, but wasteful. Measured on the Kubernetes cluster, with two
+catalog pods, **328 of the 1,136 messages on `catalog.product-changed` were duplicates**. The fix is
+a PostgreSQL transaction-level advisory lock taken at the start of every batch, so only one relay
+publishes at a time (not `SKIP LOCKED`, which would let two relays reorder one order's events; see
+`docs/decisions.md`). A burst of 80 product writes across the autoscaled pods then produced 80
+messages for 80 events.
 
 **CDC (Debezium) is the other answer.** It reads the database's replication log and needs no
 application change at all, which makes it the better choice at scale and the wrong one to learn
@@ -4239,12 +4242,10 @@ cost a container start each time.
   the dashboard rather than by any test: `DashboardMetricsTest` checks that panels reference meters
   that exist, and these do. The fix is to make all four range-scoped; it is deliberately not
   bundled into an unrelated refactor.
-- **Two application instances would both publish every outbox row.** The relay takes no lock, so
-  two instances polling the same table can read the same pending row and both send it. It is
-  survivable rather than broken — the duplicate carries the same `event_id` and the consumer's
-  `processed_event` table refuses it, so the cost is duplicate *sends* and not duplicate
-  notifications. The proper fix is `SELECT ... FOR UPDATE SKIP LOCKED`; it is left out because it
-  is a PostgreSQL-flavoured query the H2 unit suite could not run.
+- **Two application instances used to both publish every outbox row (closed by KI-002).** Only one
+  relay per database publishes at a time now (an advisory lock taken per batch); the one duplicate
+  left is the documented crash seam (sent, then the process died before the commit), which the
+  consumer's `processed_event` table absorbs as before.
 - **Nothing watches the outbox.** A pending count that stops falling is the single clearest signal
   that publication has broken, and there is no gauge on it and no health indicator for it — the
   `attempts` and `last_error` columns make a stuck row visible only to somebody already looking.
