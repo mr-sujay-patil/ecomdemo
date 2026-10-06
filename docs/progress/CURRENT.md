@@ -5,10 +5,10 @@
 - **Updated:** 2026-10-06
 - **Fix:** KI-043 — `scripts/smoke-test.sh` does not check the stack it hits is this checkout's own
 - **Branch:** fix/ki-043-smoke-stack-guard (cut from `main` at `a926ba3`)
-- **Step:** TESTING
+- **Step:** PR_OPEN
   (NOT_STARTED | PREFLIGHT | BRANCHED | PLANNING | IMPLEMENTING | TESTING | PR_OPEN | VERIFYING | WAITING_FOR_USER)
-- **PR:** none yet
-- **Waiting for user:** NO
+- **PR:** #58 https://github.com/mr-sujay-patil/ecomdemo/pull/58
+- **Waiting for user:** YES (review of PR #58)
 
 ## Merge verification before this fix
 KI-042: PR #56 merged as a merge commit (`a926ba3`), tag `ki-042-fixed` exists. The cold compose smoke
@@ -22,12 +22,12 @@ on main was not run (frontend team's stack held the ports then; `docker ps` now 
 - [x] Cold compose smoke on this branch (own stack, `down -v` + `up --build --wait`): 468/0/0, no REFUSING;
       stack taken down afterwards
 - [x] Docs: decisions `[KI-043]` x2, development-environment note, KI-043 Fixed
-- [ ] Push, PR "Fix KI-043", add PR number to the KI row
+- [x] Push, PR #58, PR number in the KI row
 
 ## Next action
-Push, `gh pr create --base main`, set KI-043 to "Fixed (PR #n)", STOP for review. Merge main (#57) was merged
-into this branch (no rebase). Side finding: `mvnw.cmd` in main has line endings that disagree with
-`.gitattributes` (`*.cmd eol=crlf`): worktree shows a whitespace-only diff; not committed here (KI candidate).
+PR #58 is open. STOP: wait for the user's review. After the merge: merge verification (git checks, CI on
+main, `./mvnw clean verify`, cold smoke only if no foreign stack is up), tag `ki-043-fixed`. Then ask what
+is next: KI-040, KI-044, KI-045 (mvnw.cmd line endings), or KI-002..011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
