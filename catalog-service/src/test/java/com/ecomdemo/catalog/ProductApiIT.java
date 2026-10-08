@@ -84,6 +84,60 @@ class ProductApiIT extends CatalogIntegrationTest {
         assertThat(response.getBody()).extracting(ProductResponse::name).contains("Mechanical Keyboard");
     }
 
+    /**
+     * KI-007. The body stays a bare array (the web team's client reads it as one); the paging is in
+     * the query and in the headers. A caller that sends nothing gets the first page of the default
+     * size, never the whole catalogue.
+     */
+    @Test
+    @DisplayName("the listing is paged: size limits the array, X-Total-Count and Link say where it is")
+    void listIsPaged() {
+        create("Paging A", "1.00", 1, "Paging");
+        create("Paging B", "2.00", 1, "Paging");
+        create("Paging C", "3.00", 1, "Paging");
+
+        ResponseEntity<ProductResponse[]> first = rest.getForEntity("/api/products?size=2", ProductResponse[].class);
+
+        assertThat(first.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(first.getBody()).hasSize(2);
+        long total = Long.parseLong(first.getHeaders().getFirst("X-Total-Count"));
+        assertThat(total).as("every product is counted, not just this page").isGreaterThanOrEqualTo(3 + 2);
+        assertThat(first.getHeaders().getFirst(HttpHeaders.LINK))
+                .contains("rel=\"next\"").contains("rel=\"last\"").doesNotContain("rel=\"prev\"");
+
+        ResponseEntity<ProductResponse[]> second =
+                rest.getForEntity("/api/products?size=2&page=1", ProductResponse[].class);
+        assertThat(second.getBody()).hasSize(2);
+        assertThat(second.getBody()[0].id()).as("pages follow on, in id order")
+                .isGreaterThan(first.getBody()[1].id());
+        assertThat(second.getHeaders().getFirst(HttpHeaders.LINK)).contains("rel=\"prev\"");
+
+        ResponseEntity<ProductResponse[]> beyond =
+                rest.getForEntity("/api/products?size=2&page=100000", ProductResponse[].class);
+        assertThat(beyond.getStatusCode()).as("a page past the end is empty, not an error").isEqualTo(HttpStatus.OK);
+        assertThat(beyond.getBody()).isEmpty();
+        assertThat(beyond.getHeaders().getFirst("X-Total-Count")).isEqualTo(String.valueOf(total));
+    }
+
+    @Test
+    @DisplayName("with no parameters the listing is one page of the default size, with its headers")
+    void listDefaultsToOnePage() {
+        ResponseEntity<ProductResponse[]> response = rest.getForEntity("/api/products", ProductResponse[].class);
+
+        assertThat(response.getBody()).hasSizeLessThanOrEqualTo(50);
+        assertThat(response.getHeaders().getFirst("X-Total-Count")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a size over the maximum, a zero size and a negative page are 400s with the shared error body")
+    void badPagingIsRefused() {
+        for (String query : new String[] {"size=101", "size=0", "page=-1", "size=abc"}) {
+            ResponseEntity<ApiError> response = rest.getForEntity("/api/products?" + query, ApiError.class);
+            assertThat(response.getStatusCode()).as(query).isEqualTo(HttpStatus.BAD_REQUEST);
+            assertThat(response.getBody()).as(query).isNotNull();
+        }
+    }
+
     @Test
     @DisplayName("a created product survives the round trip to PostgreSQL")
     void createThenGetReturnsTheSameProduct() {

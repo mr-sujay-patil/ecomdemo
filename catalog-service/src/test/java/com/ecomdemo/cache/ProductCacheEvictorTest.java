@@ -37,7 +37,7 @@ class ProductCacheEvictorTest {
     private Cache listingCache;
 
     @Test
-    @DisplayName("evicts the product's own entry and the whole-catalogue listing")
+    @DisplayName("evicts the product's own entry and every cached page of the listing")
     void evictsBothCaches() {
         when(cacheManager.getCache(CacheNames.PRODUCT)).thenReturn(productCache);
         when(cacheManager.getCache(CacheNames.PRODUCT_LIST)).thenReturn(listingCache);
@@ -45,10 +45,10 @@ class ProductCacheEvictorTest {
         new ProductCacheEvictor(cacheManager).onStockChanged(new ProductCacheEvictor.ProductStockChanged(42L));
 
         verify(productCache).evict(42L);
-        // The listing is one cache entry holding every product, so one product's stock moving
-        // makes the whole entry wrong. Evicting only the single product would leave the
-        // catalogue page — the page a shopper actually browses — showing the old number.
-        verify(listingCache).evict(CacheNames.PRODUCT_LIST_KEY);
+        // The listing is cached a page at a time, and one product's stock moving makes whichever
+        // page holds it wrong - and the evictor cannot know which. Evicting only the single
+        // product would leave the catalogue page a shopper browses showing the old number.
+        verify(listingCache).clear();
     }
 
     @Test

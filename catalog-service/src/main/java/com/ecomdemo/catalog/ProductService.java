@@ -5,6 +5,7 @@ import com.ecomdemo.clients.inventory.InventoryGateway;
 import com.ecomdemo.cache.CacheNames;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,9 @@ import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.CachePut;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -39,7 +43,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <h2>What is cached, and what must never be</h2>
  *
- * <p>Only {@link #findAll()} and {@link #findById(Long)} are cached. Both return
+ * <p>Only {@link #findPage(int, int)} and {@link #findById(Long)} are cached. Both return
  * {@code ProductResponse} — a DTO, a snapshot, safe to hold.
  *
  * <p>{@link #requireProduct(Long)} is deliberately <strong>not</strong> cached, and that is the
@@ -91,27 +95,32 @@ public class ProductService {
     }
 
     /**
-     * The whole catalogue, under one key.
+     * One page of the catalogue, in id order (KI-007).
      *
-     * <p>{@code key = "'all'"} is a SpEL literal, not a field: the method takes no arguments, so
-     * without it Spring uses {@code SimpleKey.EMPTY} — which works, but shows up in Redis as an
-     * opaque key nobody can recognise. {@code productList::all} is greppable.
+     * <p>The listing used to be the whole table under the single key {@code all}, which grows with
+     * the catalogue and is read, serialised, cached and sent in full. A page is bounded by the
+     * caller's {@code size}, which the controller caps. The key names the page
+     * ({@code productList::p0:50}) so each page is cached on its own; any write clears the whole
+     * list cache, because a new product moves every later page.
      */
-    @Cacheable(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'")
-    public List<ProductResponse> findAll() {
-        List<Product> products = productRepository.findAll();
+    @Cacheable(cacheNames = CacheNames.PRODUCT_LIST, key = "'p' + #page + ':' + #size")
+    public ProductPage findPage(int page, int size) {
+        Page<Product> found = productRepository.findAll(PageRequest.of(page, size, Sort.by("id")));
+        List<Product> products = found.getContent();
 
-        // ONE stock lookup for the whole listing, not one per product. This is the N+1 problem
+        // ONE stock lookup for the whole page, not one per product. This is the N+1 problem
         // that the JOIN FETCH queries elsewhere in this application exist to avoid - and here it
         // matters more than usual, because when inventory becomes a separate service this line
         // becomes a single HTTP call rather than one per row.
         Map<Long, Integer> quantities =
                 inventory.quantitiesFor(products.stream().map(Product::getId).toList());
 
-        return products.stream()
-                .map(product -> ProductResponse.from(
-                        product, quantities.getOrDefault(product.getId(), 0)))
-                .toList();
+        return new ProductPage(
+                products.stream()
+                        .map(product -> ProductResponse.from(
+                                product, quantities.getOrDefault(product.getId(), 0)))
+                        .toList(),
+                found.getTotalElements());
     }
 
     /**
@@ -131,7 +140,7 @@ public class ProductService {
      * A new product invalidates the listing, and nothing else — there is no entry for an id that
      * did not exist a moment ago.
      */
-    @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'")
+    @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, allEntries = true)
     @Transactional
     public ProductResponse create(ProductRequest request) {
         Product product = new Product(
@@ -163,7 +172,7 @@ public class ProductService {
      */
     @Caching(
             put = @CachePut(cacheNames = CacheNames.PRODUCT, key = "#id"),
-            evict = @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'"))
+            evict = @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, allEntries = true))
     @Transactional
     public ProductResponse update(Long id, ProductRequest request) {
         Product product = requireProduct(id);
@@ -186,7 +195,7 @@ public class ProductService {
      */
     @Caching(evict = {
             @CacheEvict(cacheNames = CacheNames.PRODUCT, key = "#id"),
-            @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'")})
+            @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, allEntries = true)})
     @Transactional
     public Product replaceDescription(Long id, String description) {
         Product product = requireProduct(id);
@@ -199,7 +208,7 @@ public class ProductService {
     /** A delete has to remove both: the entry for this id, and the listing that contained it. */
     @Caching(evict = {
             @CacheEvict(cacheNames = CacheNames.PRODUCT, key = "#id"),
-            @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, key = "'all'")})
+            @CacheEvict(cacheNames = CacheNames.PRODUCT_LIST, allEntries = true)})
     @Transactional
     public void delete(Long id) {
         productRepository.delete(requireProduct(id));

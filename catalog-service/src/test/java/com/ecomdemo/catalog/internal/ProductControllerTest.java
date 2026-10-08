@@ -4,6 +4,7 @@ import com.ecomdemo.catalog.ProductService;
 import com.ecomdemo.catalog.Product;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -20,6 +21,7 @@ import static org.springframework.http.HttpStatus.UNAUTHORIZED;
 import com.ecomdemo.shared.internal.GlobalExceptionHandler;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.WithSecurityRules;
 import java.math.BigDecimal;
@@ -80,7 +82,7 @@ class ProductControllerTest {
         @Test
         void list_whenProductsExist_returns200AndAJsonArray() {
             // Given
-            when(productService.findAll()).thenReturn(List.of(KEYBOARD));
+            when(productService.findPage(0, 50)).thenReturn(new ProductPage(List.of(KEYBOARD), 1));
 
             // When / Then: the JSON itself is asserted rather than a deserialised record.
             // This is the contract clients actually see, and JSONAssert compares numbers by
@@ -97,7 +99,7 @@ class ProductControllerTest {
         @Test
         void list_whenCatalogueIsEmpty_returns200AndAnEmptyArray() {
             // Given
-            when(productService.findAll()).thenReturn(List.of());
+            when(productService.findPage(0, 50)).thenReturn(new ProductPage(List.of(), 0));
 
             // When / Then
             assertThat(mvc.get().uri("/api/products"))
@@ -106,6 +108,28 @@ class ProductControllerTest {
                     .extractingPath("$")
                     .asArray()
                     .isEmpty();
+        }
+
+        @Test
+        void list_carriesTheTotalAndLinks_andPassesPageAndSizeOn() {
+            // Given: 5 products in all, 2 to a page, so page 1 has a neighbour on each side
+            when(productService.findPage(1, 2)).thenReturn(new ProductPage(List.of(KEYBOARD), 5));
+
+            // When / Then
+            var result = mvc.get().uri("/api/products?page=1&size=2");
+            assertThat(result).hasStatus(OK);
+            assertThat(result).headers().hasValue("X-Total-Count", "5");
+            assertThat(result).headers().hasValue("Link",
+                    "</api/products?page=0&size=2>; rel=\"first\", </api/products?page=0&size=2>; rel=\"prev\", "
+                            + "</api/products?page=2&size=2>; rel=\"next\", </api/products?page=2&size=2>; rel=\"last\"");
+        }
+
+        @Test
+        void list_refusesASizeOverTheMaximumAndABadPage_withoutAskingTheService() {
+            for (String query : new String[] {"size=101", "size=0", "page=-1"}) {
+                assertThat(mvc.get().uri("/api/products?" + query)).as(query).hasStatus(BAD_REQUEST);
+            }
+            verify(productService, never()).findPage(anyInt(), anyInt());
         }
     }
 
@@ -348,7 +372,7 @@ class ProductControllerTest {
                     .hasStatus(UNAUTHORIZED);
             assertThat(mvc.delete().uri("/api/products/1")).hasStatus(UNAUTHORIZED);
 
-            verify(productService, never()).findAll();
+            verify(productService, never()).findPage(anyInt(), anyInt());
             verify(productService, never()).create(any());
             verify(productService, never()).delete(any());
         }

@@ -3,25 +3,31 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-006, the gateway's `/actuator/prometheus` is public on port 8080 (route names, error rates, JVM details)
-- **Branch:** fix/ki-006-gateway-prometheus-internal (cut from `main` at `723563f`)
+- **Fix:** KI-007, `GET /api/products` returns the whole catalogue, unpaginated
+- **Branch:** fix/ki-007-paginate-products (cut from `main` at `8fb9a01`)
 - **Step:** PR_OPEN
-- **PR:** #69 https://github.com/mr-sujay-patil/ecomdemo/pull/69
-- **Waiting for user:** YES (review of the KI-006 PR)
+- **PR:** #70 https://github.com/mr-sujay-patil/ecomdemo/pull/70
+- **Waiting for user:** YES (review of the KI-007 PR)
 
-## Merge verification of KI-005 (done 2026-10-08)
-PR #68 merged as `723563f`; tag `ki-005-fixed` exists on origin and is in `main`.
+## Merge verification of KI-006 (done 2026-10-08)
+PR #69 merged as `8fb9a01`; CI on `main` green incl. scans and publish; tag `ki-006-fixed`.
+
+## Decision (user, 2026-10-08)
+Array body + headers (`X-Total-Count`, `Link`); `page` from 0, `size` default 50, max 100 (else 400). Behaviour change: no
+parameters means the first 50.
 
 ## Done
-- Gateway actuator on `management.server.port` 8088 (`GATEWAY_MANAGEMENT_PORT`); 8080 answers 401 under `/actuator`.
-- `EdgeSecurityIT`: both ports (seen failing before the fix: 200 on 8080). Compose healthcheck, Dockerfile HEALTHCHECK (by
-  module), Prometheus target, k8s probes on a `management` container port (not in the Service). Smoke "API gateway" section.
-- Docs: `security.md` API8, `decisions.md`, KNOWN_ISSUES (KI-006 fixed; KI-047 new: management port also proxies routes).
-- `./mvnw clean verify` exit 0; compose cold smoke 490/0/0; Prometheus target `gateway-service:8088` up. Not run: Kubernetes.
+- catalog-service: `ProductService.findPage` (cache per page `p<page>:<size>`, every write clears `productList`), `ProductPage`
+  record, controller params + headers; `CatalogClient.findAll()` follows pages; gateway CORS exposes the headers; Gatling
+  `TestData` follows pages. Tests: `ProductApiIT` (seen failing first), `ProductControllerTest`, `ProductServiceTest`,
+  `CatalogClientPagingTest`, `CorsIT`, `ProductCacheEvictorTest`, `CacheApiIT`. Smoke: paging checks + `listing_all` helper.
+- Docs: `security.md` API4, `decisions.md` [Fix KI-007], README endpoint table + cache table, KNOWN_ISSUES.
+- `./mvnw clean verify` exit 0; kind smoke 447/0/9 (also first run of KI-006's 8088 probe in k8s).
+- NOT run: compose smoke (the frontend team's stack, ~/projects/ecomdemo-backend-readonly, held the container names; user chose kind).
 
 ## Next action
 STOP: wait for the user's review. After `approved, merge it`: wait for the required check, merge with `--merge`, verify (tip in
-`main`, CI on `main` incl. scans and publish), tag `ki-006-fixed`. Still open: KI-007..011, KI-047.
+`main`, CI on `main` incl. scans and publish), tag `ki-007-fixed`. Still open: KI-008..011, KI-047.
 `stash@{0}` (KI-045 noise) is the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`

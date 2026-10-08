@@ -129,7 +129,7 @@ class CacheApiIT extends CatalogIntegrationTest {
 
     /** The stock this product shows in the cached whole-catalogue listing. */
     private int listedStockOf(long id) {
-        ProductResponse[] listing = rest.getForObject("/api/products", ProductResponse[].class);
+        ProductResponse[] listing = rest.getForObject("/api/products?size=100", ProductResponse[].class);
         assertThat(listing).isNotNull();
         return java.util.Arrays.stream(listing)
                 .filter(p -> p.id() == id)
@@ -175,11 +175,11 @@ class CacheApiIT extends CatalogIntegrationTest {
     }
 
     @Test
-    @DisplayName("the catalogue listing is cached under one key, and that key covers every product")
+    @DisplayName("a catalogue page is cached whole, and a product added behind the cache is invisible until it is cleared")
     void theListingIsCachedAsAWhole() {
         create("Cached Listing Item", "10.00", 5);
 
-        int before = rest.getForObject("/api/products", ProductResponse[].class).length;
+        int before = rest.getForObject("/api/products?size=100", ProductResponse[].class).length;
 
         // A product inserted behind the cache's back is invisible until the listing expires or is
         // evicted — the cost of caching a collection under a single key.
@@ -191,12 +191,12 @@ class CacheApiIT extends CatalogIntegrationTest {
                         + "VALUES ('Smuggled In', 'inserted with SQL', 1.00, 'CACHE', 0)");
 
         try {
-            assertThat(rest.getForObject("/api/products", ProductResponse[].class))
+            assertThat(rest.getForObject("/api/products?size=100", ProductResponse[].class))
                     .as("the cached listing has not noticed the new row")
                     .hasSize(before);
 
             clearCaches();
-            assertThat(rest.getForObject("/api/products", ProductResponse[].class))
+            assertThat(rest.getForObject("/api/products?size=100", ProductResponse[].class))
                     .as("after eviction it has")
                     .hasSize(before + 1);
         } finally {
