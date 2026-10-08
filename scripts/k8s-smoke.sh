@@ -26,16 +26,6 @@ WORK="$(mktemp -d)"
 cleanup() { kill $(jobs -p) 2>/dev/null || true; rm -rf "$WORK"; }
 trap cleanup EXIT
 
-kubectl --context "$CONTEXT" -n "$NS" port-forward svc/app 18084:8080 >/dev/null 2>&1 &
-kubectl --context "$CONTEXT" -n "$NS" port-forward svc/payment-service 18086:8086 >/dev/null 2>&1 &
-for _ in $(seq 1 30); do
-    curl -fsS http://localhost:18084/actuator/health >/dev/null 2>&1 \
-        && curl -fsS http://localhost:18086/actuator/health >/dev/null 2>&1 && break
-    sleep 1
-done
-
-cp scripts/smoke-test.sh "$WORK/smoke-test.sh"
-NOT_IN_CLUSTER="http://observability-stays-in-compose.invalid"
 # KI-051: the API is HTTPS now. The CA that signed the Ingress certificate is exported by k8s-up.sh to
 # .local/ecomdemo-ca.crt (public); take it from the cluster if the file is missing. curl reads
 # CURL_CA_BUNDLE and Python SSL_CERT_FILE, so the smoke test verifies the certificate like any client.
@@ -46,10 +36,21 @@ if [ ! -s "$TLS_CA" ]; then
         | base64 -d > "$TLS_CA"
 fi
 export CURL_CA_BUNDLE="$TLS_CA" SSL_CERT_FILE="$TLS_CA"
+# KI-056: the services serve HTTPS (their certificates name `localhost`, for exactly these port-forwards).
+kubectl --context "$CONTEXT" -n "$NS" port-forward svc/app 18084:8080 >/dev/null 2>&1 &
+kubectl --context "$CONTEXT" -n "$NS" port-forward svc/payment-service 18086:8086 >/dev/null 2>&1 &
+for _ in $(seq 1 30); do
+    curl -fsS https://localhost:18084/actuator/health >/dev/null 2>&1 \
+        && curl -fsS https://localhost:18086/actuator/health >/dev/null 2>&1 && break
+    sleep 1
+done
+
+cp scripts/smoke-test.sh "$WORK/smoke-test.sh"
+NOT_IN_CLUSTER="http://observability-stays-in-compose.invalid"
 SMOKE_PLATFORM=k8s \
 BASE_URL="${BASE_URL:-https://localhost:18443}" \
-APP_URL=http://localhost:18084 \
-PAYMENT_URL=http://localhost:18086 \
+APP_URL=https://localhost:18084 \
+PAYMENT_URL=https://localhost:18086 \
 PROMETHEUS_URL="$NOT_IN_CLUSTER" GRAFANA_URL="$NOT_IN_CLUSTER" \
 LOKI_URL="$NOT_IN_CLUSTER" TEMPO_URL="$NOT_IN_CLUSTER" ALLOY_URL="$NOT_IN_CLUSTER" \
 SMOKE_STATE_FILE="${SMOKE_STATE_FILE:-.smoke-state-k8s}" \

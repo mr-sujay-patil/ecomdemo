@@ -7,6 +7,12 @@ metadata:
     app.kubernetes.io/name: customer-service
 data:
   LOG_FORMAT: "ecs"
+  # KI-056: this service serves HTTPS (the certificate is cert-manager's, mounted from <name>-tls) and
+  # trusts the cluster CA (init container `trust-ca` builds the JVM truststore).
+  SERVER_SSL_BUNDLE: "server"
+  SPRING_SSL_BUNDLE_PEM_SERVER_KEYSTORE_CERTIFICATE: "file:/etc/ecomdemo-tls/tls.crt"
+  SPRING_SSL_BUNDLE_PEM_SERVER_KEYSTORE_PRIVATEKEY: "file:/etc/ecomdemo-tls/tls.key"
+  SPRING_SSL_BUNDLE_PEM_SERVER_RELOAD_ON_UPDATE: "true"
   TRACING_SAMPLING_PROBABILITY: "1.0"
   CUSTOMER_DB_HOST: "customer-db"
   CUSTOMER_DB_PORT: "5432"
@@ -47,6 +53,24 @@ spec:
       # here it waits until each dependency accepts a TCP connection. It uses the service's own
       # image (Alpine, so it has `nc`), so there is no extra image to pull.
       initContainers:
+        # KI-056: the JVM must trust the cluster CA to call other services over HTTPS. This copies the
+        # image's own truststore (public CAs included, so outbound calls keep working) and adds the CA
+        # from this service's certificate Secret. JAVA_TOOL_OPTIONS on the container points the JVM at it.
+        - name: trust-ca
+          image: ecomdemo-customer:latest
+          imagePullPolicy: Never
+          command: ["sh", "-c"]
+          args:
+            - |
+              cp "${JAVA_HOME:-/opt/java/openjdk}/lib/security/cacerts" /trust/cacerts
+              keytool -importcert -noprompt -trustcacerts -alias ecomdemo-local-ca \
+                -file /etc/ecomdemo-tls/ca.crt -keystore /trust/cacerts -storepass changeit
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: trust, mountPath: /trust }
+          resources:
+            limits:
+              memory: 192Mi
         - name: wait-for-dependencies
           image: ecomdemo-customer:latest
           imagePullPolicy: Never
@@ -62,6 +86,12 @@ spec:
             limits:
               memory: 64Mi
       terminationGracePeriodSeconds: 40
+      volumes:
+        - name: tls
+          secret:
+            secretName: customer-service-tls
+        - name: trust
+          emptyDir: {}
       containers:
         - name: customer-service
           image: ecomdemo-customer:latest
@@ -82,22 +112,31 @@ spec:
           #   liveness   "is it stuck?" - failing it RESTARTS the container;
           #   readiness  "should it get traffic?" - failing it only takes the pod out of the
           #              Service's endpoints, which is what a rolling update waits for.
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djavax.net.ssl.trustStore=/trust/cacerts -Djavax.net.ssl.trustStorePassword=changeit"
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: trust, mountPath: /trust, readOnly: true }
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
+              scheme: HTTPS
             periodSeconds: 5
             failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
+              scheme: HTTPS
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: http
+              scheme: HTTPS
             periodSeconds: 5
             failureThreshold: 3
           # The pod is removed from the Service's endpoints at the same moment it is told to stop,

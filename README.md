@@ -3543,10 +3543,17 @@ sudo cp .local/ecomdemo-ca.crt /usr/local/share/ca-certificates/ecomdemo-local-c
 A cluster created before this needs `scripts/k8s-down.sh` and `scripts/k8s-up.sh`: kind cannot add the HTTPS
 port mapping to a running cluster, and the CA is new, so re-export and re-trust it.
 
-**What this does and does not cover.** It protects the leg that crosses the network a client uses. Traefik
-to the gateway, the gateway to the services, Kafka and the databases stay plain on the cluster network, and
-compose stays HTTP on `127.0.0.1` (KI-003). Encrypting the hops inside the cluster is a separate, larger
-piece of work (certificates and truststores in every service) and is not done.
+**Behind the edge (KI-056).** Inside the cluster the services speak HTTPS too: Traefik to the gateway, the
+gateway to every service, service to service, and the token and JWKS endpoints. Each service has its own
+cert-manager certificate (`k8s/service-certificates.yaml`) from the same CA, serves it through a Spring SSL
+bundle (reloaded when cert-manager renews it), and trusts the CA through a truststore that an init
+container builds from the image's own plus the CA. It is server-side TLS only: a caller proves who it is
+with its JWT service token, not a client certificate.
+
+**What is not covered.** Redis, PostgreSQL and Kafka are still plain on the cluster network (KI-057..059),
+and compose stays HTTP on `127.0.0.1` (KI-003): the same images run there, and the TLS settings live only
+in the k8s ConfigMaps. If the CA ever has to be replaced, every service must restart to rebuild its
+truststore (a renewed *service* certificate does not: it is reloaded).
 
 ### The smoke test in CI (KI-049)
 

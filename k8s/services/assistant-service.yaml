@@ -9,13 +9,19 @@ metadata:
     app.kubernetes.io/name: assistant-service
 data:
   # Phase 33: verify tokens with customer-service's public keys.
-  JWT_JWK_SET_URI: "http://customer-service:8083/oauth2/jwks"
+  JWT_JWK_SET_URI: "https://customer-service:8083/oauth2/jwks"
   LOG_FORMAT: "ecs"
+  # KI-056: this service serves HTTPS (the certificate is cert-manager's, mounted from <name>-tls) and
+  # trusts the cluster CA (init container `trust-ca` builds the JVM truststore).
+  SERVER_SSL_BUNDLE: "server"
+  SPRING_SSL_BUNDLE_PEM_SERVER_KEYSTORE_CERTIFICATE: "file:/etc/ecomdemo-tls/tls.crt"
+  SPRING_SSL_BUNDLE_PEM_SERVER_KEYSTORE_PRIVATEKEY: "file:/etc/ecomdemo-tls/tls.key"
+  SPRING_SSL_BUNDLE_PEM_SERVER_RELOAD_ON_UPDATE: "true"
   TRACING_SAMPLING_PROBABILITY: "1.0"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
-  CATALOG_BASE_URL: "http://catalog-service:8081"
-  APP_BASE_URL: "http://app:8080"
+  CATALOG_BASE_URL: "https://catalog-service:8081"
+  APP_BASE_URL: "https://app:8080"
   # No language model in the cluster, like catalog-service: every chat answers 503 "not
   # configured". Both are needed to switch it on - a chat model and an embedding model.
   AI_CHAT_PROVIDER: "none"
@@ -51,6 +57,24 @@ spec:
       # Kubernetes has no `depends_on`: wait until Redis and the two services it asks accept a TCP
       # connection (see catalog-service.yaml for the pattern).
       initContainers:
+        # KI-056: the JVM must trust the cluster CA to call other services over HTTPS. This copies the
+        # image's own truststore (public CAs included, so outbound calls keep working) and adds the CA
+        # from this service's certificate Secret. JAVA_TOOL_OPTIONS on the container points the JVM at it.
+        - name: trust-ca
+          image: ecomdemo-assistant:latest
+          imagePullPolicy: Never
+          command: ["sh", "-c"]
+          args:
+            - |
+              cp "${JAVA_HOME:-/opt/java/openjdk}/lib/security/cacerts" /trust/cacerts
+              keytool -importcert -noprompt -trustcacerts -alias ecomdemo-local-ca \
+                -file /etc/ecomdemo-tls/ca.crt -keystore /trust/cacerts -storepass changeit
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: trust, mountPath: /trust }
+          resources:
+            limits:
+              memory: 192Mi
         - name: wait-for-dependencies
           image: ecomdemo-assistant:latest
           imagePullPolicy: Never
@@ -66,6 +90,12 @@ spec:
             limits:
               memory: 64Mi
       terminationGracePeriodSeconds: 40
+      volumes:
+        - name: tls
+          secret:
+            secretName: assistant-service-tls
+        - name: trust
+          emptyDir: {}
       containers:
         - name: assistant-service
           image: ecomdemo-assistant:latest
@@ -86,22 +116,31 @@ spec:
           #   liveness   "is it stuck?" - failing it RESTARTS the container;
           #   readiness  "should it get traffic?" - failing it only takes the pod out of the
           #              Service's endpoints, which is what a rolling update waits for.
+          env:
+            - name: JAVA_TOOL_OPTIONS
+              value: "-Djavax.net.ssl.trustStore=/trust/cacerts -Djavax.net.ssl.trustStorePassword=changeit"
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: trust, mountPath: /trust, readOnly: true }
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
+              scheme: HTTPS
             periodSeconds: 5
             failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
               port: http
+              scheme: HTTPS
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
               port: http
+              scheme: HTTPS
             periodSeconds: 5
             failureThreshold: 3
           # The pod is removed from the Service's endpoints at the same moment it is told to stop,

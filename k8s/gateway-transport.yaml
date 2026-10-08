@@ -1,0 +1,16 @@
+# How Traefik verifies the gateway (KI-056). By default Traefik reaches a backend by POD IP and, over
+# HTTPS, would check the certificate against that IP, which no certificate names. This pins the name to
+# check (`gateway-service`, which gateway-service-tls carries) and the CA to trust: the public CA
+# certificate in the Secret `ecomdemo-ca-public`, key `tls.ca`, which scripts/k8s-up.sh creates from the
+# cert-manager CA. Referenced by the annotation on the gateway Service. Needs Traefik's CRD provider
+# (platform/traefik-values.yaml).
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: gateway-transport
+  labels:
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  serverName: gateway-service
+  rootCAsSecrets:
+    - ecomdemo-ca-public
