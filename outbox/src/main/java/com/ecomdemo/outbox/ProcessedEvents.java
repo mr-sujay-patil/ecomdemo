@@ -18,8 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>This is notification-service's {@code EventDeduplicator} (Phase 19), moved into the library
  * in Phase 24 because inventory, payment and the order service now need exactly the same thing.
- * notification-service keeps its own copy for now; switching it over is a follow-up, not this
- * phase's scope.
+ * notification-service dropped its own copy and uses this class too (KI-010).
  *
  * <p>Why the marker goes in FIRST, and why the table's primary key is the event id: two
  * consumers racing on the same record cannot both pass the check and proceed - the second insert

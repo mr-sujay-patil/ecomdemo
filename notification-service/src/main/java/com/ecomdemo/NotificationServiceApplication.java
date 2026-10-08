@@ -1,6 +1,7 @@
 package com.ecomdemo;
 
 import com.ecomdemo.metrics.MetricsConfig;
+import com.ecomdemo.outbox.EnableOutbox;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
@@ -31,6 +32,7 @@ import org.springframework.context.annotation.Import;
 })
 @ConfigurationPropertiesScan(basePackages = {"com.ecomdemo.notification", "com.ecomdemo.jwt"})
 @Import(MetricsConfig.class)
+@EnableOutbox
 public class NotificationServiceApplication {
 
     public static void main(String[] args) {

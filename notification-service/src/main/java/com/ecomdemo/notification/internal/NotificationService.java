@@ -1,6 +1,7 @@
 package com.ecomdemo.notification.internal;
 
 import com.ecomdemo.notification.Notification;
+import com.ecomdemo.outbox.ProcessedEvents;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,13 +27,12 @@ import org.springframework.transaction.annotation.Transactional;
  * insert violates the key and that transaction rolls back, leaving exactly one notification. The
  * check is the cheap path for the common case; the constraint is what makes it correct.
  *
- * <p>Since Phase 19 that mechanism lives behind {@code EventDeduplicator}, which moved into THIS service
- * in Phase 20d along with the {@code processed_event} table it guards — the two had sat in
- * {@code messaging} next to the outbox, and that grouping was always slightly wrong: an outbox is about
- * publishing durably, this is about consuming exactly once. {@code messaging} kept the outbox,
- * which is where it belongs: this class knows that an event may arrive twice and that it must act
- * once, and no longer knows which table records the fact or in what order the two writes happen.
- * The second consumer this application grows inherits the rule instead of copying it.
+ * <p>Since Phase 19 that mechanism lives behind a deduplicator, and since KI-010 it is the outbox
+ * library's {@code ProcessedEvents}, the same class every saga participant uses. It began as this
+ * service's own {@code EventDeduplicator} (which Phase 20d moved here with the {@code processed_event}
+ * table), and the copy was dropped once the library had the same code. This class knows that an event
+ * may arrive twice and that it must act once, and not which table records the fact or in what order
+ * the two writes happen.
  */
 @Service
 public class NotificationService {
@@ -42,12 +42,12 @@ public class NotificationService {
     private static final String EVENT_TYPE = OrderPlacedEvent.class.getSimpleName();
 
     private final NotificationRepository notifications;
-    private final EventDeduplicator deduplicator;
+    private final ProcessedEvents processedEvents;
 
     public NotificationService(
-            NotificationRepository notifications, EventDeduplicator deduplicator) {
+            NotificationRepository notifications, ProcessedEvents processedEvents) {
         this.notifications = notifications;
-        this.deduplicator = deduplicator;
+        this.processedEvents = processedEvents;
     }
 
     /**
@@ -55,7 +55,7 @@ public class NotificationService {
      */
     @Transactional
     public boolean handle(OrderPlacedEvent event) {
-        if (!deduplicator.claim(event.eventId(), EVENT_TYPE)) {
+        if (!processedEvents.claim(event.eventId(), EVENT_TYPE)) {
             // Not a warning and not an error: a redelivery is Kafka working as designed, and a
             // log level that says otherwise trains people to ignore it. It is logged at all
             // because a SUDDEN RISE in duplicates means something else — a consumer failing to
