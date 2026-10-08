@@ -325,7 +325,7 @@ class ResilientCatalogTest {
         }
     }
 
-    private static Properties applicationProperties() {
+    static Properties applicationProperties() {
         Properties file = new Properties();
         try (InputStream in = ResilientCatalogTest.class.getResourceAsStream("/application.properties")) {
             file.load(in);
