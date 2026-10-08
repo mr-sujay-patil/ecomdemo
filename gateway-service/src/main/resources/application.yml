@@ -240,6 +240,13 @@ ecomdemo:
     application: gateway-service
 
 management:
+  server:
+    # KI-006. The actuator is served on its OWN port, so the port clients use answers nothing under
+    # /actuator. Metrics describe route names, error rates and the JVM; that is for Prometheus and the
+    # orchestrator's probes, which are in the network, and not for the internet. Nothing publishes or
+    # routes this port (compose, the Ingress and the Service's public port all leave it out), and
+    # the security chain on it still requires ADMIN for anything but health, info and prometheus.
+    port: ${GATEWAY_MANAGEMENT_PORT:8088}
   endpoints:
     web:
       exposure:

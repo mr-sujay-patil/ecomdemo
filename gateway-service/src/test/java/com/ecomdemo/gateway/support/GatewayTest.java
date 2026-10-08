@@ -89,13 +89,23 @@ public abstract class GatewayTest {
      */
     protected WebTestClient web;
 
+    /** KI-006: the actuator's own port. Same client settings, different door. */
+    protected WebTestClient management;
+
     @org.springframework.boot.test.web.server.LocalServerPort
     private int port;
+
+    @org.springframework.boot.test.web.server.LocalManagementPort
+    private int managementPort;
 
     @org.junit.jupiter.api.BeforeEach
     void bindTheClientToTheRunningServer() {
         web = WebTestClient.bindToServer()
                 .baseUrl("http://localhost:" + port)
+                .responseTimeout(Duration.ofSeconds(30))
+                .build();
+        management = WebTestClient.bindToServer()
+                .baseUrl("http://localhost:" + managementPort)
                 .responseTimeout(Duration.ofSeconds(30))
                 .build();
     }

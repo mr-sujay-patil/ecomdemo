@@ -216,12 +216,28 @@ class EdgeSecurityIT extends GatewayTest {
                 .expectStatus().is5xxServerError();
     }
 
+    /**
+     * KI-006. The gateway's actuator lives on its own management port, which no client can reach
+     * (compose does not publish it, the Ingress does not route it). The public port answers nothing
+     * under {@code /actuator}: metrics describe route names, error rates and the JVM, and the port
+     * every client uses is the wrong place for them to be open.
+     */
     @Test
-    @DisplayName("the gateway's own health is open, and its other endpoints are not")
-    void actuatorIsExposedTheSameWayEveryServiceExposesIt() {
-        web.get().uri("/actuator/health").exchange().expectStatus().isOk();
-        web.get().uri("/actuator/prometheus").exchange().expectStatus().isOk();
+    @DisplayName("the public port serves no actuator endpoint at all")
+    void thePublicPortDoesNotServeTheActuator() {
+        web.get().uri("/actuator/prometheus").exchange().expectStatus().isUnauthorized();
+        web.get().uri("/actuator/health").exchange().expectStatus().isUnauthorized();
+        web.get().uri("/actuator/health/readiness").exchange().expectStatus().isUnauthorized();
         web.get().uri("/actuator/env").exchange().expectStatus().isUnauthorized();
+    }
+
+    @Test
+    @DisplayName("the management port serves health and metrics, and no other endpoint")
+    void theManagementPortServesHealthAndMetricsAndNoOtherEndpoint() {
+        management.get().uri("/actuator/health").exchange().expectStatus().isOk();
+        management.get().uri("/actuator/health/readiness").exchange().expectStatus().isOk();
+        management.get().uri("/actuator/prometheus").exchange().expectStatus().isOk();
+        management.get().uri("/actuator/env").exchange().expectStatus().isUnauthorized();
     }
 
     /**

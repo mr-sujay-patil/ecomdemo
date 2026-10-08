@@ -88,6 +88,10 @@ public class GatewaySecurityConfig {
 
                         // The gateway's OWN health and metrics. Kubernetes and Prometheus have no
                         // token, and Phase 25 will probe this container like any other.
+                        //
+                        // KI-006: these matchers only ever match on the MANAGEMENT port
+                        // (management.server.port), which nothing publishes. On the public port they
+                        // match nothing, so /actuator/** falls through to `authenticated()` below.
                         .matchers(EndpointRequest.to("health", "info")).permitAll()
                         .matchers(EndpointRequest.to("prometheus")).permitAll()
                         .matchers(EndpointRequest.toAnyEndpoint()).hasRole("ADMIN")
