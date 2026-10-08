@@ -7,8 +7,12 @@ import com.ecomdemo.shared.InsufficientStockException;
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.metrics.CheckoutMetrics;
 import com.ecomdemo.metrics.CheckoutOutcome;
+import com.ecomdemo.shared.ServiceUnavailableException;
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import com.ecomdemo.order.dto.OrderResponse;
 import io.micrometer.core.instrument.Timer;
+import java.time.Duration;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,23 +41,32 @@ public class OrderService {
      */
     static final int MAX_ATTEMPTS = 3;
 
+    /** The instance name in {@code resilience4j.bulkhead.instances.*}, in metrics and on the dashboard. */
+    static final String CHECKOUT_BULKHEAD = "checkout";
+
+    /** What a shed shopper is told to wait: a checkout is short, so a second is a real answer. */
+    private static final Duration SHED_RETRY_AFTER = Duration.ofSeconds(1);
+
     private final OrderRepository orderRepository;
     private final OrderPlacementService orderPlacementService;
     private final OrderAuditService orderAuditService;
     private final CurrentUser currentUser;
     private final CheckoutMetrics checkoutMetrics;
+    private final Bulkhead checkoutBulkhead;
 
     public OrderService(
             OrderRepository orderRepository,
             OrderPlacementService orderPlacementService,
             OrderAuditService orderAuditService,
             CurrentUser currentUser,
-            CheckoutMetrics checkoutMetrics) {
+            CheckoutMetrics checkoutMetrics,
+            BulkheadRegistry bulkheads) {
         this.orderRepository = orderRepository;
         this.orderPlacementService = orderPlacementService;
         this.orderAuditService = orderAuditService;
         this.currentUser = currentUser;
         this.checkoutMetrics = checkoutMetrics;
+        this.checkoutBulkhead = bulkheads.bulkhead(CHECKOUT_BULKHEAD);
     }
 
     /**
@@ -74,6 +87,19 @@ public class OrderService {
     @PreAuthorize("hasRole('CUSTOMER')")
     public OrderResponse place() {
         Timer.Sample sample = checkoutMetrics.start();
+        // Load shedding (KI-005). Every checkout holds a database connection, and the pool is
+        // small (10). Without a limit the excess does not fail, it WAITS: Phase 30 measured 200
+        // requests queued for a connection, each failing only after ten seconds, and a backlog that
+        // outlasted the spike. Refusing at once, with a Retry-After, fails a few requests fast
+        // instead of making all of them slow. Nothing is written for a shed request - not even the
+        // audit row, which would be one more database call made at the worst possible moment.
+        if (!checkoutBulkhead.tryAcquirePermission()) {
+            checkoutMetrics.failed(sample, CheckoutOutcome.SHED);
+            throw new ServiceUnavailableException(
+                    "Checkout is busy right now. Your cart is untouched; please try again shortly.",
+                    SHED_RETRY_AFTER,
+                    null);
+        }
         try {
             OrderResponse placed = placeWithRetries();
             checkoutMetrics.placed(sample, placed.totalAmount());
@@ -105,6 +131,8 @@ public class OrderService {
         } catch (RuntimeException ex) {
             checkoutMetrics.failed(sample, CheckoutOutcome.ERROR);
             throw ex;
+        } finally {
+            checkoutBulkhead.onComplete();
         }
     }
 

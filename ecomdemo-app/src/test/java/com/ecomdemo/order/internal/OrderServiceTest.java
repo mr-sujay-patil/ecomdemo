@@ -23,6 +23,7 @@ import com.ecomdemo.metrics.MetricNames;
 import com.ecomdemo.order.dto.OrderResponse;
 import com.ecomdemo.jwt.CurrentUser;
 import com.ecomdemo.support.TestData;
+import io.github.resilience4j.bulkhead.BulkheadRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -83,6 +84,10 @@ class OrderServiceTest {
 
     @Spy
     private CheckoutMetrics checkoutMetrics = new CheckoutMetrics(meterRegistry);
+
+    /** Real, with the library's defaults (25 concurrent): these tests are about retries, not shedding. */
+    @Spy
+    private BulkheadRegistry bulkheads = BulkheadRegistry.ofDefaults();
 
     @InjectMocks
     private OrderService orderService;
