@@ -28,14 +28,18 @@ class OutboxCleanupJobTest {
     @Mock
     private OutboxEventRepository outbox;
 
+    @Mock
+    private ProcessedEventRepository processedEvents;
+
     @Test
     @DisplayName("sweeps everything published longer ago than the retention window")
     void usesTheRetentionWindowAsTheCutoff() {
         OutboxCleanupJob job =
                 new OutboxCleanupJob(
                         outbox,
+                        processedEvents,
                         new OutboxProperties(
-                                Duration.ofSeconds(1), 100, Duration.ofDays(7), "0 0 3 * * *", 20));
+                                Duration.ofSeconds(1), 100, Duration.ofDays(7), "0 0 3 * * *", 20, Duration.ofDays(30)));
         when(outbox.deletePublishedBefore(any(Instant.class))).thenReturn(3);
 
         Instant before = Instant.now();
@@ -58,8 +62,9 @@ class OutboxCleanupJobTest {
         OutboxCleanupJob job =
                 new OutboxCleanupJob(
                         outbox,
+                        processedEvents,
                         new OutboxProperties(
-                                Duration.ofSeconds(1), 100, Duration.ofDays(30), "0 0 3 * * *", 20));
+                                Duration.ofSeconds(1), 100, Duration.ofDays(30), "0 0 3 * * *", 20, Duration.ofDays(30)));
         when(outbox.deletePublishedBefore(any(Instant.class))).thenReturn(0);
 
         job.sweep();
@@ -67,5 +72,27 @@ class OutboxCleanupJobTest {
         ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
         verify(outbox).deletePublishedBefore(cutoff.capture());
         assertThat(cutoff.getValue()).isBefore(Instant.now().minus(Duration.ofDays(29)));
+    }
+
+    /**
+     * KI-008. The dedup record only has to outlive the longest time a message can be delivered
+     * again, which is a different clock from the outbox's forensic window, so it has its own.
+     */
+    @Test
+    @DisplayName("prunes processed-event records older than their own retention, not the outbox's")
+    void prunesProcessedEventsWithTheirOwnWindow() {
+        OutboxCleanupJob job =
+                new OutboxCleanupJob(
+                        outbox,
+                        processedEvents,
+                        new OutboxProperties(
+                                Duration.ofSeconds(1), 100, Duration.ofDays(7), "0 0 3 * * *", 20, Duration.ofDays(30)));
+
+        job.sweep();
+
+        ArgumentCaptor<Instant> cutoff = ArgumentCaptor.forClass(Instant.class);
+        verify(processedEvents).deleteProcessedBefore(cutoff.capture());
+        assertThat(cutoff.getValue()).isBefore(Instant.now().minus(Duration.ofDays(29)));
+        assertThat(cutoff.getValue()).isAfter(Instant.now().minus(Duration.ofDays(31)));
     }
 }

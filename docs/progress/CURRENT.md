@@ -3,26 +3,23 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-047, the gateway's management port (8088) also served the API routes
-- **Branch:** fix/ki-047-mgmt-port-routes (cut from `main` at `d7be593`)
-- **Step:** PR_OPEN
-- **PR:** #71 https://github.com/mr-sujay-patil/ecomdemo/pull/71
-- **Waiting for user:** YES (review of the KI-047 PR)
+- **Fix:** KI-008, nothing prunes `processed_event`
+- **Branch:** fix/ki-008-prune-processed-event (cut from `main` at `83a4a20`)
+- **Step:** TESTING
+- **Waiting for user:** NO
 
-## Merge verification of KI-007 (done 2026-10-08)
-PR #70 merged as `d7be593`; CI on `main` green; tag `ki-007-fixed` on origin.
+## Merge verification of KI-047 (done 2026-10-08)
+PR #71 merged as `83a4a20`; CI on `main` green incl. scans and publish; tag `ki-047-fixed`.
 
 ## Done
-- `ManagementPortGuardFilter` (gateway-service): 404 for non-`/actuator` paths on the management port, found through
-  `local.management.port` + the request's local port. `EdgeSecurityIT` gained two tests (seen failing first).
-- Docs: `decisions.md` [Fix KI-047], KNOWN_ISSUES row.
-- `./mvnw clean verify` exit 0 (42/253/68 tests, 0 failures).
-- NOT run: `scripts/smoke-test.sh` (compose or kind); k8s probes and Prometheus only use `/actuator/**`, which the filter lets through.
+- outbox library: `ProcessedEventRepository.deleteProcessedBefore`, `OutboxProperties.processedEventRetention` (30 d),
+  `OutboxCleanupJob` prunes in its existing 03:00 sweep. Tests: `OutboxCleanupJobTest`, `OutboxPropertiesTest`,
+  `ProcessedEventRepositoryTest` (new, DB). Red phase was a compile failure (the new members did not exist yet).
+- Docs: `decisions.md`, `saga.md`, KNOWN_ISSUES.
 
 ## Next action
-STOP: wait for the user's review. After `approved, merge it`: wait for the required check, merge with `--merge`, verify (tip in
-`main`, CI on `main` incl. scans and publish), tag `ki-047-fixed`. Still open: KI-008..011.
-`stash@{0}` (KI-045 noise) is the user's to drop.
+Check `~/.cache/ecomdemo-claude/ki008-full.log` (`./mvnw clean verify`); if green, commit, push, raise the PR, set PR_OPEN, STOP.
+notification-service's own table is not pruned (KI-010). Still open: KI-009..011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

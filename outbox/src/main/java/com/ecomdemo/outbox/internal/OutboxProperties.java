@@ -16,10 +16,17 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param cleanupCron six-field cron for the cleanup job, or {@code -} to disable it
  * @param maxBatchesPerTick how many FULL batches one tick may publish back to back before it
  *     yields to the scheduler (Phase 30)
+ * @param processedEventRetention how long an idempotent-consumer record ({@code processed_event}) is
+ *     kept before the cleanup job prunes it (KI-008)
  */
 @ConfigurationProperties(prefix = "ecomdemo.outbox")
 public record OutboxProperties(
-        Duration pollDelay, int batchSize, Duration retention, String cleanupCron, int maxBatchesPerTick) {
+        Duration pollDelay,
+        int batchSize,
+        Duration retention,
+        String cleanupCron,
+        int maxBatchesPerTick,
+        Duration processedEventRetention) {
 
     public OutboxProperties {
         // One second. This is the outbox's latency floor for the common case, and the number is a
@@ -55,5 +62,14 @@ public record OutboxProperties(
         // the same time on a laptop that has one core to spare. Six fields: Spring's cron starts
         // at SECONDS.
         cleanupCron = cleanupCron == null || cleanupCron.isBlank() ? "0 0 3 * * *" : cleanupCron;
+    
+        // Thirty days (KI-008). A processed_event row is the proof that a message was already handled,
+        // so it must outlive the longest time that message can be delivered AGAIN: the broker's topic
+        // retention (7 days by default) is the hard limit for a redelivery, and a dead letter replayed
+        // by an operator is the soft one. Pruning sooner than that would turn a late duplicate back
+        // into a second reservation or a second charge; later only costs a few bytes a row.
+        processedEventRetention = processedEventRetention == null || processedEventRetention.isNegative()
+                ? Duration.ofDays(30)
+                : processedEventRetention;
     }
 }
