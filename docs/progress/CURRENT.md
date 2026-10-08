@@ -6,7 +6,7 @@
 - **Fix:** KI-004, no timeouts or circuit breaker on the app's inventory calls or on the gateway's `/api/products` route
 - **Branch:** fix/ki-004-timeouts-circuit-breaker (cut from `main` at `e7b0f98`)
 - **Step:** PR_OPEN
-- **PR:** none yet
+- **PR:** #67 https://github.com/mr-sujay-patil/ecomdemo/pull/67
 - **Waiting for user:** YES (review of the KI-004 PR)
 
 ## Merge verification of KI-003 (done 2026-10-08)
@@ -25,7 +25,7 @@ incl. scans and publish; tag `ki-003-fixed` pushed. Cold compose smoke skipped (
 
 ## Next action
 STOP: wait for the user's review of the KI-004 PR. After `approved, merge it`: wait for the required check, merge with
-`--merge`, verify (tip in `main`, CI on `main` incl. scans and publish), tag `ki-004-fixed`. Replace `PR #TBD` in KNOWN_ISSUES
+`--merge`, verify (tip in `main`, CI on `main` incl. scans and publish), tag `ki-004-fixed`. KNOWN_ISSUES already says PR #67; no placeholder left. (Was: replace `PR #TBD` in KNOWN_ISSUES
 with the real number on this branch first. A cold compose smoke on `main` is owed if no foreign stack is up (`docker ps` first).
 Suggested, not built: breaker on catalog-service's own inventory calls; bulkhead size 50 is a judgement, measure it.
 Still open: KI-005..011. `stash@{0}` (KI-045 noise) is obsolete; the user's to drop.
