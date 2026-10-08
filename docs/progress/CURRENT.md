@@ -3,28 +3,24 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-050, Redis has no password (the no-replica half is split out as KI-054)
-- **Branch:** fix/ki-050-redis-password (cut from `main` at `3c7ecf5`)
-- **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-050 PR; also see "User action" below)
+- **Fix:** KI-049, the smoke test did not run in CI
+- **Branch:** fix/ki-049-smoke-test-in-ci (cut from `main` at `c0f0189`)
+- **Step:** PR_OPEN (PR #81, labelled `run-smoke`)
+- **Waiting for user:** YES (review of the KI-049 PR)
 
-## Merge verification of the previous units (done 2026-10-08)
-KI-052 (#78, tag `ki-052-fixed`) and KI-053 (#79, tag `ki-053-fixed`) are in `main`; CI on `main` after #79 green, publish succeeded.
+## Merge verification of KI-050 (done 2026-10-08)
+PR #80 merged as `c0f0189`, tag `ki-050-fixed`. The user must add `REDIS_PASSWORD` to `.env` (compose refuses to start without it).
 
 ## Done
-- compose: `--requirepass ${REDIS_PASSWORD:?...}`, `REDISCLI_AUTH`, `SPRING_DATA_REDIS_PASSWORD` for app/catalog/assistant/gateway.
-  k8s: `cache-secrets`, `cache.yaml` args/env, `k8s-up.sh` adds the key to the four service Secrets. No Java changed.
-- Smoke: "Redis refuses a client that has no password" + "answers one that has it" (seen failing before: unauthenticated PING gave PONG).
-- kind: `scripts/k8s-smoke.sh` 448 passed, 0 failed, 7 skipped. Docs: KI-050 fixed + KI-054, `security.md`, `decisions.md`, README, `.env.example`.
-- No local full `./mvnw verify`: no Java or pom change; the PR's CI "Build and test" runs it.
-
-## User action (not code)
-Add `REDIS_PASSWORD=<openssl rand -hex 16>` to `.env` before the next `docker compose up`; compose refuses to start without it.
-The frontend team needs the same variable. Existing kind cluster: after `scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`.
+- `.github/workflows/smoke.yml`: daily 05:43 UTC + workflow_dispatch + PR label `run-smoke`; throwaway `.env`, `docker compose up -d --build --wait`,
+  `scripts/smoke-test.sh`, logs artifact, teardown. User chose this schedule (2026-10-08). `run-smoke` label created.
+- Proven on CI: 4 runs of the same code, 1 failed (rate-limit burst, cold runner), 3 passed 468/0/3. Burst counts now printed. KI-055 records the flake.
+- README "The smoke test in CI", KNOWN_ISSUES (KI-049 fixed, KI-055), `decisions.md` [Fix KI-049].
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-050-fixed`.
-Remaining gaps: KI-016..024, 031..036, 048, 049, 051, 054.
+STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-049-fixed`.
+The first daily run on `main` happens at 05:43 UTC; the workflow can also be started from the Actions tab.
+Remaining gaps: KI-016..024, 031..036, 048, 051, 054, 055.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

@@ -1,0 +1,105 @@
+# =============================================================================================
+# EcomDemo — end-to-end smoke test (KI-049)
+# =============================================================================================
+# `ci.yml` builds the code and runs the unit and integration tests. It never starts the system:
+# the compose stack, the images and scripts/smoke-test.sh (~480 checks across every service, Kafka,
+# Redis and the observability stack) were exercised only on a developer's machine. This workflow
+# runs them.
+#
+# It is deliberately NOT on every pull request. It builds all the images and starts ~22 containers,
+# which takes roughly three times as long as the `build` job, and #77 exists to keep PR runs short.
+# It runs:
+#   - every day (so a change that broke the stack is found within a day, and a newly published
+#     base-image or dependency problem shows up even when nobody pushed),
+#   - on demand (Actions > Smoke test > Run workflow),
+#   - on a pull request that carries the `run-smoke` label, and again on each push to it. Use it
+#     for a change that touches compose, k8s manifests, configuration, startup or the
+#     communication between services (the same cases as the workflow rules in CLAUDE.md).
+#
+# It is a separate file, not a job in ci.yml, on purpose: adding `labeled` to ci.yml's pull_request
+# types would make every label change start (and, through the shared concurrency group, CANCEL) the
+# build and the scans of the same PR.
+#
+# Not a required check, and it does not gate `publish`.
+
+name: Smoke test
+
+on:
+  pull_request:
+    branches: [main]
+    types: [labeled, synchronize, reopened]
+  schedule:
+    # 05:43 UTC: after the scans in ci.yml (04:43) and the NVD refresh (03:17).
+    - cron: '43 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per PR (a new push cancels the old one), and scheduled/manual runs in groups of their own.
+concurrency:
+  group: smoke-${{ github.workflow }}-${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.event_name || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  smoke:
+    name: Smoke test (compose)
+    # On a pull request only when it carries the label; the other events always run.
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-smoke')
+    runs-on: ubuntu-latest
+    # Image builds (~10 min) + startup + the script. Generous: a hang should end, not run for 6 hours.
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Write .env with generated secrets
+        # compose reads .env. Everything has a default except the secrets, which are generated for
+        # this run and never printed (::add-mask:: hides them even if a step echoed them).
+        run: |
+          redis_password="$(openssl rand -hex 16)"
+          signing_key="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 2>/dev/null \
+            | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 -w0)"
+          gateway_secret="$(openssl rand -hex 32)"
+          app_secret="$(openssl rand -hex 32)"
+          catalog_secret="$(openssl rand -hex 32)"
+          for value in "$redis_password" "$signing_key" "$gateway_secret" "$app_secret" "$catalog_secret"; do
+            echo "::add-mask::$value"
+          done
+          {
+            echo "REDIS_PASSWORD=$redis_password"
+            echo "JWT_SIGNING_KEY=$signing_key"
+            echo "GATEWAY_CLIENT_SECRET=$gateway_secret"
+            echo "APP_CLIENT_SECRET=$app_secret"
+            echo "CATALOG_CLIENT_SECRET=$catalog_secret"
+          } > .env
+
+      - name: Build the images and start the stack
+        # --wait returns when every service with a healthcheck is healthy, which is what the smoke
+        # test needs; its own readiness check then covers the rest.
+        run: docker compose up -d --build --wait --wait-timeout 900
+
+      - name: Run the smoke test
+        run: scripts/smoke-test.sh
+
+      - name: Collect the container logs
+        if: always()
+        run: |
+          docker compose ps -a > compose-ps.txt 2>&1 || true
+          docker compose logs --no-color --timestamps > compose-logs.txt 2>&1 || true
+
+      - name: Upload the logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smoke-logs
+          path: |
+            compose-ps.txt
+            compose-logs.txt
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v --remove-orphans
