@@ -5,27 +5,23 @@
 - **Updated:** 2026-10-08
 - **Fix:** KI-006, the gateway's `/actuator/prometheus` is public on port 8080 (route names, error rates, JVM details)
 - **Branch:** fix/ki-006-gateway-prometheus-internal (cut from `main` at `723563f`)
-- **Step:** BRANCHED
-- **PR:** none yet
-- **Waiting for user:** NO
+- **Step:** PR_OPEN
+- **PR:** TBD
+- **Waiting for user:** YES (review of the KI-006 PR)
 
 ## Merge verification of KI-005 (done 2026-10-08)
 PR #68 merged as `723563f`; tag `ki-005-fixed` exists on origin and is in `main`.
 
-## Plan
-Move the gateway's actuator to a separate management port (in-network only, never published, never routed), so the public
-port 8080 no longer answers `/actuator/*` at all. Prometheus scrapes the management port.
-
-## Checklist
-- [ ] Reproduce first: a test that fails because `/actuator/prometheus` answers 200 on the public port
-- [ ] Gateway `management.server.port`, security rule for prometheus removed
-- [ ] compose healthcheck + Prometheus target; k8s probes + scrape; Dockerfile HEALTHCHECK is shared (check)
-- [ ] smoke tests (compose + k8s) that read gateway health/metrics
-- [ ] Docs: `security.md` API8, `decisions.md` [KI-006], KNOWN_ISSUES row -> Fixed
-- [ ] Testing protocol (steps 1, 3, 4, 7, 8 + regression test)
+## Done
+- Gateway actuator on `management.server.port` 8088 (`GATEWAY_MANAGEMENT_PORT`); 8080 answers 401 under `/actuator`.
+- `EdgeSecurityIT`: both ports (seen failing before the fix: 200 on 8080). Compose healthcheck, Dockerfile HEALTHCHECK (by
+  module), Prometheus target, k8s probes on a `management` container port (not in the Service). Smoke "API gateway" section.
+- Docs: `security.md` API8, `decisions.md`, KNOWN_ISSUES (KI-006 fixed; KI-047 new: management port also proxies routes).
+- `./mvnw clean verify` exit 0; compose cold smoke 490/0/0; Prometheus target `gateway-service:8088` up. Not run: Kubernetes.
 
 ## Next action
-Write the failing test in `gateway-service` (`EdgeSecurityIT`), then implement. Still open: KI-007..011.
+STOP: wait for the user's review. After `approved, merge it`: wait for the required check, merge with `--merge`, verify (tip in
+`main`, CI on `main` incl. scans and publish), tag `ki-006-fixed`. Still open: KI-007..011, KI-047.
 `stash@{0}` (KI-045 noise) is the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
