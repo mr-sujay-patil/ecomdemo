@@ -3,25 +3,22 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-052, `InventoryService.reserve`/`release` have no production caller
-- **Branch:** fix/ki-052-remove-unused-inventory-reserve-release (cut from `main` at `33d6f1a`)
+- **Fix:** KI-053, HIGH CVE-2026-106451 in lz4-java 1.10.1 turns the image scan red (blocks PR #78 and publish)
+- **Branch:** fix/ki-053-lz4-java-cve (cut from `main` at `33d6f1a`)
 - **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-052 PR)
+- **Waiting for user:** YES (review of the KI-053 PR)
 
-## Merge verification of the previous units (done 2026-10-08)
-KI-011 PR #75 `f088fd4`, tag `ki-011-fixed`. Chore PRs #76 (workflow rules in CLAUDE.md) and #77 (CI: tests on PRs only) merged;
-first `main` run after #77: build skipped, scans green, publish succeeded.
+## Also open: PR #78 (KI-052, branch fix/ki-052-remove-unused-inventory-reserve-release)
+Approved by the user ("approved, merge it") but NOT merged: its Image scan is red because of this CVE (workflow rule 9).
+After KI-053 merges: update #78's branch from `main` (merge commit, no rewrite), wait for green, merge --merge, tag `ki-052-fixed`.
 
 ## Done
-- Removed `InventoryService.reserve`/`release`. Tests re-homed: `StockChangePublisherTest` calls `publish` directly (H2),
-  `ConcurrentReservationTest` races two orders through `reserveForOrder` (PostgreSQL), `InventorySagaTest` gained
-  "announces stock-changed". The five H2 `Reserving` cases in `InventoryServiceTest` were removed (the method is gone and
-  `reserveForOrder` needs PostgreSQL; covered by `InventorySagaTest`). KNOWN_ISSUES KI-052 Fixed, `decisions.md` [Fix KI-052].
-- `./mvnw -B verify` green. Smoke test skipped on purpose (workflow rule 5: no manifest/config/startup/inter-service change).
+- `lz4-java.version` 1.11.4 + a `dependencyManagement` entry in the parent pom (Boot does not manage it; kafka-clients brings it).
+  `dependency:tree` shows 1.11.4. KNOWN_ISSUES KI-053, `security.md`, `decisions.md` [Fix KI-053].
+- `./mvnw -B verify` green. The proof is the CI Image scan on this PR (it said `Total: 1 (HIGH: 1)` per affected image before).
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: merge --merge, verify it is in `main`, tag `ki-052-fixed`.
-No open defects remain after this; the rest of KNOWN_ISSUES is deferred gaps (KI-016..024, 031..036, 048..051).
+Wait for this PR's CI. Green: ask for approval. After `approved, merge it`: merge --merge, verify in `main`, tag `ki-053-fixed`, then #78 as above.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
