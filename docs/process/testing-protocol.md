@@ -4,6 +4,13 @@ Applies to every phase and every fix. A fix runs steps 1, 3, 4, 7 and 8 in full,
 
 A phase is **not done** until all of this passes on the feature branch before the PR is raised, and the regression and smoke test pass again on `main` after the merge.
 
+> **Refined by the workflow rules in `CLAUDE.md` ("Workflow rules to reduce cycle time"), which win where they differ:**
+> - Step 1 while iterating: build and test only the affected module (`./mvnw -pl <module> -am verify`); run the full `./mvnw -B verify` once, just before opening the PR. A change to the API used by `performance-tests` also needs `./mvnw -B -f performance-tests/pom.xml test-compile`.
+> - Steps 3 and 4 (run the application and the smoke test, on compose or the kind cluster): only when the change touches deployment manifests, configuration, startup, or communication between services. Otherwise skip them and say why in the PR description.
+> - When a smoke-test check fails, rebuild and roll out only the affected service and re-run the failing check; run the full smoke test once at the end. Rebuild and `kind load` only the images whose code changed.
+> - "After the merge" no longer means a second local run on `main`: see section 5 of `execution-protocol.md`.
+> - A PR is offered for approval only when its CI run is green. Commands expected to take more than a few minutes run in the background.
+
 1. **Full regression.** `./mvnw clean verify` runs **all** unit and integration tests from **every** phase so far. Zero failures, and no test is skipped or `@Disabled` without a documented reason.
 2. **Phase acceptance tests.** Every **Done when** item has an automated test or scripted check proving it.
 3. **Run the complete application** the way it runs at this phase: `./mvnw spring-boot:run` early on, `docker compose up` from Phase 10, and the local Kubernetes cluster from Phase 25. The app must start with no errors in the logs.

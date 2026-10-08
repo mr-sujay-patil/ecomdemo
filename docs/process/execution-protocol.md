@@ -68,7 +68,7 @@ If Git and `CURRENT.md` disagree, trust Git, report the mismatch, and ask the us
 ## 5. Merge verification
 
 1. Run Command Reference step 5 and the Verification Checklist in `git-workflow.md`.
-2. Re-run `./mvnw clean verify` and `scripts/smoke-test.sh` **on `main`** (from Phase 11 onwards, also confirm CI on `main` is green).
+2. Confirm the merge commit is on `origin/main` and that it contains the branch's last commit (the checklist above). **Do not re-run the tests on `main`**: branch protection requires a branch to be up to date before it merges, so the pull request's own CI run tested exactly the tree that landed, and a push to `main` no longer re-runs `Build and test` (`ci.yml`, #77). The run on `main` is the two scans and the image publish: wait for it only when the next task depends on the published image, or when the merged change touched dependencies or the build (a red scan there is a defect to fix first). The compose smoke test is not part of this step; it runs daily and on PRs labelled `run-smoke` (`smoke.yml`, KI-049).
 3. If everything passes, tag and push `phase-XX-complete` (for a fix: `ki-XXX-fixed`).
 4. If anything fails, **stop**, report exactly what is missing, and fix it through a follow-up PR from the same feature or fix branch. Never fix on `main`.
 
