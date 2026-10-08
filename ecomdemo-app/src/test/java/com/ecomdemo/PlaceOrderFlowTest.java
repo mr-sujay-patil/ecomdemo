@@ -1,10 +1,6 @@
 package com.ecomdemo;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -109,7 +105,6 @@ class PlaceOrderFlowTest {
         // Phase 24 checkout makes no request at all - it writes an OrderCreatedEvent carrying the
         // lines into the outbox, in this transaction, and inventory-service reserves them when it
         // reads it (InventorySagaTest). So the request is now a ROW, and the row is asserted.
-        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
         assertThat(jdbc.queryForObject(
                         "SELECT payload FROM outbox_event WHERE aggregate_id = ? AND event_type = 'OrderCreatedEvent'",
                         String.class,

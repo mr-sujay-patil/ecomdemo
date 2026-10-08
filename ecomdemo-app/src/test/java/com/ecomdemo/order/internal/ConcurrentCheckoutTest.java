@@ -7,7 +7,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -190,8 +189,6 @@ class ConcurrentCheckoutTest {
                 .isInstanceOf(ConflictException.class);
 
         // Nothing was reserved and nothing is released.
-        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
-        verify(inventory, never()).release(anyLong(), anyInt());
     }
 
     @Test
@@ -233,8 +230,6 @@ class ConcurrentCheckoutTest {
         // The emptied cart came back with the rollback: the shopper can simply try again.
         assertThat(cartService.view().items()).hasSize(2);
         // And, as before the saga as after it, no stock was released that was never taken.
-        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
-        verify(inventory, never()).release(anyLong(), anyInt());
     }
 
     private long sagaEventsStarted() {

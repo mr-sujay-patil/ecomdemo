@@ -19,7 +19,7 @@ import java.util.Map;
  * assertion about a mock returning zero.
  *
  * <p>This interface gives a third option: a test double that BEHAVES like inventory — create sets a
- * level, reserve reduces it, release puts it back — so those forty-six tests keep making the same
+ * level, a later read sees it — so those forty-six tests keep making the same
  * claims they always made, about the things they were actually written to check.
  *
  * <p><strong>What the double cannot prove</strong> is that {@link InventoryClient} speaks the
@@ -35,11 +35,6 @@ public interface InventoryGateway {
     Map<Long, Integer> quantitiesFor(Collection<Long> productIds);
 
     void requireAvailable(Long productId, String productName, int quantity);
-
-    void reserve(Long productId, String productName, int quantity);
-
-    /** The compensating half of the checkout saga. */
-    void release(Long productId, int quantity);
 
     void setStockLevel(Long productId, int quantity);
 

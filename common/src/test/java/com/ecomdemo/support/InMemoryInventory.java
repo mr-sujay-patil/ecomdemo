@@ -68,7 +68,6 @@ public class InMemoryInventory implements InventoryGateway {
      * PostgreSQL. What this provides is enough consistency that a concurrent test here fails for
      * the reason it is testing rather than for a lost update in the double.
      */
-    @Override
     public void reserve(Long productId, String productName, int quantity) {
         quantities.compute(productId, (id, current) -> {
             int available = current == null ? 0 : current;
@@ -79,7 +78,6 @@ public class InMemoryInventory implements InventoryGateway {
         });
     }
 
-    @Override
     public void release(Long productId, int quantity) {
         quantities.merge(productId, quantity, Integer::sum);
     }

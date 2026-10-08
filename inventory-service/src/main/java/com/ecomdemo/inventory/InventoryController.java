@@ -2,7 +2,6 @@ package com.ecomdemo.inventory;
 
 import com.ecomdemo.inventory.dto.StockLevelRequest;
 import com.ecomdemo.inventory.dto.StockResponse;
-import com.ecomdemo.inventory.dto.UnitsRequest;
 import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
@@ -29,12 +28,10 @@ import org.springframework.web.bind.annotation.RestController;
  * while it was still a method call precisely so this endpoint could exist rather than be wished
  * for later.
  *
- * <h2>Reserve and release are a pair, and the pairing is the whole design</h2>
+ * <h2>There is no reserve or release here</h2>
  *
- * <p>Reserving used to be {@code MANDATORY}-transactional inside the caller's transaction, so a
- * failed checkout un-reserved automatically. Over HTTP that is impossible, so the caller
- * compensates: it reserves, and if its own transaction rolls back it releases. See
- * {@code InventoryService#release} for why the two are deliberately not symmetric.
+ * <p>Stock is taken and given back by the saga, from {@code orders.created} and the close
+ * endpoint below, never by a caller over HTTP (KI-011 removed the old pair).
  *
  * <h2>Everything needs a token</h2>
  *
@@ -96,27 +93,6 @@ class InventoryController {
     @PutMapping("/{productId}")
     StockResponse setLevel(@PathVariable Long productId, @Valid @RequestBody StockLevelRequest request) {
         inventory.setStockLevel(productId, request.quantity());
-        return new StockResponse(productId, inventory.quantityFor(productId));
-    }
-
-    /**
-     * Takes units out. Answers 409 through {@code InsufficientStockException} when there are not
-     * enough, which is the same status and the same message a shopper saw when this was a method
-     * call — the split is not supposed to be visible from the outside.
-     */
-    @PostMapping("/{productId}/reserve")
-    StockResponse reserve(@PathVariable Long productId, @Valid @RequestBody UnitsRequest request) {
-        inventory.reserve(productId, request.productName(), request.units());
-        return new StockResponse(productId, inventory.quantityFor(productId));
-    }
-
-    /**
-     * Puts units back. The compensating half of the saga, called when the caller's transaction
-     * rolled back after a successful reserve.
-     */
-    @PostMapping("/{productId}/release")
-    StockResponse release(@PathVariable Long productId, @Valid @RequestBody UnitsRequest request) {
-        inventory.release(productId, request.units());
         return new StockResponse(productId, inventory.quantityFor(productId));
     }
 

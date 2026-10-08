@@ -11,8 +11,6 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.Map;
 import java.util.function.Supplier;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.web.client.HttpServerErrorException;
 import org.springframework.web.client.ResourceAccessException;
 
@@ -29,21 +27,15 @@ import org.springframework.web.client.ResourceAccessException;
  * <h2>What differs from the catalogue</h2>
  *
  * <ul>
- *   <li><strong>Only reads are retried.</strong> {@code reserve}, {@code setStockLevel} and
- *       {@code forget} fail fast. A reservation that timed out may already have taken the stock, and
- *       asking twice would take it twice.</li>
- *   <li><strong>{@link #release} never throws</strong>, exactly like the client it wraps: it runs on
- *       a rollback path, where a second exception would hide the first. If the breaker or bulkhead
- *       refuses it, the stock stays reserved and that is logged as loudly as the client logs its own
- *       failures. Phase 32's reconciler is what eventually gives such stock back.</li>
- *   <li><strong>A 409 from {@code reserve} is not an outage.</strong> The client turns it into
+ *   <li><strong>Only reads are retried.</strong> {@code setStockLevel} and {@code forget} fail
+ *       fast: a write that timed out may already have happened.</li>
+ *   <li><strong>A 409 from the pre-check is not an outage.</strong> The client turns it into
  *       {@code InsufficientStockException} before it gets here; it is neither recorded as a failure
  *       nor translated, and the shopper still sees "only 3 left".</li>
  * </ul>
  */
 class ResilientInventory implements InventoryGateway {
 
-    private static final Logger log = LoggerFactory.getLogger(ResilientInventory.class);
 
     private static final Duration BUSY_RETRY_AFTER = Duration.ofSeconds(1);
 
@@ -75,30 +67,6 @@ class ResilientInventory implements InventoryGateway {
             delegate.requireAvailable(productId, productName, quantity);
             return null;
         });
-    }
-
-    @Override
-    public void reserve(Long productId, String productName, int quantity) {
-        write(() -> {
-            delegate.reserve(productId, productName, quantity);
-            return null;
-        });
-    }
-
-    @Override
-    public void release(Long productId, int quantity) {
-        try {
-            write(() -> {
-                delegate.release(productId, quantity);
-                return null;
-            });
-        } catch (ServiceUnavailableException e) {
-            log.error(
-                    "Could not release {} unit(s) of product {} after a failed checkout: inventory-service "
-                            + "is unavailable ({}). That stock is now reserved for an order that does not "
-                            + "exist and will stay that way until it is reconciled.",
-                    quantity, productId, e.getMessage());
-        }
     }
 
     @Override

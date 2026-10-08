@@ -23,7 +23,7 @@ public class InMemoryInventoryConfig {
 
     @Bean
     @Primary
-    InventoryGateway inMemoryInventory() {
+    InMemoryInventory inMemoryInventory() {
         return new InMemoryInventory();
     }
 }

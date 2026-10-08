@@ -81,18 +81,31 @@ class InventorySecurityTest {
         mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
                 .andExpect(status().isOk());
 
-        // A write too, because the chain could conceivably admit a GET and reject a POST — and
-        // because a reservation is the call whose failure would break checkout rather than a
-        // listing.
-        mvc.perform(post("/api/inventory/1/reserve")
+        // A write too, because the chain could conceivably admit a GET and reject a PUT.
+        mvc.perform(put("/api/inventory/1")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"units\":1,\"productName\":\"Anything\"}"))
-                // The reservation has no stock to take, so it fails — on BUSINESS grounds, which
-                // is exactly the point. A 409 means the request got through the filter chain and
-                // was understood; 401 or 403 would mean it never arrived. What the stock rules
-                // then decide belongs to the tests that own them.
-                .andExpect(status().isConflict());
+                        .content("{\"quantity\":5}"))
+                // Anything but 401 or 403 means the request got through the filter chain.
+                .andExpect(status().is2xxSuccessful());
+    }
+
+    /**
+     * KI-011: checkout stopped calling these in Phase 24 (the saga reserves from the event) and
+     * the endpoints were removed. A caller that still tries gets a 404, not a quiet stock change.
+     */
+    @Test
+    @DisplayName("the old HTTP reserve and release endpoints are gone (KI-011)")
+    void reserveAndReleaseAreGone() throws Exception {
+        String token = TestJwt.service("ecomdemo-app", ServiceTokens.INVENTORY_READ, ServiceTokens.INVENTORY_WRITE);
+
+        for (String action : new String[] {"reserve", "release"}) {
+            mvc.perform(post("/api/inventory/1/" + action)
+                            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"units\":1,\"productName\":\"Anything\"}"))
+                    .andExpect(status().isNotFound());
+        }
     }
 
     /**
@@ -107,10 +120,10 @@ class InventorySecurityTest {
 
         mvc.perform(get("/api/inventory/1").header(HttpHeaders.AUTHORIZATION, "Bearer " + readOnly))
                 .andExpect(status().isOk());
-        mvc.perform(post("/api/inventory/1/reserve")
+        mvc.perform(put("/api/inventory/1")
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + readOnly)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"units\":1,\"productName\":\"Anything\"}"))
+                        .content("{\"quantity\":5}"))
                 .andExpect(status().isForbidden());
     }
 
@@ -127,7 +140,7 @@ class InventorySecurityTest {
      * The Phase 31 regression. A CUSTOMER's token is perfectly valid - signed by us, not expired -
      * and until the security review that was all this chain asked for, so a shopper who reached
      * this port directly could set stock levels. No shopper has a reason to call this service at
-     * all, so every path refuses them: reads, the admin write and the saga's reservation alike.
+     * all, so every path refuses them: reads, the admin write and the order close alike.
      */
     @Test
     @DisplayName("a CUSTOMER's valid token is refused on every path (Phase 31, OWASP API5)")
@@ -140,11 +153,6 @@ class InventorySecurityTest {
                         .header(HttpHeaders.AUTHORIZATION, "Bearer " + customer)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"quantity\":1000}"))
-                .andExpect(status().isForbidden());
-        mvc.perform(post("/api/inventory/1/reserve")
-                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + customer)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"units\":1,\"productName\":\"Anything\"}"))
                 .andExpect(status().isForbidden());
 
         // Phase 32: closing an order releases its stock, so a shopper must not be able to do it.

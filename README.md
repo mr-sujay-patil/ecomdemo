@@ -339,7 +339,7 @@ ecomdemo/
 ├── inventory-service/       # A SEPARATE DEPLOYABLE (Phase 20b). Owns stock and nothing else.
 │   └── src/main/java/com/ecomdemo/inventory/
 │       ├── InventoryService, ProductStock, ProductStockRepository
-│       ├── InventoryController      # /api/inventory: read, set level, reserve, release, forget
+│       ├── InventoryController      # /api/inventory: read, set level, close order, forget
 │       ├── SecurityConfig           # its own filter chain; a token is required for every path
 │       ├── StockChangePublisher     # publishes `inventory.stock-changed`
 │       └── db/migration/            # its OWN Flyway history, starting again at V1
