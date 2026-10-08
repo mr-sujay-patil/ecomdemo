@@ -1,6 +1,5 @@
 package com.ecomdemo.support;
 
-import com.ecomdemo.clients.inventory.InventoryGateway;
 import com.ecomdemo.messaging.KafkaTopics;
 import com.ecomdemo.messaging.OrderCreatedEvent;
 import com.ecomdemo.order.internal.saga.PaymentCompletedEvent;
@@ -107,23 +106,23 @@ public class FakeSagaParticipants {
     static final Set<Long> CLOSED = ConcurrentHashMap.newKeySet();
 
     @Bean
-    Participants fakeSagaParticipants(InventoryGateway inventory, KafkaTemplate<String, Object> kafka) {
+    Participants fakeSagaParticipants(InMemoryInventory inventory, KafkaTemplate<String, Object> kafka) {
         return new Participants(inventory, kafka);
     }
 
     @Bean
     @Primary
-    Settlement fakeSettlement(InventoryGateway inventory) {
+    Settlement fakeSettlement(InMemoryInventory inventory) {
         return new Settlement(inventory);
     }
 
     /** The listener itself; a bean so that {@code @KafkaListener} is picked up. */
     public static class Participants {
 
-        private final InventoryGateway inventory;
+        private final InMemoryInventory inventory;
         private final KafkaTemplate<String, Object> kafka;
 
-        Participants(InventoryGateway inventory, KafkaTemplate<String, Object> kafka) {
+        Participants(InMemoryInventory inventory, KafkaTemplate<String, Object> kafka) {
             this.inventory = inventory;
             this.kafka = kafka;
         }
@@ -211,7 +210,7 @@ public class FakeSagaParticipants {
     }
 
     /** Gives back whatever an order holds, once. */
-    static synchronized void releaseAll(Long orderId, InventoryGateway inventory) {
+    static synchronized void releaseAll(Long orderId, InMemoryInventory inventory) {
         List<OrderCreatedEvent.Line> held = RESERVED.remove(orderId);
         if (held != null) {
             held.forEach(line -> inventory.release(line.productId(), line.quantity()));
@@ -221,9 +220,9 @@ public class FakeSagaParticipants {
     /** payment-service's settlement and inventory-service's close, as the saga deadline sees them. */
     public static class Settlement implements SagaParticipants {
 
-        private final InventoryGateway inventory;
+        private final InMemoryInventory inventory;
 
-        Settlement(InventoryGateway inventory) {
+        Settlement(InMemoryInventory inventory) {
             this.inventory = inventory;
         }
 

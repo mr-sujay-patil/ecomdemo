@@ -1,7 +1,6 @@
 package com.ecomdemo.resilience;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -129,22 +128,7 @@ class ResilientInventoryTest {
     class Writes {
 
         @Test
-        @DisplayName("a reservation is never retried: one that timed out may already have taken the stock")
-        void reserveIsNotRetried() {
-            doThrow(new ResourceAccessException("Read timed out"))
-                    .when(http)
-                    .reserve(anyLong(), anyString(), anyInt());
-
-            context.run(ctx -> {
-                assertThatThrownBy(() -> inventory(ctx).reserve(1L, "Keyboard", 1))
-                        .isInstanceOf(ServiceUnavailableException.class);
-
-                verify(http, times(1)).reserve(1L, "Keyboard", 1);
-            });
-        }
-
-        @Test
-        @DisplayName("setStockLevel and forget fail fast too")
+        @DisplayName("setStockLevel and forget are never retried: a write that timed out may already have happened")
         void otherWritesAreNotRetried() {
             doThrow(new ResourceAccessException("Read timed out")).when(http).setStockLevel(anyLong(), anyInt());
             doThrow(new ResourceAccessException("Read timed out")).when(http).forget(anyLong());
@@ -159,20 +143,6 @@ class ResilientInventoryTest {
             });
         }
 
-        @Test
-        @DisplayName("release never throws, even with the breaker open: it runs on a rollback path")
-        void releaseNeverThrows() {
-            when(http.quantityFor(anyLong())).thenThrow(new ResourceAccessException("Connection refused"));
-
-            context.run(ctx -> {
-                openTheBreaker(ctx);
-                clearInvocations(http);
-
-                assertThatCode(() -> inventory(ctx).release(1L, 2)).doesNotThrowAnyException();
-
-                verifyNoInteractions(http);
-            });
-        }
     }
 
     @Nested
@@ -202,15 +172,15 @@ class ResilientInventoryTest {
         }
 
         @Test
-        @DisplayName("a reservation is refused at once while it is open: checkout fails fast, it does not hang")
-        void reserveIsRefusedWhileOpen() {
+        @DisplayName("a write is refused at once while it is open: the caller fails fast, it does not hang")
+        void writesAreRefusedWhileOpen() {
             when(http.quantityFor(anyLong())).thenThrow(new ResourceAccessException("Connection refused"));
 
             context.run(ctx -> {
                 openTheBreaker(ctx);
                 clearInvocations(http);
 
-                assertThatThrownBy(() -> inventory(ctx).reserve(1L, "Keyboard", 1))
+                assertThatThrownBy(() -> inventory(ctx).setStockLevel(1L, 5))
                         .isInstanceOf(ServiceUnavailableException.class);
 
                 verifyNoInteractions(http);

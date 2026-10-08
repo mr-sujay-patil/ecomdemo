@@ -8,9 +8,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doNothing;
@@ -167,8 +164,6 @@ class OrderPlacementServiceTest {
                 new OrderCreatedEvent.Line(10L, "Lamp", 2),
                 new OrderCreatedEvent.Line(11L, "Cable", 3));
         assertThat(created.getValue().totalAmount()).isEqualByComparingTo("3301.50");
-        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
-        verify(inventory, never()).release(anyLong(), anyInt());
         verify(cartService).clearCart(cart);
     }
 
@@ -251,7 +246,6 @@ class OrderPlacementServiceTest {
         // The point of the test, restated for the saga: a short cart is refused before anything is
         // written - no order, and no OrderCreatedEvent, so inventory never hears of it and
         // reserves nothing for it.
-        verify(inventory, never()).reserve(anyLong(), anyString(), anyInt());
         verify(orderRepository, never()).save(any());
         verifyNoInteractions(outbox);
     }

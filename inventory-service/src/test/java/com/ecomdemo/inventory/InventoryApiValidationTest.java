@@ -2,7 +2,6 @@ package com.ecomdemo.inventory;
 
 import com.ecomdemo.jwt.ServiceTokens;
 import com.ecomdemo.support.TestJwt;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -53,25 +52,6 @@ class InventoryApiValidationTest {
     @BeforeEach
     void mintACallerToken() {
         token = TestJwt.service("ecomdemo-app", ServiceTokens.INVENTORY_READ, ServiceTokens.INVENTORY_WRITE);
-    }
-
-    @Test
-    @DisplayName("a reservation with no units is a 400, not a 500")
-    void rejectsAReservationMissingItsUnits() throws Exception {
-        perform(post("/api/inventory/1/reserve"), "{\"productName\":\"Anything\"}")
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("a reservation of zero units is a 400")
-    void rejectsAReservationOfNothing() throws Exception {
-        perform(post("/api/inventory/1/reserve"), "{\"units\":0}").andExpect(status().isBadRequest());
-    }
-
-    @Test
-    @DisplayName("a release with no units is a 400, not a 500")
-    void rejectsAReleaseMissingItsUnits() throws Exception {
-        perform(post("/api/inventory/1/release"), "{}").andExpect(status().isBadRequest());
     }
 
     @Test

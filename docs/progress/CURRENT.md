@@ -3,31 +3,29 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-010, notification-service keeps its own copy of the idempotent-consumer code
-- **Branch:** fix/ki-010-notification-processed-events (cut from `main` at `b3ed529`)
+- **Fix:** KI-011, dead `reserve`/`release` in the inventory gateway and inventory-service's HTTP API
+- **Branch:** fix/ki-011-remove-dead-reserve-release (cut from `main` at `99fc130`)
 - **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-010 PR)
+- **Waiting for user:** YES (review of the KI-011 PR)
 
-## Merge verification of KI-009 (done 2026-10-08)
-PR #73 merged as `b3ed529`; CI on `main` green; tag `ki-009-fixed`.
+## Merge verification of KI-010 (done 2026-10-08)
+PR #74 merged as `99fc130`; CI on `main` green; tag `ki-010-fixed`.
 
 ## Done
-- User chose "adopt @EnableOutbox" (2026-10-08). notification-service now depends on `ecomdemo-outbox`, has `@EnableOutbox`,
-  an empty `OutboxRoutes` bean (`OutboxWiring`), and `V2__outbox_event.sql` (always-empty table).
-- Deleted its `EventDeduplicator`, `ProcessedEvent`, `ProcessedEventRepository`, `EventDeduplicatorTest`
-  (`ProcessedEventsTest` in the library covers the same behaviour); `NotificationService` uses `ProcessedEvents`.
-- Docs: KNOWN_ISSUES KI-010 Fixed, `decisions.md` [Fix KI-010], `saga.md` gaps list.
-- `./mvnw clean verify`: BUILD SUCCESS, 0 failures (notification-service: 6 unit + 5 IT).
+- Removed `reserve`/`release` from `InventoryGateway`, `InventoryClient`, `ResilientInventory`, and the two inventory-service
+  endpoints + `UnitsRequest`. Regression test `InventorySecurityTest.reserveAndReleaseAreGone` (404; seen failing with 409 on the old controller).
+- Removed tests of the removed behaviour (ResilientInventoryTest reserve/release cases, 3 reserve/release validation tests,
+  `never().reserve/release` assertions); security tests moved to the remaining `PUT /api/inventory/{id}` write.
+- KI-052 added: `InventoryService.reserve/release` still exist, test-only. `decisions.md` [Fix KI-011]; README and `saga.md` updated.
+- `./mvnw clean verify` green; `scripts/k8s-smoke.sh` on kind: 446 passed, 0 failed, 7 skipped.
 
-## Verified (2026-10-08)
-- Steps 3-4 ran on the kind cluster (the frontend team's compose stack was left alone): only the notification image was
-  rebuilt/loaded and the deployment restarted. New pod applied V2, started in 5 s, 0 ERROR lines.
-  `scripts/k8s-smoke.sh`: 446 passed, 0 failed, 7 skipped (compose-only checks).
-- Side effect: `docker compose build notification-service` retagged the local `ecomdemo-notification:latest`.
+## Pending request from the user (2026-10-08)
+Document the backend changes since `phase-34-complete` for the frontend team and tell them to point to `main`.
+Draft is in the job tmp dir (`frontend-changes.md`); commit it on a `chore/` branch AFTER this PR merges (one open PR at a time).
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-010-fixed`.
-Still open: KI-011.
+STOP: wait for review. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-011-fixed`. Then the chore branch above.
+Still open: KI-052.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
