@@ -2,35 +2,36 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-10-06
-- **Fix:** KI-002, two outbox relays double-publish (catalog-service runs 2-4 pods)
-- **Branch:** fix/ki-002-outbox-relay-lock (cut from `main` at `adf6f72`)
+- **Updated:** 2026-10-08
+- **Fix:** KI-003, compose published every port on all interfaces (databases with default passwords, Redis, Kafka)
+- **Branch:** fix/ki-003-compose-loopback-ports (cut from `main` at `091cabe`)
 - **Step:** PR_OPEN
-- **PR:** #65 https://github.com/mr-sujay-patil/ecomdemo/pull/65
-- **Waiting for user:** YES (review of PR #65)
+- **PR:** #66 https://github.com/mr-sujay-patil/ecomdemo/pull/66
+- **Waiting for user:** YES (review of PR #66)
 
-## Merge verification of KI-044 (done 2026-10-06)
-PR #64 merged as `adf6f72`; CI on `main` all green incl. publish; tag `ki-044-fixed`. The first SCHEDULED run
-(04:43 UTC) is still to be checked: `gh run list --workflow ci.yml --event schedule`.
+## Merge verification of KI-002 (done 2026-10-06)
+PR #65 merged as `091cabe`; CI on `main` all green incl. publish; cold compose smoke on `main` 480/0/0 (also closes
+KI-040's owed cold run); tag `ki-002-fixed`. The daily scan (KI-044) has fired: 2026-10-07 11:21 UTC, success.
 
 ## Done
-- Advisory lock (`pg_try_advisory_xact_lock`, `OutboxEventRepository.RELAY_LOCK_KEY`) at the start of each batch in
-  `OutboxBatchPublisher`; chosen over SKIP LOCKED because disjoint rows let two relays reorder one order's events.
-- Tests: `OutboxBatchPublisherTest.yieldsToAnotherRelay`, `OutboxRelayLockIT` (seen failing without the fix; its first
-  version was flawed: Awaitility polls on another thread, use `pollInSameThread()`).
-- `./mvnw clean verify` exit 0. kind smoke 436/0/7. Burst of 80 creates over 3 autoscaled pods: 80 messages, 80 distinct.
-  History before the fix: 328 extra copies in 1,136 messages on `catalog.product-changed`.
-- Not run: compose smoke (frontend team's stack was up). Consumers audited for duplicates (in the PR).
-- I started the stopped kind control plane to test, then stopped it again (`docker stop ecomdemo-control-plane`).
+- All 23 mappings are `${BIND_ADDRESS:-127.0.0.1}:<host>:<container>` (`compose.yaml` 22, `compose.sonar.yaml` 1);
+  `BIND_ADDRESS=0.0.0.0` in `.env` is the opt-out. Chosen over "publish only gateway/Grafana/Prometheus".
+- Tests, seen failing first: `scripts/test-compose-ports.sh` (static) and the smoke test's "Published ports" section (live).
+- Live: LAN address 172.25.188.147 refused on every probed port, loopback open; Redis with the opt-out was open on the
+  LAN address (contrast); Windows `powershell.exe` reaches `localhost:8080`.
+- `./mvnw clean verify` exit 0; smoke 482/0/0; `scripts/test-smoke-guard.sh` passes. Not run: Kubernetes (untouched).
+- My compose stack is stopped (`docker compose down`, volumes kept).
 
 ## Next action
-STOP: wait for the user's review of PR #65. After `approved, merge it`: verify the merge (tip in `main`, CI on `main`
-incl. scans and publish), a cold compose smoke if no foreign stack is up (also owed for KI-040), tag `ki-002-fixed`.
-Still open: KI-003..011. `stash@{0}` (KI-045 noise) is obsolete; the user's to drop.
+STOP: wait for the user's review of PR #66. After `approved, merge it`: verify the merge (tip in `main`, CI on `main`
+incl. scans and publish), tag `ki-003-fixed`. A cold compose smoke on `main` is optional (config-only change, run on this
+tree already); do it if no foreign stack is up.
+Still open: KI-004..011. `stash@{0}` (KI-045 noise) is obsolete; the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
   uses the SAME container names and ports (and has its own `ecomdemo-backend-readonly_kafka-data` volume: never touch it). kind does not conflict.
+- compose ports are loopback-only now; probe from the LAN address (`hostname -I`) to check exposure.
 - kind: `docker start ecomdemo-control-plane` revives the cluster; `scripts/k8s-up.sh` loads images but does NOT restart
   pods: `kubectl -n ecomdemo rollout restart deploy` after it, or the pods keep the old code.
 - Never edit `scripts/smoke-test.sh` while it runs; run a copy placed inside `scripts/` and delete it after. Never print `.env`.
