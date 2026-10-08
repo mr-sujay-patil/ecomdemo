@@ -3515,6 +3515,16 @@ Every pull request is built and tested by [`.github/workflows/ci.yml`](.github/w
 before it can be merged, and every merge to `main` publishes an image. **A PR may be merged only
 when CI is green.**
 
+### The smoke test in CI (KI-049)
+
+`ci.yml` never starts the system. [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml) does: it
+writes a throwaway `.env` with generated secrets, runs `docker compose up -d --build --wait`, runs
+`scripts/smoke-test.sh` against the stack and uploads the container logs. It takes about 8 minutes, so it
+is not on every pull request. It runs **daily** (05:43 UTC), **on demand** (Actions > Smoke test > Run
+workflow), and on a **pull request that carries the `run-smoke` label** (again on every push to it). Put
+the label on a change that touches compose, the k8s manifests, configuration, startup or the
+communication between services. It is not a required check and does not gate `publish`.
+
 ### CI, and the CD this project does not have
 
 **Continuous Integration** is the "build and test every change, automatically" half: catch a
