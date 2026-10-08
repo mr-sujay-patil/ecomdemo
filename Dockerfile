@@ -185,8 +185,15 @@ ENV JAVA_OPTS="-XX:MaxRAMPercentage=50.0 -XX:+ExitOnOutOfMemoryError"
 # needs no JSON parsing.
 #
 # Phase 14 and earlier probed /api/products instead, because Actuator did not exist yet.
+#
+# KI-006: the gateway serves its actuator on a management port (8088), not on 8080, which answers
+# nothing under /actuator. The check below picks the port by module, so `docker run` of any image
+# reports its own health correctly; compose and Kubernetes carry their own checks for the gateway.
+ARG MODULE
+ENV ECOMDEMO_MODULE=${MODULE}
 HEALTHCHECK --interval=10s --timeout=3s --start-period=40s --retries=5 \
-    CMD wget -q -O /dev/null http://localhost:8080/actuator/health/readiness || exit 1
+    CMD port=8080; [ "$ECOMDEMO_MODULE" = "gateway-service" ] && port=8088; \
+        wget -q -O /dev/null "http://localhost:${port}/actuator/health/readiness" || exit 1
 
 # `sh -c` so $JAVA_OPTS is expanded; exec so the JVM becomes PID 1 and receives SIGTERM directly,
 # which is what lets `docker compose down` shut Spring down gracefully instead of killing it

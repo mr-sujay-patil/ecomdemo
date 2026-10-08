@@ -284,8 +284,14 @@ internal paths with the product name or order id as a *parameter*, never as a UR
   `BIND_ADDRESS=0.0.0.0` the same port was open. `scripts/test-compose-ports.sh` renders the
   compose files and the smoke test's **Published ports** section reads what Docker actually bound.
   Opting out is one variable and is on purpose.
-- ⚠️ **The gateway's `/actuator/prometheus` is public.** Metrics reveal route names, error rates
-  and JVM details. Recommended: scrape it on an internal port, or require a token.
+- ✅ **The gateway's actuator is on a management port (KI-006).** `/actuator/prometheus` used to be
+  open on the port every client uses, revealing route names, error rates and JVM details. It, health
+  and info now live on `management.server.port` (8088), which compose does not publish and the
+  Ingress does not route; `GET /actuator/prometheus` or `/actuator/health` on 8080 answers 401.
+  Prometheus, the compose healthcheck and the Kubernetes probes use 8088 in-network. Anything beyond
+  health, info and prometheus still needs ADMIN there. Verified by `EdgeSecurityIT` (both ports) and
+  the smoke test's **API gateway** section, which reads 8088 from inside the container and checks
+  that Docker does not publish it. Residual: see KI-047.
 - ✅ **CSRF off** is deliberate. The API uses bearer tokens, not cookies, so a browser can't be
   tricked into sending credentials. The README's security section explains it.
 - ✅ **CORS:** an explicit origin list, methods and headers, and no credentials. Since KI-041 the

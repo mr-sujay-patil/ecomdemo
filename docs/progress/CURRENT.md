@@ -3,27 +3,26 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-005, no load shedding at checkout (requests wait 10 s for a DB connection instead of a fast 503 + `Retry-After`)
-- **Branch:** fix/ki-005-checkout-load-shedding (cut from `main` at `4ce3159`)
+- **Fix:** KI-006, the gateway's `/actuator/prometheus` is public on port 8080 (route names, error rates, JVM details)
+- **Branch:** fix/ki-006-gateway-prometheus-internal (cut from `main` at `723563f`)
 - **Step:** PR_OPEN
-- **PR:** #68 https://github.com/mr-sujay-patil/ecomdemo/pull/68
-- **Waiting for user:** YES (review of the KI-005 PR)
+- **PR:** #69 https://github.com/mr-sujay-patil/ecomdemo/pull/69
+- **Waiting for user:** YES (review of the KI-006 PR)
 
-## Merge verification of KI-004 (done 2026-10-08)
-PR #67 merged as `4ce3159`; branch ancestor of `main`, diff empty, `./mvnw clean verify` exit 0, CI on `main` green incl. scans
-and publish; tag `ki-004-fixed`; cold compose smoke on `main` 484/0/0.
+## Merge verification of KI-005 (done 2026-10-08)
+PR #68 merged as `723563f`; tag `ki-005-fixed` exists on origin and is in `main`.
 
 ## Done
-- `OrderService.place()` takes a permit from bulkhead `checkout` (8 concurrent, no wait); otherwise 503 + `Retry-After: 1`,
-  outcome `shed` (new `CheckoutOutcome.SHED`), nothing written. `resilience4j.bulkhead.instances.checkout.*` in app properties.
-- `CheckoutLoadSheddingTest` reads the shipped limit; seen failing with the check removed. `OrderServiceTest` given a registry.
-- Docs: `security.md`, `performance.md`, `decisions.md`, KNOWN_ISSUES row.
-- `./mvnw clean verify` exit 0; compose smoke on this tree 484/0/0. Not run: Kubernetes; the Phase 30 spike against the new limit.
+- Gateway actuator on `management.server.port` 8088 (`GATEWAY_MANAGEMENT_PORT`); 8080 answers 401 under `/actuator`.
+- `EdgeSecurityIT`: both ports (seen failing before the fix: 200 on 8080). Compose healthcheck, Dockerfile HEALTHCHECK (by
+  module), Prometheus target, k8s probes on a `management` container port (not in the Service). Smoke "API gateway" section.
+- Docs: `security.md` API8, `decisions.md`, KNOWN_ISSUES (KI-006 fixed; KI-047 new: management port also proxies routes).
+- `./mvnw clean verify` exit 0; compose cold smoke 490/0/0; Prometheus target `gateway-service:8088` up. Not run: Kubernetes.
 
 ## Next action
 STOP: wait for the user's review. After `approved, merge it`: wait for the required check, merge with `--merge`, verify (tip in
-`main`, CI on `main` incl. scans and publish), tag `ki-005-fixed`. Suggested, not built: re-run the Phase 30 spike to measure
-the limit of 8; a Grafana panel for `shed`. Still open: KI-006..011. `stash@{0}` (KI-045 noise) is the user's to drop.
+`main`, CI on `main` incl. scans and publish), tag `ki-006-fixed`. Still open: KI-007..011, KI-047.
+`stash@{0}` (KI-045 noise) is the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
