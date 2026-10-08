@@ -36,7 +36,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-003 | compose publishes every port on all interfaces: 6 PostgreSQL databases (default passwords), Redis and Kafka (no auth) | Medium | Phase 10 | `security.md` API8 | Fixed (PR #66) |
 | KI-004 | No timeouts or circuit breaker on the app's inventory calls or on the gateway's `/api/products` route | Medium | Phase 22 | `security.md` API4, API10 | Fixed (PR #67) |
 | KI-005 | No load shedding at checkout: under overload, requests wait 10 s for a connection instead of failing fast with 503 + `Retry-After` | Medium | Phase 30 | `security.md` API4, `performance.md` | Fixed (PR #68) |
-| KI-006 | The gateway's `/actuator/prometheus` is public, and reveals route names, error rates and JVM details | Low | Phase 21 | `security.md` API8 | Fixed (PR #TBD) |
+| KI-006 | The gateway's `/actuator/prometheus` is public, and reveals route names, error rates and JVM details | Low | Phase 21 | `security.md` API8 | Fixed (PR #69) |
 | KI-007 | `GET /api/products` returns the whole catalogue, unpaginated | Low | Phase 1 | `security.md` API4 | Open |
 | KI-008 | Nothing prunes `processed_event`, which grows forever (its index already exists) | Low | Phase 17 | `architecture/saga.md` | Open |
 | KI-009 | The README's "Known gaps (closed by later phases)" sections are stale: some items are closed, some still open, and the heading says all are closed. Replace them with a link to this file | Low | n/a | `README.md:3989` | Open |

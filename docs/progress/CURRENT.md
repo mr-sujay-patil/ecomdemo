@@ -6,7 +6,7 @@
 - **Fix:** KI-006, the gateway's `/actuator/prometheus` is public on port 8080 (route names, error rates, JVM details)
 - **Branch:** fix/ki-006-gateway-prometheus-internal (cut from `main` at `723563f`)
 - **Step:** PR_OPEN
-- **PR:** TBD
+- **PR:** #69 https://github.com/mr-sujay-patil/ecomdemo/pull/69
 - **Waiting for user:** YES (review of the KI-006 PR)
 
 ## Merge verification of KI-005 (done 2026-10-08)
