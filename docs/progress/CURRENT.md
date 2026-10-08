@@ -3,22 +3,28 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-053, HIGH CVE-2026-106451 in lz4-java 1.10.1 turns the image scan red (blocks PR #78 and publish)
-- **Branch:** fix/ki-053-lz4-java-cve (cut from `main` at `33d6f1a`)
+- **Fix:** KI-050, Redis has no password (the no-replica half is split out as KI-054)
+- **Branch:** fix/ki-050-redis-password (cut from `main` at `3c7ecf5`)
 - **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-053 PR)
+- **Waiting for user:** YES (review of the KI-050 PR; also see "User action" below)
 
-## Also open: PR #78 (KI-052, branch fix/ki-052-remove-unused-inventory-reserve-release)
-Approved by the user ("approved, merge it") but NOT merged: its Image scan is red because of this CVE (workflow rule 9).
-After KI-053 merges: update #78's branch from `main` (merge commit, no rewrite), wait for green, merge --merge, tag `ki-052-fixed`.
+## Merge verification of the previous units (done 2026-10-08)
+KI-052 (#78, tag `ki-052-fixed`) and KI-053 (#79, tag `ki-053-fixed`) are in `main`; CI on `main` after #79 green, publish succeeded.
 
 ## Done
-- `lz4-java.version` 1.11.4 + a `dependencyManagement` entry in the parent pom (Boot does not manage it; kafka-clients brings it).
-  `dependency:tree` shows 1.11.4. KNOWN_ISSUES KI-053, `security.md`, `decisions.md` [Fix KI-053].
-- `./mvnw -B verify` green. The proof is the CI Image scan on this PR (it said `Total: 1 (HIGH: 1)` per affected image before).
+- compose: `--requirepass ${REDIS_PASSWORD:?...}`, `REDISCLI_AUTH`, `SPRING_DATA_REDIS_PASSWORD` for app/catalog/assistant/gateway.
+  k8s: `cache-secrets`, `cache.yaml` args/env, `k8s-up.sh` adds the key to the four service Secrets. No Java changed.
+- Smoke: "Redis refuses a client that has no password" + "answers one that has it" (seen failing before: unauthenticated PING gave PONG).
+- kind: `scripts/k8s-smoke.sh` 448 passed, 0 failed, 7 skipped. Docs: KI-050 fixed + KI-054, `security.md`, `decisions.md`, README, `.env.example`.
+- No local full `./mvnw verify`: no Java or pom change; the PR's CI "Build and test" runs it.
+
+## User action (not code)
+Add `REDIS_PASSWORD=<openssl rand -hex 16>` to `.env` before the next `docker compose up`; compose refuses to start without it.
+The frontend team needs the same variable. Existing kind cluster: after `scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`.
 
 ## Next action
-Wait for this PR's CI. Green: ask for approval. After `approved, merge it`: merge --merge, verify in `main`, tag `ki-053-fixed`, then #78 as above.
+STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-050-fixed`.
+Remaining gaps: KI-016..024, 031..036, 048, 049, 051, 054.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

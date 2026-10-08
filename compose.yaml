@@ -109,6 +109,15 @@ services:
       - ${REDIS_MAXMEMORY:-256mb}
       - --maxmemory-policy
       - allkeys-lru
+      # KI-050: a client must authenticate. No default on purpose: a password that ships in the
+      # repository is not a password, and `:?` makes compose refuse to start rather than run a
+      # cache that anyone on the network (see BIND_ADDRESS) could read, flush or poison.
+      - --requirepass
+      - ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
+    environment:
+      # redis-cli reads this, so the healthcheck below and `docker exec ecomdemo-cache redis-cli ...`
+      # authenticate without the password being typed or put on a command line.
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
     ports:
       # Published so `redis-cli` and the smoke test can look inside from the host. The
       # application does not use this: it reaches Redis at `cache:6379` over the compose network.
@@ -166,6 +175,7 @@ services:
       # Redis, reached by service name on the compose network — same reasoning as `db` above.
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
 
       # `dev` is the profile that reads POSTGRES_* above. It is named for how it is run, not for
       # what it means; a `prod` profile arrives with the deployment phases.
@@ -547,6 +557,7 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
       INVENTORY_BASE_URL: http://inventory-service:8082
 
       # Performance experiments only (Phase 30), defaults = today's behaviour. CATALOG_CACHE_TYPE=none
@@ -679,6 +690,7 @@ services:
       <<: *observability-env
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
       # Where it asks, by compose service name. Never through the gateway: that would count the
       # assistant's calls against the customer's rate limit, and add a hop for nothing.
       CATALOG_BASE_URL: http://catalog-service:8081
@@ -765,6 +777,7 @@ services:
 
       SPRING_DATA_REDIS_HOST: cache
       SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
 
       # The edge VALIDATES tokens; customer-service is the only service that issues them.
       # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.

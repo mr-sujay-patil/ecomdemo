@@ -35,8 +35,24 @@ spec:
       containers:
         - name: redis
           image: redis:8-alpine
+          # KI-050: clients must authenticate. The password lives in the cache-secrets Secret
+          # (scripts/k8s-up.sh creates it); Kubernetes expands $(REDIS_PASSWORD) in args from the env
+          # below. REDISCLI_AUTH lets the probe and `kubectl exec ... redis-cli` authenticate without
+          # the password on a command line.
           args: ["redis-server", "--save", "", "--appendonly", "no",
-                 "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+                 "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru",
+                 "--requirepass", "$(REDIS_PASSWORD)"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: cache-secrets
+                  key: REDIS_PASSWORD
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: cache-secrets
+                  key: REDIS_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
