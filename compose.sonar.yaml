@@ -46,7 +46,7 @@ services:
       #   sudo sysctl -w vm.max_map_count=524288
       SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
     ports:
-      - "${SONAR_PORT:-9000}:9000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${SONAR_PORT:-9000}:9000"
     volumes:
       # Three named volumes, because SonarQube keeps three different things: the analysis data,
       # the search index, and any plugins added later. Losing the index is survivable; losing

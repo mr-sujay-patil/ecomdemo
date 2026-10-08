@@ -4221,6 +4221,35 @@ fi
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed, %d skipped\n' \
     "$PASSED" "$FAILED" "$SKIPPED"
 
+# --------------------------------------------------------------------------------------------
+# Published ports (KI-003)
+# --------------------------------------------------------------------------------------------
+# compose used to publish every port on all interfaces: six PostgreSQL databases with default
+# passwords, Redis and Kafka without authentication, reachable by anyone on the network. Every
+# mapping now binds ${BIND_ADDRESS:-127.0.0.1}. scripts/test-compose-ports.sh reads the compose
+# files; this reads what Docker ACTUALLY bound, on the containers of this checkout's stack.
+section "Published ports"
+
+if [ "$SMOKE_PLATFORM" != "compose" ]; then
+    skip "compose publishes its ports on 127.0.0.1 only" "this run is against Kubernetes (ClusterIP and the Ingress)"
+elif ! command -v docker >/dev/null 2>&1; then
+    skip "compose publishes its ports on 127.0.0.1 only" "no docker on PATH"
+elif [ -n "${BIND_ADDRESS:-}" ] && [ "${BIND_ADDRESS}" != "127.0.0.1" ]; then
+    skip "compose publishes its ports on 127.0.0.1 only" "BIND_ADDRESS=${BIND_ADDRESS} was chosen on purpose"
+else
+    PORTS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+    # "ecomdemo-db 127.0.0.1:5432->5432/tcp" per mapping; IPv6 and 0.0.0.0 mappings keep their prefix.
+    BOUND="$(docker ps --filter "label=com.docker.compose.project.working_dir=$PORTS_ROOT" \
+        --format '{{.Names}}|{{.Ports}}' 2>/dev/null \
+        | awk -F'|' '{ n = split($2, m, /, */); for (i = 1; i <= n; i++) if (m[i] ~ /->/) print $1, m[i] }')"
+    BOUND_COUNT="$(printf '%s\n' "$BOUND" | grep -c . || true)"
+    BEYOND_LOOPBACK="$(printf '%s\n' "$BOUND" | grep . | grep -v ' 127\.0\.0\.1:' || true)"
+    check "this stack publishes ports to the host at all (so the next check looks at something)" \
+        "yes" "$([ "$BOUND_COUNT" -gt 0 ] && echo yes || echo "no (0 mappings)")"
+    check "no published port is reachable beyond 127.0.0.1 (set BIND_ADDRESS to change that)" \
+        "" "$(printf '%s' "$BEYOND_LOOPBACK" | head -3 | tr '\n' ';')"
+fi
+
 if [ "$SKIPPED" -gt 0 ]; then
     printf '\033[33mNote: %d check(s) could not be run - see the SKIP lines above.\033[0m\n' \
         "$SKIPPED"
