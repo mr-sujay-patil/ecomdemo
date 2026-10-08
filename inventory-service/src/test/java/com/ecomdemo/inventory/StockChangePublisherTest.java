@@ -57,7 +57,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class StockChangePublisherTest {
 
     @Autowired
-    private InventoryService inventory;
+    private StockChangePublisher publisher;
 
     @Autowired
     private ProductStockRepository stock;
@@ -81,7 +81,7 @@ class StockChangePublisherTest {
                 .thenReturn(CompletableFuture.completedFuture(null));
         stock.save(new ProductStock(1L, 9));
 
-        transactions.executeWithoutResult(status -> inventory.reserve(1L, "Lamp", 2));
+        transactions.executeWithoutResult(status -> publisher.publish(1L));
 
         // Keyed by product id, so every change to one product lands in one partition and is read
         // in the order it was written.
@@ -94,7 +94,7 @@ class StockChangePublisherTest {
         stock.save(new ProductStock(1L, 9));
 
         transactions.executeWithoutResult(status -> {
-            inventory.reserve(1L, "Lamp", 2);
+            publisher.publish(1L);
             status.setRollbackOnly();
         });
 

@@ -32,11 +32,14 @@ import org.springframework.test.context.event.RecordApplicationEvents;
  * missing-row case, neither of which a mock could have shown.
  *
  * <p><strong>Phase 20b moved the file itself into inventory-service</strong>, and took a helper
- * out of it. These tests used to wrap every reservation in a transaction, because {@code reserve}
- * was {@code Propagation.MANDATORY} and refused to run without one. It cannot be any more — the
- * caller is in another process — so the wrapper went with the guarantee. What replaces that
- * guarantee is a compensating {@code release}, which is tested below and, unlike a rollback, can
- * itself fail.
+ * out of it. These tests used to wrap every reservation in a transaction, because the old
+ * single-product {@code reserve} was {@code Propagation.MANDATORY} and refused to run without one.
+ * It cannot be any more — the caller is in another process — so the wrapper went with the
+ * guarantee. What replaces it is the saga: an order's reservation is a row, and
+ * {@code releaseForOrder} is the compensation. KI-052 removed the single-product {@code reserve}
+ * and {@code release} together with the cases that tested them here; reserving now takes a
+ * PostgreSQL advisory lock (it cannot run on H2), so its behaviour is asserted in
+ * {@code InventorySagaTest} and {@code ConcurrentReservationTest}, against a real database.
  *
  * <h2>Why a database rather than a mocked repository</h2>
  *
@@ -161,65 +164,6 @@ class InventoryServiceTest {
             assertThatThrownBy(() -> inventory.requireAvailable(404L, "Ghost Lamp", 1))
                     .isInstanceOf(InsufficientStockException.class)
                     .hasMessageContaining("Ghost Lamp");
-        }
-    }
-
-    @Nested
-    @DisplayName("reserving")
-    class Reserving {
-
-        @Test
-        @DisplayName("reduces by the quantity ordered")
-        void reducesStock() {
-            // Moved from OrderPlacementServiceTest, which used to assert this on a Product it
-            // could mutate directly.
-            stock.save(new ProductStock(1L, 9));
-
-            inventory.reserve(1L, "Lamp", 2);
-
-            assertThat(inventory.quantityFor(1L)).isEqualTo(7);
-        }
-
-        @Test
-        @DisplayName("announces the change, which is what lets the cache be evicted after commit")
-        void announcesTheChange() {
-            // Moved from ProductServiceTest. Announcing is all a reservation is allowed to do
-            // about the cache: it runs inside a transaction that may still roll back, so the
-            // eviction itself has to wait for the commit.
-            stock.save(new ProductStock(1L, 9));
-
-            inventory.reserve(1L, "Lamp", 2);
-
-            assertThat(publishedEvents.stream(ProductStockChangedEvent.class))
-                    .containsExactly(new ProductStockChangedEvent(1L));
-        }
-
-        @Test
-        @DisplayName("refuses to take more than there is, in the shopper's terms")
-        void refusesAnOverdraw() {
-            stock.save(new ProductStock(1L, 1));
-
-            assertThatThrownBy(() -> inventory.reserve(1L, "Lamp", 2))
-                    .isInstanceOf(InsufficientStockException.class);
-
-            assertThat(inventory.quantityFor(1L)).isEqualTo(1);
-        }
-
-        @Test
-        @DisplayName("a product with no stock row cannot be reserved from")
-        void refusesWhenThereIsNoRow() {
-            assertThatThrownBy(() -> inventory.reserve(404L, "Ghost", 1))
-                    .isInstanceOf(InsufficientStockException.class);
-        }
-
-        @Test
-        @DisplayName("taking the last unit is allowed and leaves zero")
-        void allowsTakingTheLastUnit() {
-            stock.save(new ProductStock(1L, 1));
-
-            inventory.reserve(1L, "Lamp", 1);
-
-            assertThat(inventory.quantityFor(1L)).isZero();
         }
     }
 

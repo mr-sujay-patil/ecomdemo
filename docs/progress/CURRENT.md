@@ -3,29 +3,25 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-011, dead `reserve`/`release` in the inventory gateway and inventory-service's HTTP API
-- **Branch:** fix/ki-011-remove-dead-reserve-release (cut from `main` at `99fc130`)
+- **Fix:** KI-052, `InventoryService.reserve`/`release` have no production caller
+- **Branch:** fix/ki-052-remove-unused-inventory-reserve-release (cut from `main` at `33d6f1a`)
 - **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-011 PR)
+- **Waiting for user:** YES (review of the KI-052 PR)
 
-## Merge verification of KI-010 (done 2026-10-08)
-PR #74 merged as `99fc130`; CI on `main` green; tag `ki-010-fixed`.
+## Merge verification of the previous units (done 2026-10-08)
+KI-011 PR #75 `f088fd4`, tag `ki-011-fixed`. Chore PRs #76 (workflow rules in CLAUDE.md) and #77 (CI: tests on PRs only) merged;
+first `main` run after #77: build skipped, scans green, publish succeeded.
 
 ## Done
-- Removed `reserve`/`release` from `InventoryGateway`, `InventoryClient`, `ResilientInventory`, and the two inventory-service
-  endpoints + `UnitsRequest`. Regression test `InventorySecurityTest.reserveAndReleaseAreGone` (404; seen failing with 409 on the old controller).
-- Removed tests of the removed behaviour (ResilientInventoryTest reserve/release cases, 3 reserve/release validation tests,
-  `never().reserve/release` assertions); security tests moved to the remaining `PUT /api/inventory/{id}` write.
-- KI-052 added: `InventoryService.reserve/release` still exist, test-only. `decisions.md` [Fix KI-011]; README and `saga.md` updated.
-- `./mvnw clean verify` green; `scripts/k8s-smoke.sh` on kind: 446 passed, 0 failed, 7 skipped.
-
-## Pending request from the user (2026-10-08)
-Document the backend changes since `phase-34-complete` for the frontend team and tell them to point to `main`.
-Draft is in the job tmp dir (`frontend-changes.md`); commit it on a `chore/` branch AFTER this PR merges (one open PR at a time).
+- Removed `InventoryService.reserve`/`release`. Tests re-homed: `StockChangePublisherTest` calls `publish` directly (H2),
+  `ConcurrentReservationTest` races two orders through `reserveForOrder` (PostgreSQL), `InventorySagaTest` gained
+  "announces stock-changed". The five H2 `Reserving` cases in `InventoryServiceTest` were removed (the method is gone and
+  `reserveForOrder` needs PostgreSQL; covered by `InventorySagaTest`). KNOWN_ISSUES KI-052 Fixed, `decisions.md` [Fix KI-052].
+- `./mvnw -B verify` green. Smoke test skipped on purpose (workflow rule 5: no manifest/config/startup/inter-service change).
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-011-fixed`. Then the chore branch above.
-Still open: KI-052.
+STOP: wait for review. After `approved, merge it`: merge --merge, verify it is in `main`, tag `ki-052-fixed`.
+No open defects remain after this; the rest of KNOWN_ISSUES is deferred gaps (KI-016..024, 031..036, 048..051).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
