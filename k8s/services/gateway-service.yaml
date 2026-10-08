@@ -28,6 +28,7 @@ data:
   ASSISTANT_BASE_URL: "https://assistant-service:8087"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only; the JVM trusts the cluster CA (trust-ca)
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -3550,7 +3550,9 @@ bundle (reloaded when cert-manager renews it), and trusts the CA through a trust
 container builds from the image's own plus the CA. It is server-side TLS only: a caller proves who it is
 with its JWT service token, not a client certificate.
 
-**What is not covered.** Redis, PostgreSQL and Kafka are still plain on the cluster network (KI-057..059),
+**Redis (KI-057).** In the cluster Redis is TLS-only too: it listens on 6379 with its own certificate and the plain port is closed. Its four clients connect over TLS and verify it against the CA. Redis reads its certificate once, so a small sidecar (`cert-reload` in `k8s/data/cache.yaml`) applies a renewed one at runtime; a renewal needs no restart.
+
+**What is not covered.** PostgreSQL and Kafka are still plain on the cluster network (KI-058, KI-059),
 and compose stays HTTP on `127.0.0.1` (KI-003): the same images run there, and the TLS settings live only
 in the k8s ConfigMaps. If the CA ever has to be replaced, every service must restart to rebuild its
 truststore (a renewed *service* certificate does not: it is reloaded).

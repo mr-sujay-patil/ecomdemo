@@ -85,6 +85,10 @@ K8S_CONTEXT="${K8S_CONTEXT:-kind-ecomdemo}"
 # with verification ON (each JVM trusts the CA). Compose is plain HTTP.
 IN_SCHEME=http; WGET_TLS=""
 if [ "$SMOKE_PLATFORM" = "k8s" ]; then IN_SCHEME=https; WGET_TLS="--no-check-certificate"; fi
+# KI-057: Redis is TLS-only in k8s. redis-cli inside its pod verifies the certificate against the cluster CA
+# (the pod has the CA mounted), so these checks verify too, unlike BusyBox wget above.
+REDIS_TLS=""
+if [ "$SMOKE_PLATFORM" = "k8s" ]; then REDIS_TLS="--tls --cacert /etc/ecomdemo-tls/ca.crt"; fi
 
 k8s_workload() { # k8s_workload <container name> -> statefulset/<n> or deployment/<n>
     local name="${1#ecomdemo-}"
@@ -466,7 +470,7 @@ redis_cli() {
             redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>/dev/null
     elif command -v docker >/dev/null 2>&1 \
         && ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
-        ctr_exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null
+        ctr_exec "$REDIS_CONTAINER" redis-cli $REDIS_TLS "$@" 2>/dev/null
     else
         return 1
     fi
@@ -479,7 +483,7 @@ redis_cli_noauth() {
         REDISCLI_AUTH= redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>&1
     elif command -v docker >/dev/null 2>&1 \
         && ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
-        ctr_exec "$REDIS_CONTAINER" sh -c 'unset REDISCLI_AUTH; redis-cli "$@"' sh "$@" 2>&1
+        ctr_exec "$REDIS_CONTAINER" sh -c 'unset REDISCLI_AUTH; redis-cli "$@"' sh $REDIS_TLS "$@" 2>&1
     else
         return 1
     fi
@@ -1449,6 +1453,12 @@ if redis_cli PING >/dev/null 2>&1; then
     check "Redis refuses a client that has no password" "True" \
         "$(case "$(redis_cli_noauth PING || true)" in *NOAUTH* | *"Authentication required"*) echo True ;; *) echo False ;; esac)"
     check "and answers one that has it" "PONG" "$(redis_cli PING | tr -d '\r ')"
+    # KI-057: on the cluster Redis serves TLS only; the plain port is closed. A plain-text client (here with the
+    # password, from inside the pod) must not get PONG: before, it did, and so did anything on the network.
+    if [ "$SMOKE_PLATFORM" = "k8s" ]; then
+        check "Redis serves TLS only: a plain-text client does not get PONG" "True" \
+            "$(ctr_exec "$REDIS_CONTAINER" sh -c 'redis-cli -h 127.0.0.1 ping 2>&1' | grep -q PONG && echo False || echo True)"
+    fi
     as_admin
     STATUS="$(request POST /api/products \
         '{"name":"Cache Probe","description":"read me twice","price":77.00,"stockQuantity":4,"category":"TEST"}')"
@@ -4246,7 +4256,7 @@ check "cert-manager has the certificate Ready" "True" \
 # CA, and trusts that CA when it calls another service. Server-side TLS only: a caller is still identified
 # by its JWT service token, not a client certificate. That the JVMs verify each other is proven by this whole
 # run working: the gateway, the saga and the token endpoint all cross these hops.
-check "cert-manager has all 9 certificates Ready (the Ingress and the 8 services)" "9" \
+check "cert-manager has all 10 certificates Ready (the Ingress, the 8 services and Redis)" "10" \
     "$(kube get certificates -o json | python3 -c "
 import json, sys
 print(sum(1 for c in json.load(sys.stdin)['items']

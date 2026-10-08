@@ -43,6 +43,7 @@ data:
   POSTGRES_USER: "ecomdemo"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only; the JVM trusts the cluster CA (trust-ca)
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   CATALOG_BASE_URL: "https://catalog-service:8081"
   CUSTOMER_BASE_URL: "https://customer-service:8083"

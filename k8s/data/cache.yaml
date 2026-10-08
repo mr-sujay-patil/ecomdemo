@@ -41,7 +41,16 @@ spec:
           # the password on a command line.
           args: ["redis-server", "--save", "", "--appendonly", "no",
                  "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru",
-                 "--requirepass", "$(REDIS_PASSWORD)"]
+                 "--requirepass", "$(REDIS_PASSWORD)",
+                 # KI-057: TLS ONLY. `--port 0` closes the plain port; the TLS port keeps the number
+                 # 6379, so the Service and every client's port are unchanged. The certificate is
+                 # cert-manager's (k8s/service-certificates.yaml: cache-tls). Server-side TLS: no
+                 # client certificate (`--tls-auth-clients no`), clients authenticate with the password.
+                 "--port", "0", "--tls-port", "6379",
+                 "--tls-cert-file", "/etc/ecomdemo-tls/tls.crt",
+                 "--tls-key-file", "/etc/ecomdemo-tls/tls.key",
+                 "--tls-ca-cert-file", "/etc/ecomdemo-tls/ca.crt",
+                 "--tls-auth-clients", "no"]
           env:
             - name: REDIS_PASSWORD
               valueFrom:
@@ -56,9 +65,11 @@ spec:
           ports:
             - name: redis
               containerPort: 6379
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
           readinessProbe:
             exec:
-              command: ["redis-cli", "ping"]
+              command: ["redis-cli", "--tls", "--cacert", "/etc/ecomdemo-tls/ca.crt", "ping"]
             periodSeconds: 5
           livenessProbe:
             tcpSocket:
@@ -70,3 +81,45 @@ spec:
               memory: 32Mi
             limits:
               memory: 320Mi
+        # KI-057: Redis reads its certificate once, at start, so a certificate cert-manager renews at day 60
+        # would sit unused in the volume and Redis would keep serving the old one until it expired at day 90.
+        # This sidecar notices the file change and tells Redis to load the new one (`CONFIG SET tls-*`,
+        # supported at runtime), so a renewal needs no restart and no outage.
+        - name: cert-reload
+          image: redis:8-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              cert=/etc/ecomdemo-tls/tls.crt
+              last="$(sha256sum "$cert" | cut -d' ' -f1)"
+              while true; do
+                sleep 30
+                now="$(sha256sum "$cert" | cut -d' ' -f1)"
+                if [ "$now" != "$last" ]; then
+                  if redis-cli -h 127.0.0.1 --tls --cacert /etc/ecomdemo-tls/ca.crt \
+                       CONFIG SET tls-cert-file "$cert" tls-key-file /etc/ecomdemo-tls/tls.key \
+                       tls-ca-cert-file /etc/ecomdemo-tls/ca.crt | grep -q OK; then
+                    echo "reloaded the Redis certificate"; last="$now"
+                  else
+                    echo "could not reload the Redis certificate; retrying"
+                  fi
+                fi
+              done
+          env:
+            - name: REDISCLI_AUTH
+              valueFrom:
+                secretKeyRef:
+                  name: cache-secrets
+                  key: REDIS_PASSWORD
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: cache-tls

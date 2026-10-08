@@ -3,21 +3,21 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-056 phase A, services over HTTPS in k8s (server-side TLS; Redis/PostgreSQL/Kafka TLS are KI-057..059)
-- **Branch:** fix/ki-056-services-https (cut from `main` at `0cea876`)
+- **Fix:** KI-057, Redis TLS-only in k8s
+- **Branch:** fix/ki-057-redis-tls (cut from `main` at `91821fa`)
 - **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-056 PR)
+- **Waiting for user:** YES (review of the KI-057 PR)
 
 ## Done
-- User chose scope A only + no mTLS (2026-10-08). 8 cert-manager Certificates, SSL bundle per service, `trust-ca` init container + JAVA_TOOL_OPTIONS,
-  HTTPS probes (the gateway's management port included), Traefik `ServersTransport` + `ecomdemo-ca-public` Secret, `https://` URLs in the ConfigMaps.
-- Smoke: 6 new checks; `scripts/k8s-smoke.sh` 459 passed, 0 failed, 7 skipped. Forced certificate renewal: live pods served the new serial in ~60 s, 0 restarts.
-- Docs: README TLS, security.md, KNOWN_ISSUES (KI-056 fixed, KI-057..059 new), `decisions.md` [Fix KI-056].
+- Chosen by the assistant as the smallest remaining TLS gap, after the user said "continue" (not an explicit pick; say if it was unwanted).
+- Redis `--port 0 --tls-port 6379` with `cache-tls`; 4 clients `SPRING_DATA_REDIS_SSL_ENABLED`; readiness probe over TLS; `cert-reload` sidecar.
+- Smoke: plain-text check + 10 certificates; `scripts/k8s-smoke.sh` 460 passed, 0 failed, 7 skipped. Forced renewal: sidecar reloaded, new serial in ~70 s, 0 restarts.
+- Docs: README TLS, security.md, KNOWN_ISSUES (KI-057 fixed), `decisions.md` [Fix KI-057].
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-056-fixed`.
-An existing cluster picks this up with `scripts/k8s-up.sh` (no recreate needed this time).
-Remaining gaps: KI-016..024, 031..036, 048 (needs a Sonar server/token), 054, 055, 057, 058, 059.
+STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-057-fixed`.
+An existing cluster: `scripts/k8s-up.sh`, then `kubectl -n ecomdemo rollout restart deploy` (the ConfigMap change does not restart the clients).
+Remaining TLS gaps: KI-058 (PostgreSQL), KI-059 (Kafka). Other: KI-016..024, 031..036, 048, 054, 055.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

@@ -224,3 +224,31 @@ spec:
   issuerRef:
     name: ecomdemo-ca
     kind: ClusterIssuer
+---
+# Redis (KI-057). The name every client connects to is `cache`; `localhost` is for `redis-cli` inside the pod.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: cache-tls
+  labels:
+    app.kubernetes.io/name: cache
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: cache-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - cache
+    - cache.ecomdemo
+    - cache.ecomdemo.svc
+    - cache.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer

@@ -27,6 +27,7 @@ data:
   INVENTORY_BASE_URL: "https://inventory-service:8082"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only; the JVM trusts the cluster CA (trust-ca)
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   # Phase 27. No language model in the cluster: generate-description answers 503 "not configured".
   # To switch one on, set this to openai and add OPENAI_API_KEY to catalog-service-secrets.
