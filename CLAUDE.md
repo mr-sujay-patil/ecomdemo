@@ -6,12 +6,12 @@ A learning project: an e-commerce app evolving from a simple Spring Boot monolit
 
 ## 🔴 Hard rules (never break; if a rule can't be followed, STOP and ask)
 
-1. Every unit of work gets its own branch cut from the latest `main`, and all its changes are made only there:
+1. Every unit of work gets its own branch cut from the latest `main`, and all its changes are made only there (related fixes may share one branch and PR, but only when the user asks: workflow rule 11 below):
    a phase → `feature/phase-XX-<slug>`; a defect from `docs/KNOWN_ISSUES.md` → `fix/ki-XXX-<slug>`;
    a process or docs change outside both → `chore/<slug>` (only when the user asks for it).
 2. When the phase or fix is complete: push and raise a PR to `main`, then **STOP** for the user's review.
 3. **Never merge** unless the user says `approved, merge it`. Only merge commits (`gh pr merge --merge`), never squash or rebase.
-4. Start the next phase or fix only after the user says to continue **and** merge verification proves every change of the previous one is in `main`. One open PR at a time.
+4. Start the next phase or fix only after the user says to continue **and** merge verification proves every change of the previous one is in `main`. One open PR at a time; the exceptions the user has set up (a PR blocked by a red CI it did not cause, and chores the user asks for) are in `docs/process/git-workflow.md`.
 5. **Never delete any branch** (local or remote). Never use `--delete-branch`.
 6. **Never commit to `main`** (the only exception is the Phase 0 bootstrap commit). Never force-push, never rewrite history.
 7. Implement **only** the current phase's or fix's scope. Suggest extras; don't build them. A defect found along the way goes into `docs/KNOWN_ISSUES.md`; it isn't fixed in passing.
