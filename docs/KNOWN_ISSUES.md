@@ -38,7 +38,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-005 | No load shedding at checkout: under overload, requests wait 10 s for a connection instead of failing fast with 503 + `Retry-After` | Medium | Phase 30 | `security.md` API4, `performance.md` | Fixed (PR #68) |
 | KI-006 | The gateway's `/actuator/prometheus` is public, and reveals route names, error rates and JVM details | Low | Phase 21 | `security.md` API8 | Fixed (PR #69) |
 | KI-007 | `GET /api/products` returns the whole catalogue, unpaginated | Low | Phase 1 | `security.md` API4 | Fixed (PR #70) |
-| KI-008 | Nothing prunes `processed_event`, which grows forever (its index already exists) | Low | Phase 17 | `architecture/saga.md` | Open |
+| KI-008 | Nothing prunes `processed_event`, which grows forever (its index already exists) | Low | Phase 17 | `architecture/saga.md` | Fixed (this PR) |
 | KI-009 | The README's "Known gaps (closed by later phases)" sections are stale: some items are closed, some still open, and the heading says all are closed. Replace them with a link to this file | Low | n/a | `README.md:3989` | Open |
 | KI-010 | notification-service keeps its own copy of the idempotent-consumer code instead of using `ProcessedEvents` from the library | Low | Phase 24 | `ProcessedEvents.java:21`, `saga.md` | Open |
 | KI-011 | Dead code: `InventoryGateway.reserve`/`release` and inventory's matching HTTP endpoints are no longer called by checkout | Low | Phase 24 | `architecture/saga.md` | Open |

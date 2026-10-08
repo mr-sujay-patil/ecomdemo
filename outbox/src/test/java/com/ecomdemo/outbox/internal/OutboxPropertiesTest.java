@@ -18,43 +18,45 @@ class OutboxPropertiesTest {
 
     @Test
     void fillsInEveryDefaultWhenNothingIsConfigured() {
-        OutboxProperties properties = new OutboxProperties(null, 0, null, null, 0);
+        OutboxProperties properties = new OutboxProperties(null, 0, null, null, 0, null);
 
         assertThat(properties.pollDelay()).isEqualTo(Duration.ofSeconds(1));
         assertThat(properties.batchSize()).isEqualTo(100);
         assertThat(properties.retention()).isEqualTo(Duration.ofDays(7));
         assertThat(properties.cleanupCron()).isEqualTo("0 0 3 * * *");
         assertThat(properties.maxBatchesPerTick()).isEqualTo(20);
+        assertThat(properties.processedEventRetention()).isEqualTo(Duration.ofDays(30));
     }
 
     @Test
     @DisplayName("refuses a poll delay of zero, which would spin the relay against the database")
     void rejectsAZeroPollDelay() {
-        assertThat(new OutboxProperties(Duration.ZERO, 100, null, null, 0).pollDelay())
+        assertThat(new OutboxProperties(Duration.ZERO, 100, null, null, 0, null).pollDelay())
                 .isEqualTo(Duration.ofSeconds(1));
     }
 
     @Test
     @DisplayName("refuses a batch size of zero, which would publish nothing for ever")
     void rejectsAnEmptyBatch() {
-        assertThat(new OutboxProperties(null, -5, null, null, 0).batchSize()).isEqualTo(100);
+        assertThat(new OutboxProperties(null, -5, null, null, 0, null).batchSize()).isEqualTo(100);
     }
 
     @Test
     @DisplayName("refuses zero batches per tick, which would publish nothing for ever")
     void rejectsZeroBatchesPerTick() {
-        assertThat(new OutboxProperties(null, 0, null, null, -1).maxBatchesPerTick()).isEqualTo(20);
+        assertThat(new OutboxProperties(null, 0, null, null, -1, null).maxBatchesPerTick()).isEqualTo(20);
     }
 
     @Test
     void keepsWhatIsConfigured() {
         OutboxProperties properties =
-                new OutboxProperties(Duration.ofMillis(250), 25, Duration.ofDays(1), "0 0 4 * * *", 3);
+                new OutboxProperties(Duration.ofMillis(250), 25, Duration.ofDays(1), "0 0 4 * * *", 3, Duration.ofDays(45));
 
         assertThat(properties.pollDelay()).isEqualTo(Duration.ofMillis(250));
         assertThat(properties.batchSize()).isEqualTo(25);
         assertThat(properties.retention()).isEqualTo(Duration.ofDays(1));
         assertThat(properties.cleanupCron()).isEqualTo("0 0 4 * * *");
         assertThat(properties.maxBatchesPerTick()).isEqualTo(3);
+        assertThat(properties.processedEventRetention()).isEqualTo(Duration.ofDays(45));
     }
 }

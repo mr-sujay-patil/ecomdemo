@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * Sweeps published events out of the outbox.
+ * Sweeps published events out of the outbox, and prunes old idempotent-consumer records (KI-008).
  *
  * <p><strong>Why an outbox needs a bin at all.</strong> Every order writes a row here for ever.
  * The relay's query is "the oldest pending rows", which is fast only because the pending set is
@@ -37,10 +37,13 @@ class OutboxCleanupJob {
     private static final Logger log = LoggerFactory.getLogger(OutboxCleanupJob.class);
 
     private final OutboxEventRepository outbox;
+    private final ProcessedEventRepository processedEvents;
     private final OutboxProperties properties;
 
-    OutboxCleanupJob(OutboxEventRepository outbox, OutboxProperties properties) {
+    OutboxCleanupJob(
+            OutboxEventRepository outbox, ProcessedEventRepository processedEvents, OutboxProperties properties) {
         this.outbox = outbox;
+        this.processedEvents = processedEvents;
         this.properties = properties;
     }
 
@@ -63,5 +66,16 @@ class OutboxCleanupJob {
                 deleted,
                 cutoff,
                 properties.retention());
+
+        // KI-008. The same housekeeping slot also prunes the idempotent-consumer records, which
+        // otherwise grow for ever. They have their own, longer window: see
+        // OutboxProperties#processedEventRetention for why it cannot be the outbox's.
+        Instant processedCutoff = Instant.now().minus(properties.processedEventRetention());
+        int pruned = processedEvents.deleteProcessedBefore(processedCutoff);
+        log.info(
+                "Outbox cleanup pruned {} processed-event record(s) older than {} ({} retention)",
+                pruned,
+                processedCutoff,
+                properties.processedEventRetention());
     }
 }

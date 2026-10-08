@@ -31,7 +31,7 @@ class OutboxRelayTest {
     private OutboxRelay relay(int maxBatchesPerTick) {
         return new OutboxRelay(
                 publisher,
-                new OutboxProperties(Duration.ofSeconds(1), BATCH, Duration.ofDays(7), "-", maxBatchesPerTick));
+                new OutboxProperties(Duration.ofSeconds(1), BATCH, Duration.ofDays(7), "-", maxBatchesPerTick, null));
     }
 
     @Test

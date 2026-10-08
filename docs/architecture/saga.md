@@ -251,6 +251,6 @@ offsets restart (recreated, or its volume wiped) does not make a new record look
 - **Restoring the cart** when an order is cancelled.
 - notification-service still has its own copy of the idempotent-consumer code; it could use
   `ProcessedEvents` from the library (KI-010).
-- Nothing prunes `processed_event` yet (the index for it exists) (KI-008).
+- `processed_event` is pruned by the outbox cleanup job (03:00 daily) after 30 days (KI-008). notification-service has its own copy of the table and is not pruned until KI-010 moves it onto the library.
 - `InventoryGateway.reserve`/`release` and inventory's matching HTTP endpoints are no longer used
   by checkout. They can go once nothing else is expected to call them (KI-011).
