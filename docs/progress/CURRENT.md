@@ -6,7 +6,7 @@
 - **Fix:** KI-007, `GET /api/products` returns the whole catalogue, unpaginated
 - **Branch:** fix/ki-007-paginate-products (cut from `main` at `8fb9a01`)
 - **Step:** PR_OPEN
-- **PR:** TBD
+- **PR:** #70 https://github.com/mr-sujay-patil/ecomdemo/pull/70
 - **Waiting for user:** YES (review of the KI-007 PR)
 
 ## Merge verification of KI-006 (done 2026-10-08)
