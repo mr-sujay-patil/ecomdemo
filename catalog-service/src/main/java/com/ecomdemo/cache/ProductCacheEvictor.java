@@ -91,7 +91,7 @@ public class ProductCacheEvictor {
     public void onStockChanged(ProductStockChanged event) {
         try {
             evict(CacheNames.PRODUCT, event.productId());
-            evict(CacheNames.PRODUCT_LIST, CacheNames.PRODUCT_LIST_KEY);
+            clear(CacheNames.PRODUCT_LIST);
         } catch (RuntimeException ex) {
             log.warn(
                     "Could not evict the catalogue caches after stock changed for product {}; "
@@ -135,6 +135,14 @@ public class ProductCacheEvictor {
             // which costs a round trip to learn something nobody acts on. Evicting a key that is
             // already absent is a no-op everywhere.
             cache.evict(key);
+        }
+    }
+
+    /** Every entry of a cache: the listing is keyed by page, and a stock change can move any of them. */
+    private void clear(String cacheName) {
+        Cache cache = cacheManager.getCache(cacheName);
+        if (cache != null) {
+            cache.clear();
         }
     }
 }

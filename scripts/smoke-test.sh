@@ -592,6 +592,22 @@ section "Authentication and authorization"
 as_anonymous
 check "anonymous GET /api/products returns 200" "200" "$(request GET /api/products)"
 
+# KI-007: the listing is paged. The body stays a bare array; the position is in the headers.
+page_header() { # page_header <path> <header name> -> its value
+    curl -sS -o /dev/null -D - "$BASE_URL$1" 2>/dev/null \
+        | tr -d '\r' | awk -F': ' -v h="$(printf '%s' "$2" | tr 'A-Z' 'a-z')" 'tolower($1) == h { sub(/^[^:]*: /, ""); print; exit }'
+}
+request GET "/api/products?size=2" >/dev/null
+check "GET /api/products?size=2 returns an array of two" "2" "$(jget "len(d)")"
+check "and X-Total-Count says how many there are in all" "True" \
+    "$(python3 -c "import sys; print(int(sys.argv[1]) >= 10)" "$(page_header '/api/products?size=2' X-Total-Count)")"
+check "and Link names the next page" "True" \
+    "$(case "$(page_header '/api/products?size=2' Link)" in *'rel="next"'*) echo True ;; *) echo False ;; esac)"
+check "a page size over the maximum (101) is refused (400)" "400" "$(request GET "/api/products?size=101")"
+check "a negative page is refused (400)" "400" "$(request GET "/api/products?page=-1")"
+request GET /api/products >/dev/null
+check "with no parameters the listing is at most one default page (50)" "True" "$(jget "len(d) <= 50")"
+
 # The cart is somebody's. With no credentials the server cannot know whose, so it asks for them.
 # 401 means "unauthenticated" despite the name: presenting a token could change the answer.
 check "anonymous GET /api/cart returns 401" "401" "$(request GET /api/cart)"

@@ -163,8 +163,14 @@ Can a client read or write a *field* it shouldn't?
   gateway's catalogue reads (2 s limit, breaker, 503 + `Retry-After`). Search and AI description generation
   have their own, longer limit. catalog-service's own calls to inventory-service have the same timeouts (shared
   client) but no breaker.
-- ⚠️ `GET /api/products` returns the **whole catalogue**, unpaginated. That's harmless at 40
-  products, but it grows without limit. Recommended: pagination with a maximum page size.
+- ✅ **`GET /api/products` is paged (KI-007).** It returned the whole catalogue, which grew without limit
+  and was read, serialised, cached and sent in full. It now returns one page: `page` from 0, `size` default
+  50 and at most 100 (a larger size, a size under 1 or a negative page is a 400), in id order. The body is
+  still a bare JSON array, so existing clients keep working; `X-Total-Count` and `Link` (first/prev/next/last)
+  carry the position and the gateway exposes both through CORS. Behaviour change: a caller that relied on
+  one request returning everything now gets 50. The internal `CatalogClient.findAll()` follows the pages.
+  Verified by `ProductApiIT`, `ProductControllerTest`, `CatalogClientPagingTest`, `CorsIT` and the smoke
+  test's **Authentication and authorization** section.
 - ✅ **Load shedding at checkout** (KI-005): at most 8 checkouts in progress; the ninth is refused at
   once with 503 and `Retry-After: 1` (outcome `shed` on `checkout.duration`) instead of waiting 10 s
   for a database connection. The limit is a judgement tied to the pool size of 10, not a measurement.

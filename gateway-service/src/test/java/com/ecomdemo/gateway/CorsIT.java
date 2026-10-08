@@ -152,6 +152,21 @@ class CorsIT {
         assertThat(headers.get(HttpHeaders.ACCESS_CONTROL_ALLOW_ORIGIN)).containsExactly(ALLOWED);
     }
 
+    /** KI-007: X-Total-Count and Link are not CORS-safelisted, so a page script reads them only if exposed. */
+    @Test
+    @DisplayName("a cross-origin response exposes the paging headers, or the browser hides them from the page")
+    void thePagingHeadersAreExposed() {
+        HttpHeaders headers = web.get().uri("/api/products")
+                .header(HttpHeaders.ORIGIN, ALLOWED)
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(Void.class)
+                .getResponseHeaders();
+
+        assertThat(headers.getAccessControlExposeHeaders())
+                .contains("X-Total-Count", "Link", "X-Correlation-Id");
+    }
+
     @Test
     @DisplayName("a refused cross-origin call still carries the allow header, so the browser can read the 401")
     void aRefusalIsReadableByTheBrowser() {

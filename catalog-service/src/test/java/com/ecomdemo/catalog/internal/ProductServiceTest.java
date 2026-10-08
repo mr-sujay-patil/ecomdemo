@@ -21,10 +21,14 @@ import static org.mockito.Mockito.when;
 
 import com.ecomdemo.shared.NotFoundException;
 import com.ecomdemo.catalog.dto.ProductRequest;
+import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.TestData;
 import java.math.BigDecimal;
 import java.util.List;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import java.util.Optional;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -73,36 +77,42 @@ class ProductServiceTest {
     private ArgumentCaptor<Product> productCaptor;
 
     @Nested
-    @DisplayName("findAll")
-    class FindAll {
+    @DisplayName("findPage")
+    class FindPage {
 
         @Test
-        void findAll_whenProductsExist_returnsOneResponsePerProduct() {
+        void findPage_whenProductsExist_returnsOneResponsePerProductAndTheTotal() {
             // Given
-            when(productRepository.findAll())
-                    .thenReturn(List.of(
-                            TestData.product(1L, "Keyboard", "8999.00"),
-                            TestData.product(2L, "Mouse", "3499.00")));
+            when(productRepository.findAll(PageRequest.of(0, 2, Sort.by("id"))))
+                    .thenReturn(new PageImpl<>(
+                            List.of(
+                                    TestData.product(1L, "Keyboard", "8999.00"),
+                                    TestData.product(2L, "Mouse", "3499.00")),
+                            PageRequest.of(0, 2, Sort.by("id")),
+                            7));
 
             // When
-            List<ProductResponse> found = productService.findAll();
+            ProductPage found = productService.findPage(0, 2);
 
             // Then
-            assertThat(found)
+            assertThat(found.items())
                     .extracting(ProductResponse::id, ProductResponse::name)
                     .containsExactly(tuple(1L, "Keyboard"), tuple(2L, "Mouse"));
+            assertThat(found.total()).as("the count is of the catalogue, not of the page").isEqualTo(7);
         }
 
         @Test
-        void findAll_whenCatalogueIsEmpty_returnsEmptyList() {
+        void findPage_whenCatalogueIsEmpty_returnsAnEmptyPage() {
             // Given
-            when(productRepository.findAll()).thenReturn(List.of());
+            when(productRepository.findAll(PageRequest.of(0, 50, Sort.by("id"))))
+                    .thenReturn(new PageImpl<>(List.of(), PageRequest.of(0, 50, Sort.by("id")), 0));
 
             // When
-            List<ProductResponse> found = productService.findAll();
+            ProductPage found = productService.findPage(0, 50);
 
             // Then
-            assertThat(found).isEmpty();
+            assertThat(found.items()).isEmpty();
+            assertThat(found.total()).isZero();
         }
     }
 

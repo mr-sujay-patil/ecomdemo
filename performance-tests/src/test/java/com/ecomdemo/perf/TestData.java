@@ -127,12 +127,20 @@ final class TestData {
      */
     private List<Long> ensureProducts(String admin) {
         Map<String, Long> existing = new HashMap<>();
-        HttpResponse<String> list = send(get("/api/products", admin));
-        if (list.statusCode() != 200) {
-            throw fail("list products", list);
-        }
-        for (JsonNode product : read(list)) {
-            existing.put(product.get("name").asText(), product.get("id").asLong());
+        // KI-007: the listing is paged (at most 100 a page), so follow the pages until a short one;
+        // matching by name on the first page alone would create a duplicate set on every run.
+        for (int page = 0;; page++) {
+            HttpResponse<String> list = send(get("/api/products?page=" + page + "&size=100", admin));
+            if (list.statusCode() != 200) {
+                throw fail("list products", list);
+            }
+            JsonNode products = read(list);
+            for (JsonNode product : products) {
+                existing.put(product.get("name").asText(), product.get("id").asLong());
+            }
+            if (products.size() < 100) {
+                break;
+            }
         }
 
         List<Long> ids = new ArrayList<>();

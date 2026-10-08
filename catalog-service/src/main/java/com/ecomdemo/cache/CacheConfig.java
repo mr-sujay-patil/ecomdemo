@@ -1,5 +1,6 @@
 package com.ecomdemo.cache;
 
+import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import java.time.Duration;
 import java.util.List;
@@ -121,8 +122,7 @@ public class CacheConfig implements CachingConfigurer {
                 PRODUCT_TTL);
 
         RedisCacheConfiguration productList = configurationFor(
-                new JacksonJsonRedisSerializer<>(
-                        jsonMapper, types.constructCollectionType(List.class, ProductResponse.class)),
+                new JacksonJsonRedisSerializer<>(jsonMapper, types.constructType(ProductPage.class)),
                 PRODUCT_LIST_TTL);
 
         return new LoggingRedisCacheManager(

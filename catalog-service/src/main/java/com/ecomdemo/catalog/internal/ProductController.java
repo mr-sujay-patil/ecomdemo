@@ -5,17 +5,23 @@ import com.ecomdemo.shared.ApiError;
 import com.ecomdemo.catalog.dto.ProductRequest;
 import com.ecomdemo.clients.catalog.ProductSnapshot;
 import com.ecomdemo.clients.catalog.ProductUpsert;
+import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.headers.Header;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,6 +30,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** HTTP entry point for the catalogue. No business logic, no persistence. */
@@ -42,13 +49,58 @@ public class ProductController {
         this.productService = productService;
     }
 
+    /** Largest page a caller may ask for (KI-007). */
+    static final int MAX_PAGE_SIZE = 100;
+
     @GetMapping
     @Operation(
-            summary = "List every product",
-            description = "Returns the whole catalogue, unpaged and unsorted. Paging arrives when the catalogue is big enough to need it.")
-    @ApiResponse(responseCode = "200", description = "The catalogue, possibly empty")
-    public List<ProductResponse> list() {
-        return productService.findAll();
+            summary = "List the products, one page at a time",
+            description = "Returns one page of the catalogue as a JSON array, in id order. `page` counts from 0 "
+                    + "(default 0) and `size` defaults to 50, at most 100. `X-Total-Count` is the number of "
+                    + "products in all, and `Link` carries the first, prev, next and last pages. A page past the "
+                    + "end is an empty array.")
+    @ApiResponse(
+            responseCode = "200",
+            description = "The page, possibly empty",
+            headers = {
+                @Header(name = "X-Total-Count", description = "Products in the whole catalogue"),
+                @Header(name = "Link", description = "RFC 8288 links: first, prev, next, last")})
+    @ApiResponse(
+            responseCode = "400",
+            description = "A negative page, or a size under 1 or over 100",
+            content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
+    public ResponseEntity<List<ProductResponse>> list(
+            @Parameter(description = "Page number, from 0", example = "0")
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @Parameter(description = "Products per page (default 50, max 100)", example = "50")
+            @RequestParam(defaultValue = "50") @Min(1) @Max(MAX_PAGE_SIZE) int size) {
+        ProductPage found = productService.findPage(page, size);
+        return ResponseEntity.ok()
+                .header("X-Total-Count", String.valueOf(found.total()))
+                .header(HttpHeaders.LINK, links(page, size, found.total()))
+                .body(found.items());
+    }
+
+    /**
+     * RFC 8288 links, relative so they work behind the gateway as they do here. {@code prev} and
+     * {@code next} are left out at the ends, and a page past the end links back to the last page.
+     */
+    private static String links(int page, int size, long total) {
+        int last = (int) Math.max(0, (total - 1) / size);
+        List<String> links = new ArrayList<>();
+        links.add(link(0, size, "first"));
+        if (page > 0) {
+            links.add(link(Math.min(page - 1, last), size, "prev"));
+        }
+        if (page < last) {
+            links.add(link(page + 1, size, "next"));
+        }
+        links.add(link(last, size, "last"));
+        return String.join(", ", links);
+    }
+
+    private static String link(int page, int size, String rel) {
+        return "</api/products?page=" + page + "&size=" + size + ">; rel=\"" + rel + "\"";
     }
 
     @GetMapping("/{id}")

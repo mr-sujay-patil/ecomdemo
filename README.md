@@ -727,7 +727,7 @@ is the trade, and the retry budget is what makes it honest.
 | `POST` | `/api/customers/register` | anyone | Create a CUSTOMER account (201 + `Location`) |
 | `GET` | `/api/customers/me` | any account | Your own profile |
 | `PUT` | `/api/customers/me` | any account | Change your own display name |
-| `GET` | `/api/products` | anyone | List the catalogue |
+| `GET` | `/api/products?page=0&size=50` | anyone | List the catalogue, one page of at most 100 as a JSON array; `X-Total-Count` and `Link` headers say where you are (KI-007) |
 | `GET` | `/api/products/{id}` | anyone | One product |
 | `GET` | `/api/products/{id}/image` | anyone | That product's image, from its `imageUrl` (Phase 34); 404 if it has none |
 | `POST` | `/api/products` | **ADMIN** | Create a product (201 + `Location`) |
@@ -1131,7 +1131,7 @@ no way to patch one entry inside it, so it goes.
 | Cache | TTL | Why |
 |---|---|---|
 | `product` | 10 min | changes rarely, and every edit evicts it anyway |
-| `productList` | 2 min | one key covering every product: costliest to hold, likeliest to be wrong |
+| `productList` | 2 min | one key per page (`p0:50`), all cleared on any write: a new product moves every later page |
 
 **Every cache has a TTL**, and that is the real answer to invalidation. Explicit eviction handles
 the changes this application makes; the TTL handles the ones it does not — a migration, a manual
