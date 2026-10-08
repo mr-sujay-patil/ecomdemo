@@ -27,7 +27,7 @@ import java.util.UUID;
  *
  * It was package-private at first, which compiled and deserialised into an instance with EVERY FIELD
  * NULL - Jackson could not reach the canonical constructor of a non-public record, so the listener
- * received an event whose eventId was null and EventDeduplicator threw "The given id must not be
+ * received an event whose eventId was null and the idempotency check threw "The given id must not be
  * null" on every single message. The record the application used before the split was public; copying
  * the shape and not the visibility is what broke it.
  *

@@ -3,6 +3,7 @@ package com.ecomdemo.notification.internal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+import com.ecomdemo.outbox.internal.ProcessedEventRepository;
 import com.ecomdemo.support.KafkaContainerConfig;
 import com.ecomdemo.support.PostgresContainerConfig;
 import java.math.BigDecimal;

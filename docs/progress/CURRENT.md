@@ -3,22 +3,30 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-009, the README's "Known gaps (closed by later phases)" section is stale
-- **Branch:** fix/ki-009-readme-known-gaps (cut from `main` at `43ab02c`)
-- **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-009 PR)
+- **Fix:** KI-010, notification-service keeps its own copy of the idempotent-consumer code
+- **Branch:** fix/ki-010-notification-processed-events (cut from `main` at `b3ed529`)
+- **Step:** SMOKE_PENDING (code + docs done, `./mvnw clean verify` green; PR not raised yet)
+- **Waiting for user:** YES (steps 3-4 of the testing protocol need a free compose stack, see below)
 
-## Merge verification of KI-008 (done 2026-10-08)
-PR #72 merged as `43ab02c`; CI on `main` green incl. scans and publish; tag `ki-008-fixed`.
+## Merge verification of KI-009 (done 2026-10-08)
+PR #73 merged as `b3ed529`; CI on `main` green; tag `ki-009-fixed`.
 
 ## Done
-- README: the section is now a pointer to `docs/KNOWN_ISSUES.md`; two in-text references point at KI-017.
-- KNOWN_ISSUES: KI-009 fixed; KI-048..051 added for the four still-open gaps that were only in the README
-  (Sonar gate in CI, smoke test in CI, Redis password, TLS). `decisions.md` [Fix KI-009].
-- Docs-only: no build or smoke test run.
+- User chose "adopt @EnableOutbox" (2026-10-08). notification-service now depends on `ecomdemo-outbox`, has `@EnableOutbox`,
+  an empty `OutboxRoutes` bean (`OutboxWiring`), and `V2__outbox_event.sql` (always-empty table).
+- Deleted its `EventDeduplicator`, `ProcessedEvent`, `ProcessedEventRepository`, `EventDeduplicatorTest`
+  (`ProcessedEventsTest` in the library covers the same behaviour); `NotificationService` uses `ProcessedEvents`.
+- Docs: KNOWN_ISSUES KI-010 Fixed, `decisions.md` [Fix KI-010], `saga.md` gaps list.
+- `./mvnw clean verify`: BUILD SUCCESS, 0 failures (notification-service: 6 unit + 5 IT).
+
+## Not done
+- Testing protocol steps 3-4 (run the app, `scripts/smoke-test.sh`): the frontend team's stack
+  (`~/projects/ecomdemo-backend-readonly`) is running on the same container names and ports. NOT touched.
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-009-fixed`. Still open: KI-010, KI-011.
+Ask the user how to run steps 3-4 (stop the other stack, or use the kind cluster). Then smoke, put results in the PR
+description, raise the PR, STOP. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-010-fixed`.
+Still open: KI-011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

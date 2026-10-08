@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.ecomdemo.notification.Notification;
+import com.ecomdemo.outbox.ProcessedEvents;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
@@ -29,8 +30,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
  *
  * <p><strong>Narrower since Phase 19.</strong> The mechanics of recognising a duplicate — the
  * marker's primary key, writing it before the work, reusing the id that came in the message — moved
- * into {@code EventDeduplicator} in the messaging module, and so did the tests that pin them down:
- * see {@code EventDeduplicatorTest}. Nothing was dropped; it is asserted where the behaviour now
+ * into {@code ProcessedEvents} in the outbox library (KI-010; it began as this service's
+ * {@code EventDeduplicator}), and so did the tests that pin them down: see {@code ProcessedEventsTest}. Nothing was dropped; it is asserted where the behaviour now
  * lives, which is also where the second consumer this application grows will inherit it.
  *
  * <p>What is left here is this class's own share of the rule: ask, and act on the answer.
@@ -43,7 +44,7 @@ class NotificationServiceTest {
     private NotificationRepository notifications;
 
     @Mock
-    private EventDeduplicator deduplicator;
+    private ProcessedEvents processedEvents;
 
     @InjectMocks
     private NotificationService notificationService;
@@ -60,7 +61,7 @@ class NotificationServiceTest {
     @DisplayName("writes a notification for an event it has not seen")
     void writesANotification() {
         UUID eventId = UUID.randomUUID();
-        when(deduplicator.claim(eq(eventId), anyString())).thenReturn(true);
+        when(processedEvents.claim(eq(eventId), anyString())).thenReturn(true);
 
         boolean handled = notificationService.handle(event(eventId, 42L));
 
@@ -79,18 +80,18 @@ class NotificationServiceTest {
         // an id generated here would be different on every delivery and would recognise no
         // duplicate at all, while a test that only checked "something was claimed" would pass.
         UUID eventId = UUID.randomUUID();
-        when(deduplicator.claim(eq(eventId), anyString())).thenReturn(true);
+        when(processedEvents.claim(eq(eventId), anyString())).thenReturn(true);
 
         notificationService.handle(event(eventId, 42L));
 
-        verify(deduplicator).claim(eventId, "OrderPlacedEvent");
+        verify(processedEvents).claim(eventId, "OrderPlacedEvent");
     }
 
     @Test
     @DisplayName("does nothing at all for an event it has already handled")
     void ignoresADuplicate() {
         UUID eventId = UUID.randomUUID();
-        when(deduplicator.claim(eq(eventId), anyString())).thenReturn(false);
+        when(processedEvents.claim(eq(eventId), anyString())).thenReturn(false);
 
         boolean handled = notificationService.handle(event(eventId, 42L));
 
@@ -106,12 +107,12 @@ class NotificationServiceTest {
         // would already have written it, and the unique constraint on order_id would be the only
         // thing left standing between the design and two notifications.
         UUID eventId = UUID.randomUUID();
-        when(deduplicator.claim(eq(eventId), anyString())).thenReturn(true);
+        when(processedEvents.claim(eq(eventId), anyString())).thenReturn(true);
 
         notificationService.handle(event(eventId, 42L));
 
-        var inOrder = org.mockito.Mockito.inOrder(deduplicator, notifications);
-        inOrder.verify(deduplicator).claim(any(), anyString());
+        var inOrder = org.mockito.Mockito.inOrder(processedEvents, notifications);
+        inOrder.verify(processedEvents).claim(any(), anyString());
         inOrder.verify(notifications).save(any());
     }
 }
