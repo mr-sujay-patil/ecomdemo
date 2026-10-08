@@ -5,28 +5,29 @@
 - **Updated:** 2026-10-08
 - **Fix:** KI-007, `GET /api/products` returns the whole catalogue, unpaginated
 - **Branch:** fix/ki-007-paginate-products (cut from `main` at `8fb9a01`)
-- **Step:** BRANCHED
-- **PR:** none yet
-- **Waiting for user:** NO
+- **Step:** PR_OPEN
+- **PR:** TBD
+- **Waiting for user:** YES (review of the KI-007 PR)
 
 ## Merge verification of KI-006 (done 2026-10-08)
-PR #69 merged as `8fb9a01`; branch ancestor of `main`, diff empty, `./mvnw clean verify` exit 0, CI on `main` green incl. scans
-and publish; tag `ki-006-fixed`.
+PR #69 merged as `8fb9a01`; CI on `main` green incl. scans and publish; tag `ki-006-fixed`.
 
 ## Decision (user, 2026-10-08)
-Array body + headers: the body stays a bare JSON array (the web team's client keeps working); optional `page`/`size`, a default
-and a maximum size, `X-Total-Count` and `Link` headers (exposed through CORS). The default size is the one behaviour change.
+Array body + headers (`X-Total-Count`, `Link`); `page` from 0, `size` default 50, max 100 (else 400). Behaviour change: no
+parameters means the first 50.
 
-## Checklist
-- [ ] Reproduce first: a test that fails because the list is unbounded
-- [ ] catalog-service: page/size (validated, default + max), headers, cache keys per page
-- [ ] gateway: CORS exposes the new headers; route passes them
-- [ ] smoke test, perf tests / scripts that read the list
-- [ ] Docs: `security.md` API4, `decisions.md` [KI-007], OpenAPI text, KNOWN_ISSUES row -> Fixed
-- [ ] Testing protocol (steps 1, 3, 4, 7, 8 + regression test)
+## Done
+- catalog-service: `ProductService.findPage` (cache per page `p<page>:<size>`, every write clears `productList`), `ProductPage`
+  record, controller params + headers; `CatalogClient.findAll()` follows pages; gateway CORS exposes the headers; Gatling
+  `TestData` follows pages. Tests: `ProductApiIT` (seen failing first), `ProductControllerTest`, `ProductServiceTest`,
+  `CatalogClientPagingTest`, `CorsIT`, `ProductCacheEvictorTest`, `CacheApiIT`. Smoke: paging checks + `listing_all` helper.
+- Docs: `security.md` API4, `decisions.md` [Fix KI-007], README endpoint table + cache table, KNOWN_ISSUES.
+- `./mvnw clean verify` exit 0; kind smoke 447/0/9 (also first run of KI-006's 8088 probe in k8s).
+- NOT run: compose smoke (the frontend team's stack, ~/projects/ecomdemo-backend-readonly, held the container names; user chose kind).
 
 ## Next action
-Read `ProductService.findAll` + cache config, then write the failing test. Still open: KI-008..011, KI-047.
+STOP: wait for the user's review. After `approved, merge it`: wait for the required check, merge with `--merge`, verify (tip in
+`main`, CI on `main` incl. scans and publish), tag `ki-007-fixed`. Still open: KI-008..011, KI-047.
 `stash@{0}` (KI-045 noise) is the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
