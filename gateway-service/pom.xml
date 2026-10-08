@@ -91,6 +91,16 @@
 		</dependency>
 
 		<!--
+			KI-004: the circuit breaker behind the gateway's CircuitBreaker route filter. The REACTOR
+			flavour, because the gateway is reactive; it brings Resilience4j's circuit breaker and
+			time limiter. Version from the Spring Cloud BOM above.
+		-->
+		<dependency>
+			<groupId>org.springframework.cloud</groupId>
+			<artifactId>spring-cloud-starter-circuitbreaker-reactor-resilience4j</artifactId>
+		</dependency>
+
+		<!--
 			KI-001: one Swagger UI for the whole system, at the one address a browser can reach.
 			Each service still builds its own OpenAPI document (only it knows its controllers); the
 			gateway routes /v3/api-docs/{service} to it, and this UI lists them in a dropdown. The

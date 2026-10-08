@@ -16,13 +16,13 @@ incl. scans and publish; tag `ki-003-fixed` pushed. Cold compose smoke skipped (
 ## Plan (KI-004 has only a table row; scope read from `security.md` API4/API10)
 1. [x] `common`: inventory client connect/read timeouts (`InventoryProperties`, `InventoryClientConfig`), `InventoryClientTimeoutTest`.
 2. [x] app: `ResilientInventory` (bulkhead + breaker, retry on reads only) wrapped in place like `ResilientCatalog`; `resilience4j.*.instances.inventory.*`; test.
-3. [ ] gateway: split `/api/products` into a fast GET route (response timeout + CircuitBreaker, 503 fallback with Retry-After)
+3. [x] gateway: split `/api/products` into a fast GET route (response timeout + CircuitBreaker, 503 fallback with Retry-After)
    and the rest (long timeout: AI generation, search); test.
 4. [ ] docs: `security.md` API4/API10, KNOWN_ISSUES row, `decisions.md`; smoke-test additions if cheap.
 5. [ ] `./mvnw clean verify`, smoke on compose (`docker ps` first), PR.
 
 ## Next action
-Continue at step 3. Not in scope (suggest only): catalog-service's own inventory calls get timeouts via the shared
+Continue at step 4. Not in scope (suggest only): catalog-service's own inventory calls get timeouts via the shared
 client but no breaker; the saga clients already have their own timeouts (Phase 32).
 `stash@{0}` (KI-045 noise) is obsolete; the user's to drop.
 
