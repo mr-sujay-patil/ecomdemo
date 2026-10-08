@@ -21,8 +21,8 @@ These rules are **non-negotiable**. Any AI assistant (Claude Code) or developer 
 - **Never merge the PR yourself.** Claude Code raises the PR and **stops**. The user reviews and merges it on GitHub. Claude Code may merge only if the user explicitly says so in chat for that specific PR.
 - **Merge method: "Create a merge commit" only.** Do not use squash or rebase merging. A merge commit preserves the branch's commits in `main`, which keeps the verification checks below reliable.
 - **Never rebase or rewrite history** on a branch after its PR is opened.
-- **One phase or fix = one branch = one PR.** Do not mix work from two phases, two fixes, or a phase and a fix.
-- **One open PR at a time.** A fix waits until the current phase is merged and verified, and the next phase waits for the fix, unless the user says to interrupt for a High severity defect.
+- **One phase or fix = one branch = one PR.** Do not mix work from two phases, two fixes, or a phase and a fix. Exception, only when the user asks for it: related fixes may be grouped in one PR (workflow rule 11 in `CLAUDE.md`).
+- **One open PR at a time.** A fix waits until the current phase is merged and verified, and the next phase waits for the fix, unless the user says to interrupt for a High severity defect. Two cases the user has set up where a second PR may be open: a PR whose CI is red because of something it did not cause (for example a newly published CVE) waits while a separate fix PR is merged first, then its branch is brought up to date and it is merged (workflow rule 9: fix a red CI before asking for approval); and process or CI chores the user asks for may be opened in parallel, each on its own branch.
 - **Do not start the next phase on your own.** The next phase starts only when the user explicitly says to continue **and** the merge verification of the current phase passes.
 
 ## Branch and Naming Conventions

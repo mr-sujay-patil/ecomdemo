@@ -3,24 +3,20 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-049, the smoke test did not run in CI
-- **Branch:** fix/ki-049-smoke-test-in-ci (cut from `main` at `c0f0189`)
-- **Step:** PR_OPEN (PR #81, labelled `run-smoke`)
-- **Waiting for user:** YES (review of the KI-049 PR)
+- **Unit:** chore/align-process-docs (PR open): align `docs/process/*` with the workflow rules in `CLAUDE.md`
+- **Branch:** chore/align-process-docs (cut from `main` at `82ef598`)
+- **Step:** PR_OPEN
+- **Waiting for user:** YES (review of the chore PR)
 
-## Merge verification of KI-050 (done 2026-10-08)
-PR #80 merged as `c0f0189`, tag `ki-050-fixed`. The user must add `REDIS_PASSWORD` to `.env` (compose refuses to start without it).
-
-## Done
-- `.github/workflows/smoke.yml`: daily 05:43 UTC + workflow_dispatch + PR label `run-smoke`; throwaway `.env`, `docker compose up -d --build --wait`,
-  `scripts/smoke-test.sh`, logs artifact, teardown. User chose this schedule (2026-10-08). `run-smoke` label created.
-- Proven on CI: 4 runs of the same code, 1 failed (rate-limit burst, cold runner), 3 passed 468/0/3. Burst counts now printed. KI-055 records the flake.
-- README "The smoke test in CI", KNOWN_ISSUES (KI-049 fixed, KI-055), `decisions.md` [Fix KI-049].
+## State of the backend
+No open defects. Last merged fixes: KI-050 (Redis password, `c0f0189`, tag `ki-050-fixed`) and KI-049 (smoke test in CI, `82ef598`,
+tag `ki-049-fixed`). Open deferred gaps: KI-016..024, 031..036, 048 (needs a Sonar server/token from the user),
+051 (TLS), 054, 055.
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-049-fixed`.
-The first daily run on `main` happens at 05:43 UTC; the workflow can also be started from the Actions tab.
-Remaining gaps: KI-016..024, 031..036, 048, 051, 054, 055.
+STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main` (no tag for a chore).
+Then wait for the user to pick the next unit (the user suggested TLS, KI-051, as the one worth doing; its scope needs agreeing first).
+The frontend team was given notes for everything since `phase-34-complete` (pull `main`, add `REDIS_PASSWORD`, paging, 503s, actuator).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
