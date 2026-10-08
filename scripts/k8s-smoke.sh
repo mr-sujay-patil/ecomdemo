@@ -4,7 +4,7 @@
 #   scripts/k8s-up.sh && scripts/k8s-smoke.sh
 #
 # What changes for the smoke test, and nothing else does:
-#   - BASE_URL is the INGRESS (Traefik, localhost:18080), so every API check crosses it;
+#   - BASE_URL is the INGRESS (Traefik, https://localhost:18443; plain 18080 only redirects), so every API check crosses it;
 #   - SMOKE_PLATFORM=k8s makes its container helpers use `kubectl exec` / `kubectl scale`;
 #   - the two services it reads directly (the app's actuator, payment-service's health) are reached
 #     through `kubectl port-forward` on 18084 / 18086 - ports compose does not use, so both stacks
@@ -36,8 +36,18 @@ done
 
 cp scripts/smoke-test.sh "$WORK/smoke-test.sh"
 NOT_IN_CLUSTER="http://observability-stays-in-compose.invalid"
+# KI-051: the API is HTTPS now. The CA that signed the Ingress certificate is exported by k8s-up.sh to
+# .local/ecomdemo-ca.crt (public); take it from the cluster if the file is missing. curl reads
+# CURL_CA_BUNDLE and Python SSL_CERT_FILE, so the smoke test verifies the certificate like any client.
+TLS_CA="${TLS_CA:-.local/ecomdemo-ca.crt}"
+if [ ! -s "$TLS_CA" ]; then
+    mkdir -p "$(dirname "$TLS_CA")"
+    kubectl --context "$CONTEXT" -n cert-manager get secret ecomdemo-local-ca -o 'jsonpath={.data.ca\.crt}' \
+        | base64 -d > "$TLS_CA"
+fi
+export CURL_CA_BUNDLE="$TLS_CA" SSL_CERT_FILE="$TLS_CA"
 SMOKE_PLATFORM=k8s \
-BASE_URL="${BASE_URL:-http://localhost:18080}" \
+BASE_URL="${BASE_URL:-https://localhost:18443}" \
 APP_URL=http://localhost:18084 \
 PAYMENT_URL=http://localhost:18086 \
 PROMETHEUS_URL="$NOT_IN_CLUSTER" GRAFANA_URL="$NOT_IN_CLUSTER" \

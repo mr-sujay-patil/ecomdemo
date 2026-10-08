@@ -18,9 +18,24 @@ service:
 ports:
   web:
     nodePort: 30080     # mapped to localhost:18080 by kind-cluster.yaml
+    # KI-051: the plain-HTTP port serves no API traffic, it only answers 301 to HTTPS. Without this
+    # a client that typed http:// would send its Bearer token in clear text before anything
+    # could object. Traefik redirects to the PORT OF THE `websecure` ENTRYPOINT, which is why that
+    # entrypoint below listens on 18443 inside the pod: the same number the client uses (kind maps
+    # host 18443 to NodePort 30443 to this port), so the Location header is right. The chart only
+    # accepts an entrypoint NAME here, not ":18443".
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
   websecure:
+    port: 18443         # inside the pod; see the redirect above
+    exposedPort: 18443
     expose:
-      default: false    # no TLS on a laptop cluster
+      default: true
+    nodePort: 30443     # mapped to localhost:18443 by kind-cluster.yaml
 ingressClass:
   enabled: true
   isDefaultClass: true

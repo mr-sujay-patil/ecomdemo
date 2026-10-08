@@ -282,6 +282,7 @@ internal paths with the product name or order id as a *parameter*, never as a UR
 
 ### API8 Security Misconfiguration ⚠️
 
+- ✅ **The cluster's front door is HTTPS (KI-051).** Traefik terminates TLS on `https://localhost:18443` with a certificate cert-manager issues (90 days, renewed at 60) from a local CA created in the cluster; the plain `http://localhost:18080` answers 301 to it and serves no API traffic, so a Bearer token cannot be sent in clear text there. The CA's public certificate is exported to `.local/ecomdemo-ca.crt` (README, "TLS"); its private key stays in the cluster. The smoke test asserts the redirect, that a token over plain HTTP is only redirected, and that the certificate verifies against the CA for `localhost`. Not done: TLS between Traefik and the gateway, between services, to Kafka and to the databases (KI-056), and in compose (HTTP on `127.0.0.1`).
 - ✅ **Redis requires a password (KI-050).** `REDIS_PASSWORD` (no default; compose refuses to start without it, and `scripts/k8s-up.sh` generates one into the `cache-secrets` Secret) is passed to the cache with `--requirepass` and to the four services that use it as `SPRING_DATA_REDIS_PASSWORD`. The smoke test asserts that a client without the password gets `NOAUTH`. Not done: TLS to Redis (KI-051) and a replica (KI-054).
 - ✅ **compose publishes every port on `127.0.0.1` only (KI-003).** It used to publish all of them
   on every interface: the eight services, the six PostgreSQL databases (with default passwords),

@@ -13,7 +13,7 @@ failure says exactly which fact was missing. The alternative - a second model gr
 and with a small local model it would be the weaker of the two.
 
     python3 scripts/assistant-eval.py                 # against http://localhost:8080
-    BASE_URL=http://localhost:18080 python3 scripts/assistant-eval.py
+    BASE_URL=https://localhost:18443 SSL_CERT_FILE=.local/ecomdemo-ca.crt python3 scripts/assistant-eval.py
     python3 scripts/assistant-eval.py --report /tmp/eval.json
 
 Exit status 0 only when every case passes. Needs only the Python standard library.

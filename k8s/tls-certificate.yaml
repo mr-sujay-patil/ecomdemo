@@ -1,0 +1,27 @@
+# The Ingress's TLS certificate (KI-051), issued and renewed by cert-manager from the local CA
+# (platform/ca.yaml). cert-manager writes the key and certificate into the Secret `ecomdemo-tls`,
+# which the Ingress (ingress.yaml) names in its `tls` section.
+#
+# 90 days, renewed 30 days before expiry: short-lived on purpose, because renewal that works every
+# time is the point of automating it. A client that trusts the CA keeps working across renewals.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ecomdemo-tls
+  labels:
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: ecomdemo-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer

@@ -4215,6 +4215,25 @@ print(sum(1 for d in json.load(sys.stdin)['items'] for c in d['spec']['template'
 check "the Ingress sends everything to the gateway" "gateway-service" \
     "$(kube get ingress ecomdemo -o jsonpath='{.spec.rules[0].http.paths[0].backend.service.name}')"
 
+# --- TLS at the Ingress (KI-051) ----------------------------------------------------------------
+# A Bearer token must never cross the network in clear text. The API is on https://localhost:18443; the
+# old plain-HTTP port only redirects. HTTP_INGRESS is that plain port, TLS_CA the CA certificate that
+# scripts/k8s-up.sh exports (public; the CA key stays in the cluster).
+HTTP_INGRESS="${HTTP_INGRESS:-http://localhost:18080}"
+TLS_CA="${CURL_CA_BUNDLE:-.local/ecomdemo-ca.crt}"
+check "the API is served over HTTPS" "True" \
+    "$(case "$BASE_URL" in https://*) echo True ;; *) echo False ;; esac)"
+check "the plain-HTTP port answers 301, not the API" "301" \
+    "$(curl -s -o /dev/null -w '%{http_code}' "$HTTP_INGRESS/api/products")"
+check "and the redirect points at HTTPS" "True" \
+    "$(curl -s -o /dev/null -w '%{redirect_url}' "$HTTP_INGRESS/api/products" | grep -q '^https://' && echo True || echo False)"
+check "a request with a Bearer token over plain HTTP is also only redirected, never answered" "301" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer not-a-real-token' "$HTTP_INGRESS/api/orders")"
+check "the certificate verifies against the local CA, for localhost" "Verify return code: 0 (ok)" \
+    "$(echo | openssl s_client -connect "${BASE_URL#https://}" -servername localhost -CAfile "$TLS_CA" -verify_hostname localhost 2>/dev/null | sed -n 's/^ *\(Verify return code: 0 (ok)\).*/\1/p' | head -1)"
+check "cert-manager has the certificate Ready" "True" \
+    "$(kube get certificate ecomdemo-tls -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
+
 # The HPA needs metrics-server: until it reports, the target reads <unknown> and nothing scales.
 HPA_CPU=""
 for _ in $(seq 1 90); do

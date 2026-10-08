@@ -5,7 +5,8 @@
 #   SKIP_BUILD=1 scripts/k8s-up.sh   # reuse the images already built (docker compose build)
 #
 # Safe to run again: every step checks what exists first. Then:
-#   http://localhost:18080       the Ingress (Traefik) -> gateway-service -> everything else
+#   https://localhost:18443      the Ingress (Traefik, TLS from cert-manager) -> gateway-service -> everything else
+#   http://localhost:18080       only redirects to the HTTPS port (KI-051); trust .local/ecomdemo-ca.crt, written below
 #   scripts/k8s-smoke.sh         the smoke test against it
 #   scripts/k8s-demo.sh          rolling update, rollback, self-healing and autoscaling demos
 #   scripts/k8s-down.sh          delete the cluster
@@ -22,6 +23,7 @@ KCTX="kind-$CLUSTER"
 # while this script was being written) and an unpinned install then fails - or worse, changes.
 TRAEFIK_CHART_VERSION=41.6.0          # Traefik v3.7.13
 METRICS_SERVER_CHART_VERSION=3.14.0   # metrics-server v0.9.0
+CERT_MANAGER_CHART_VERSION=v1.20.4    # cert-manager v1.20.4 (KI-051)
 k() { kubectl --context "$KCTX" "$@"; }
 
 step() { printf '\n\033[1m== %s\033[0m\n' "$*"; }
@@ -55,6 +57,17 @@ helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/ >
 helm repo update traefik metrics-server >/dev/null
 retry helm --kube-context "$KCTX" upgrade --install traefik traefik/traefik \
     --version "$TRAEFIK_CHART_VERSION" --namespace traefik --create-namespace -f k8s/platform/traefik-values.yaml --wait
+# KI-051: cert-manager issues and renews the Ingress certificate from a local CA (k8s/platform/ca.yaml).
+helm repo add jetstack https://charts.jetstack.io >/dev/null 2>&1 || true
+helm repo update jetstack >/dev/null
+retry helm --kube-context "$KCTX" upgrade --install cert-manager jetstack/cert-manager \
+    --version "$CERT_MANAGER_CHART_VERSION" --namespace cert-manager --create-namespace \
+    -f k8s/platform/cert-manager-values.yaml --wait
+# The CA's own objects need cert-manager's webhook to be answering, which `--wait` has just ensured
+# but a freshly started webhook can still refuse the first request, so retry.
+retry k apply -f k8s/platform/ca.yaml
+k -n cert-manager wait --for=condition=Ready certificate/ecomdemo-local-ca --timeout=120s
+k wait --for=condition=Ready clusterissuer/ecomdemo-ca --timeout=120s
 retry helm --kube-context "$KCTX" upgrade --install metrics-server metrics-server/metrics-server \
     --version "$METRICS_SERVER_CHART_VERSION" --namespace kube-system -f k8s/platform/metrics-server-values.yaml --wait
 
@@ -166,4 +179,14 @@ done
 
 step "Ready"
 k -n "$NS" get pods -o wide
-printf '\nThe Ingress is http://localhost:18080 - try: curl -s http://localhost:18080/api/products | head -c 200\n'
+# KI-051: wait for the Ingress certificate, then write the CA that signed it where you can trust it. The
+# file is the CA's PUBLIC certificate; its private key stays in the cluster.
+step "TLS certificate and the CA to trust"
+k -n "$NS" wait --for=condition=Ready certificate/ecomdemo-tls --timeout=120s
+mkdir -p .local
+k -n cert-manager get secret ecomdemo-local-ca -o 'jsonpath={.data.ca\.crt}' | base64 -d > .local/ecomdemo-ca.crt
+echo "CA certificate written to .local/ecomdemo-ca.crt"
+
+printf '\nThe Ingress is https://localhost:18443 (http://localhost:18080 redirects to it).\n'
+printf 'Try: curl --cacert .local/ecomdemo-ca.crt -s https://localhost:18443/api/products | head -c 200\n'
+printf 'Trust the CA once (README, "TLS") and the --cacert is not needed.\n'
