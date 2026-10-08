@@ -2726,13 +2726,33 @@ section "API gateway"
 # Worth establishing first, because it is what gives the rest of the section meaning: if 8080 and
 # 8084 were the same server, every check here would be vacuous.
 as_anonymous
-check "the gateway answers on 8080" "200" "$(request GET /actuator/health)"
+# KI-006: the gateway's actuator is on a management port that nothing publishes (compose) or routes
+# (the Ingress), so it is read from INSIDE the gateway's container. The public port answers none of it.
+GATEWAY_CONTAINER="${GATEWAY_CONTAINER:-ecomdemo-gateway-service}"
+GATEWAY_MANAGEMENT_PORT="${GATEWAY_MANAGEMENT_PORT:-8088}"
+in_gateway_management() { # in_gateway_management <path> -> the body
+    ctr_exec "$GATEWAY_CONTAINER" wget -qO- "http://localhost:${GATEWAY_MANAGEMENT_PORT}$1" 2>/dev/null
+}
+check "the gateway answers on 8080" "200" "$(request GET /api/products)"
+check "its health is UP on the management port" "UP" \
+    "$(in_gateway_management /actuator/health | python3 -c "import json,sys; print(json.load(sys.stdin)['status'])" 2>/dev/null)"
 check "and the application answers separately on 8084" "200" "$(app_request GET /actuator/health)"
-request GET /actuator/info >/dev/null
-check "8080 identifies itself as the gateway" "gateway-service" "$(jget "d['build']['artifact']")"
+in_gateway_management /actuator/info > "$BODY"
+check "the management port identifies itself as the gateway" "gateway-service" "$(jget "d['build']['artifact']")"
 app_request GET /actuator/info >/dev/null
 check "and 8084 as the application - two builds, two processes" "ecomdemo-app" \
     "$(jget "d['build']['artifact']")"
+GATEWAY_METRICS="$(in_gateway_management /actuator/prometheus)"
+check "the gateway's metrics are served on the management port" "yes" \
+    "$(case "$GATEWAY_METRICS" in *http_server_requests*) echo yes ;; *) echo no ;; esac)"
+# KI-006 itself: the port every client uses serves no actuator endpoint, so the metrics are not public.
+check "8080 refuses /actuator/prometheus to an anonymous caller (401)" "401" "$(request GET /actuator/prometheus)"
+check "8080 refuses /actuator/health to an anonymous caller (401)" "401" "$(request GET /actuator/health)"
+if [ "$SMOKE_PLATFORM" != "k8s" ]; then
+    GATEWAY_PORTS="$(docker port "$GATEWAY_CONTAINER" 2>/dev/null)"
+    check "compose does not publish the gateway's management port" "no" \
+        "$(case "$GATEWAY_PORTS" in *"${GATEWAY_MANAGEMENT_PORT}/"*) echo yes ;; *) echo no ;; esac)"
+fi
 
 # --- The routes reach four different services ---------------------------------------------------
 # One request per routed service, each asserting something only that service can answer. A route

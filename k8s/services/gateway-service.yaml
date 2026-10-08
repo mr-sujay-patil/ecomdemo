@@ -80,6 +80,10 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            # KI-006: the actuator's own port. Probes and Prometheus use it; the Service below does
+            # not list it, so nothing outside the pod network can reach it.
+            - name: management
+              containerPort: 8088
           envFrom:
             - configMapRef:
                 name: gateway-service-config
@@ -94,19 +98,19 @@ spec:
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: http
+              port: management
             periodSeconds: 5
             failureThreshold: 60
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
-              port: http
+              port: management
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
-              port: http
+              port: management
             periodSeconds: 5
             failureThreshold: 3
           # The pod is removed from the Service's endpoints at the same moment it is told to stop,
