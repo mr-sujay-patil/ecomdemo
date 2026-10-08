@@ -5,7 +5,8 @@
 - **Updated:** 2026-10-08
 - **Fix:** KI-047, the gateway's management port (8088) also served the API routes
 - **Branch:** fix/ki-047-mgmt-port-routes (cut from `main` at `d7be593`)
-- **Step:** PR_OPEN (PR number below once raised)
+- **Step:** PR_OPEN
+- **PR:** #71 https://github.com/mr-sujay-patil/ecomdemo/pull/71
 - **Waiting for user:** YES (review of the KI-047 PR)
 
 ## Merge verification of KI-007 (done 2026-10-08)
