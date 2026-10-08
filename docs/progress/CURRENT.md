@@ -6,7 +6,7 @@
 - **Fix:** KI-005, no load shedding at checkout (requests wait 10 s for a DB connection instead of a fast 503 + `Retry-After`)
 - **Branch:** fix/ki-005-checkout-load-shedding (cut from `main` at `4ce3159`)
 - **Step:** PR_OPEN
-- **PR:** see the PR for this branch (number is in KNOWN_ISSUES once set)
+- **PR:** #68 https://github.com/mr-sujay-patil/ecomdemo/pull/68
 - **Waiting for user:** YES (review of the KI-005 PR)
 
 ## Merge verification of KI-004 (done 2026-10-08)
