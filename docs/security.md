@@ -69,6 +69,7 @@ Trivy.
 | CVE-2026-68497 | `com.fasterxml.jackson.core:jackson-databind` 2.21.5 (7 images) | HIGH | Trivy | **Fixed**: `jackson-2-bom.version` 2.21.6 |
 | CVE-2026-91776, CVE-2026-91777 | `tools.jackson.core:jackson-databind` 3.1.6 (8 images) | HIGH | Trivy (CI on `main`, 2026-10-01) | **Fixed** (KI-042): `jackson-bom.version` 3.1.7 |
 | CVE-2026-91776, CVE-2026-91777 | `com.fasterxml.jackson.core:jackson-databind` 2.21.6 (8 images) | HIGH | Trivy (CI on `main`, 2026-10-01) | **Fixed** (KI-042): `jackson-2-bom.version` 2.21.7 |
+| CVE-2026-106451 | `at.yawk.lz4:lz4-java` 1.10.1 (5 images, via kafka-clients) | HIGH | Trivy (CI on PR #78, 2026-10-08) | **Fixed** (KI-053): pinned `lz4-java.version` 1.11.4 in the parent pom's `dependencyManagement` (Boot does not manage it) |
 | CVE-2026-53914 (9.8) | `kotlin-stdlib` 2.3.21, `kotlin-stdlib-common` 1.9.10, `kotlin-reflect` 2.3.21 | CRITICAL | Dependency-Check | **Suppressed, false positive**: the CVE is in Kotlin's *build cache* (compiler tooling), and the CPE covers the whole product, so every Kotlin jar matches. Only the runtime libraries ship here (via OkHttp and the OpenAI client); Trivy doesn't flag them. Expires 2027-03-31 |
 | CVE-2026-18022 (8.8) | `com.pgvector:pgvector` 0.1.6 (Java client) | HIGH | Dependency-Check | **Suppressed, false positive**: the CVE is in the PostgreSQL *extension's* IVFFlat build, on 32-bit only. The jar has no index code, and the running extension was checked: 0.8.6 (fixed), HNSW index, 64-bit. Expires 2027-03-31 |
 
