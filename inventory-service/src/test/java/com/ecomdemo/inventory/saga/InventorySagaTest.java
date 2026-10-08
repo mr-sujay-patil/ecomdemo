@@ -1,6 +1,11 @@
 package com.ecomdemo.inventory.saga;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.ecomdemo.inventory.InventoryService;
 import com.ecomdemo.outbox.internal.OutboxEvent;
@@ -8,7 +13,9 @@ import com.ecomdemo.outbox.internal.OutboxEventRepository;
 import com.ecomdemo.outbox.internal.ProcessedEventRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
+import com.ecomdemo.inventory.StockChangePublisher;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -150,6 +157,20 @@ class InventorySagaTest {
             assertThat(reserved.totalAmount()).isEqualByComparingTo("149.97");
             assertThat(reserved.username()).isEqualTo("shopper");
             assertThat(reserved.eventId()).isNotEqualTo(event.eventId());
+        }
+
+        @Test
+        @DisplayName("announces stock-changed for every product it took, so catalogue caches are evicted after commit")
+        void announcesTheStockChange() {
+            // Moved from InventoryServiceTest (KI-052): the old single-product reserve was the thing
+            // that announced, and reserveForOrder needs PostgreSQL, so the assertion lives here.
+            when(kafkaTemplate.send(anyString(), anyString(), any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            handler.onOrderCreated(order(orderId, line(mouse, 3), line(keyboard, 2)));
+
+            verify(kafkaTemplate).send(eq(StockChangePublisher.TOPIC), eq(String.valueOf(mouse)), any());
+            verify(kafkaTemplate).send(eq(StockChangePublisher.TOPIC), eq(String.valueOf(keyboard)), any());
         }
 
         @Test

@@ -2,6 +2,7 @@ package com.ecomdemo.inventory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,8 +26,10 @@ import org.testcontainers.utility.DockerImageName;
  * <h2>This coverage MOVED here in Phase 20b; it was not written from scratch</h2>
  *
  * <p>{@code ConcurrentCheckoutTest} in the monolith asserted exactly this: two checkouts for the
- * last unit leave one order and zero stock, because the second {@code UPDATE} matches no row and
- * Hibernate raises an optimistic-locking failure. When inventory became a service, the app-side
+ * last unit leave one order and zero stock. (It was an optimistic-locking failure then; since
+ * Phase 24 {@code reserveForOrder} takes a pessimistic row lock instead, so the loser is refused
+ * rather than failing. KI-052 moved this test onto it when the single-product {@code reserve}
+ * was removed.) When inventory became a service, the app-side
  * test could no longer create the race — it now reaches stock over HTTP, and what it was really
  * testing was a database lock two processes away.
  *
@@ -79,14 +82,17 @@ class ConcurrentReservationTest {
 
         ExecutorService threads = Executors.newFixedThreadPool(2);
         for (int i = 0; i < 2; i++) {
+            // Two DIFFERENT orders: the same order twice would be a redelivery, not a race.
+            long orderId = 9100L + i;
             threads.submit(() -> {
                 try {
                     start.await();
-                    inventory.reserve(productId, "Last One", 1);
-                    succeeded.incrementAndGet();
+                    ReservationResult result = inventory.reserveForOrder(
+                            orderId, List.of(new ReservationLine(productId, "Last One", 1)));
+                    // The loser is REFUSED (a rejection, which the saga publishes), or its
+                    // transaction fails; either is the system declining to oversell.
+                    (result.reserved() ? succeeded : failed).incrementAndGet();
                 } catch (Exception e) {
-                    // Either the optimistic lock fired, or the loser read a row that already said
-                    // zero. Both are the system refusing to oversell, which is the claim.
                     failed.incrementAndGet();
                 } finally {
                     finished.countDown();
