@@ -107,8 +107,8 @@ search answers 503 and everything else works. See [Semantic search](#semantic-se
 
 
 **Phase 25: Container Orchestration — the whole system also runs on a local Kubernetes cluster,
-behind an Ingress.** `scripts/k8s-up.sh` builds a kind cluster with Traefik on **localhost:18080**
-in front of the gateway. Every service has a Deployment, Service, ConfigMap and Secret, three
+behind an Ingress.** `scripts/k8s-up.sh` builds a kind cluster with Traefik on **https://localhost:18443**
+(plain `localhost:18080` only redirects to it, KI-051) in front of the gateway. Every service has a Deployment, Service, ConfigMap and Secret, three
 health probes and resource limits; the databases and Kafka are StatefulSets with their own volumes,
 and catalog-service scales 2–4 pods on CPU. Delete a pod and the flow keeps working while it is
 replaced; roll out a new version and no request fails. See
@@ -2831,7 +2831,7 @@ containers, here a single node.
 
 ```bash
 scripts/k8s-up.sh        # cluster, Traefik, metrics-server, images, secrets, manifests (~5 min first time)
-curl -s localhost:18080/api/products | head -c 200    # through the Ingress
+curl --cacert .local/ecomdemo-ca.crt -s https://localhost:18443/api/products | head -c 200    # through the Ingress, over TLS
 scripts/k8s-smoke.sh     # the smoke test, through the Ingress, plus a Kubernetes section
 scripts/k8s-demo.sh rollout|rollback|selfheal|hpa
 scripts/k8s-down.sh      # delete the cluster
@@ -2847,7 +2847,8 @@ Needs `kind`, `kubectl` and `helm`. The manifests are in `k8s/`: plain YAML, app
 | the 7 services | Deployment + Service + ConfigMap + Secret | stateless pods, replaced freely |
 | 6 PostgreSQL, Kafka | StatefulSet + Service + a volume each | a stable name (`db-0`) and a disk that outlives the pod |
 | Redis | Deployment | holds nothing that cannot be rebuilt |
-| Traefik (namespace `traefik`) | Helm chart | the Ingress controller: `localhost:18080` → gateway |
+| Traefik (namespace `traefik`) | Helm chart | the Ingress controller: `https://localhost:18443` → gateway; `localhost:18080` redirects |
+| cert-manager (namespace `cert-manager`) | Helm chart | issues and renews the Ingress certificate from a local CA (KI-051) |
 | metrics-server | Helm chart | CPU numbers for the HPA and `kubectl top` |
 
 Prometheus, Grafana, Loki and Tempo stay in compose (a Phase 25 decision). The Kubernetes smoke run
@@ -3514,6 +3515,38 @@ annotation is what makes the rule speak up again the day this application adopts
 Every pull request is built and tested by [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 before it can be merged, and every merge to `main` publishes an image. **A PR may be merged only
 when CI is green.**
+
+### TLS at the Ingress (KI-051)
+
+A Bearer token must not cross a network in clear text, so the cluster's front door is HTTPS:
+**https://localhost:18443**. Traefik terminates TLS with a certificate that **cert-manager** issues and
+renews (90 days, renewed at 60) from a local certificate authority it creates inside the cluster
+(`k8s/platform/ca.yaml`). The old port, `http://localhost:18080`, serves no API traffic at all: it answers
+**301** with a `Location` on the HTTPS port, so even a client that typed `http://` never sends its token over it.
+
+`scripts/k8s-up.sh` writes the CA's public certificate to `.local/ecomdemo-ca.crt` (git-ignored; the CA's
+private key never leaves the cluster). Use it without installing anything:
+
+```bash
+curl --cacert .local/ecomdemo-ca.crt https://localhost:18443/api/products
+```
+
+or trust it once so browsers and tools stop warning:
+
+```bash
+# Debian/Ubuntu/WSL2 (command-line tools):
+sudo cp .local/ecomdemo-ca.crt /usr/local/share/ca-certificates/ecomdemo-local-ca.crt && sudo update-ca-certificates
+# Windows browsers (from WSL2): import it into "Trusted Root Certification Authorities"
+#   certutil.exe -addstore -user Root "$(wslpath -w .local/ecomdemo-ca.crt)"
+```
+
+A cluster created before this needs `scripts/k8s-down.sh` and `scripts/k8s-up.sh`: kind cannot add the HTTPS
+port mapping to a running cluster, and the CA is new, so re-export and re-trust it.
+
+**What this does and does not cover.** It protects the leg that crosses the network a client uses. Traefik
+to the gateway, the gateway to the services, Kafka and the databases stay plain on the cluster network, and
+compose stays HTTP on `127.0.0.1` (KI-003). Encrypting the hops inside the cluster is a separate, larger
+piece of work (certificates and truststores in every service) and is not done.
 
 ### The smoke test in CI (KI-049)
 

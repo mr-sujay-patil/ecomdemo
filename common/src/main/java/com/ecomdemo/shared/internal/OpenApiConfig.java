@@ -44,7 +44,7 @@ public class OpenApiConfig {
     /**
      * The only server in every document: RELATIVE, so it resolves against the address the document
      * was fetched from. Through the gateway's Swagger UI that is always the gateway, on whatever port
-     * it is published (8080 in compose, 18080 on kind), so "Try it out" goes through the same edge as
+     * it is published (8080 in compose, https 18443 on kind), so "Try it out" goes through the same edge as
      * a client. An absolute {@code http://localhost:8080} was right for compose only.
      */
     static final String DEFAULT_SERVER = "/";

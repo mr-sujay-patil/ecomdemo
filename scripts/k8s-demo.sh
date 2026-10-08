@@ -10,7 +10,9 @@
 set -euo pipefail
 CONTEXT=kind-ecomdemo
 NS=ecomdemo
-INGRESS="${INGRESS:-http://localhost:18080}"
+INGRESS="${INGRESS:-https://localhost:18443}"
+# KI-051: verify the certificate against the local CA that k8s-up.sh exported (public).
+if [ -s .local/ecomdemo-ca.crt ]; then export CURL_CA_BUNDLE="$PWD/.local/ecomdemo-ca.crt"; fi
 k() { kubectl --context "$CONTEXT" -n "$NS" "$@"; }
 
 traffic() { # traffic <seconds> -> prints "N requests, M not 200"

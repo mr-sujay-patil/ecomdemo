@@ -30,5 +30,6 @@ resources:
   - services/assistant-service.yaml
   - services/gateway-service.yaml
   # the edge and the autoscaler
+  - tls-certificate.yaml
   - ingress.yaml
   - hpa.yaml

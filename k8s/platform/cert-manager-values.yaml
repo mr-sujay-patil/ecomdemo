@@ -1,0 +1,12 @@
+# cert-manager (KI-051), installed with Helm by scripts/k8s-up.sh:
+#   helm upgrade --install cert-manager jetstack/cert-manager --version <pinned> -n cert-manager -f this-file
+# The chart version is pinned in the script, for the reason Traefik's is: a chart's values schema
+# changes between releases.
+#
+# cert-manager turns a `Certificate` resource into a TLS Secret and renews it before it expires. Here
+# it runs a local certificate authority (platform/ca.yaml) so the Ingress certificate is signed by a
+# CA you can trust once, instead of a self-signed certificate every client has to wave through.
+crds:
+  enabled: true     # the chart installs Certificate, Issuer, ClusterIssuer ...; `kubectl apply` of our
+                    # Certificate would fail without them
+  keep: true        # and `helm uninstall` keeps them, so deleting the release cannot delete every certificate

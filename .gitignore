@@ -83,3 +83,5 @@ __pycache__/
 
 # Trivy output from the image scan (Phase 31): SBOMs and tables, written by CI and local runs
 trivy-reports/
+# The local CA certificate scripts/k8s-up.sh exports for you to trust (KI-051). Public, but per machine.
+.local/

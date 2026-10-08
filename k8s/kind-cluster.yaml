@@ -20,3 +20,10 @@ nodes:
       - containerPort: 30080
         hostPort: 18080
         protocol: TCP
+      # KI-051: HTTPS. Traefik's `websecure` entrypoint (NodePort 30443, platform/traefik-values.yaml)
+      # is https://localhost:18443. Port 18080 only redirects to it: no API call is ever served in
+      # clear text. kind cannot add a port mapping to a running cluster, so a cluster created before
+      # this needs scripts/k8s-down.sh and scripts/k8s-up.sh.
+      - containerPort: 30443
+        hostPort: 18443
+        protocol: TCP

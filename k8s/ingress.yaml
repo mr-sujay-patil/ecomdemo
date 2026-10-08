@@ -7,8 +7,14 @@
 # exactly one rule - everything to the gateway - and all the routing that knows about our API stays
 # in code, where it is tested.
 #
-# No `host`: any host name reaching the node is accepted, so http://localhost:18080 works without
-# editing /etc/hosts. A real cluster would name its host here and add a `tls` section.
+# No `host` on the rule: any host name reaching the node is accepted, so https://localhost:18443 works
+# without editing /etc/hosts.
+#
+# TLS (KI-051): the `tls` section below makes Traefik terminate HTTPS with the certificate in the
+# `ecomdemo-tls` Secret, which cert-manager issues and renews (k8s/tls-certificate.yaml, from the
+# local CA in platform/ca.yaml). Traffic from Traefik to the gateway and everything behind it stays
+# plain HTTP on the cluster network: this protects the leg that crosses the network a client uses,
+# not the pod-to-pod hops.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -17,6 +23,9 @@ metadata:
     app.kubernetes.io/part-of: ecomdemo
 spec:
   ingressClassName: traefik
+  tls:
+    - hosts: [localhost]
+      secretName: ecomdemo-tls
   rules:
     - http:
         paths:

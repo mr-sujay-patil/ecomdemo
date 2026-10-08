@@ -1,0 +1,45 @@
+# A local certificate authority for the cluster (KI-051), applied by scripts/k8s-up.sh after cert-manager
+# is running. Three objects, and the order is the point:
+#
+#   1. selfsigned-bootstrap   an issuer that signs with its own key: only used to create the CA below
+#   2. ecomdemo-local-ca      a Certificate with isCA: true. cert-manager generates a key pair and
+#                             signs the CA certificate with (1). The result lands in the Secret
+#                             `ecomdemo-local-ca` in the cert-manager namespace.
+#   3. ecomdemo-ca            an issuer that signs with (2)'s key. k8s/tls-certificate.yaml asks for
+#                             the Ingress certificate from this one.
+#
+# Trust the CA once on the machine that runs the browser or client, and every certificate it issues
+# is trusted: scripts/k8s-up.sh writes the CA certificate (public, not secret) to .local/ecomdemo-ca.crt.
+# The CA's private key never leaves the cluster.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-bootstrap
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: ecomdemo-local-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: EcomDemo local CA
+  secretName: ecomdemo-local-ca
+  duration: 17520h        # two years
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-bootstrap
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ecomdemo-ca
+spec:
+  ca:
+    secretName: ecomdemo-local-ca
