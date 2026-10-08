@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-08
 - **Fix:** KI-010, notification-service keeps its own copy of the idempotent-consumer code
 - **Branch:** fix/ki-010-notification-processed-events (cut from `main` at `b3ed529`)
-- **Step:** SMOKE_PENDING (code + docs done, `./mvnw clean verify` green; PR not raised yet)
-- **Waiting for user:** YES (steps 3-4 of the testing protocol need a free compose stack, see below)
+- **Step:** PR_OPEN
+- **Waiting for user:** YES (review of the KI-010 PR)
 
 ## Merge verification of KI-009 (done 2026-10-08)
 PR #73 merged as `b3ed529`; CI on `main` green; tag `ki-009-fixed`.
@@ -19,13 +19,14 @@ PR #73 merged as `b3ed529`; CI on `main` green; tag `ki-009-fixed`.
 - Docs: KNOWN_ISSUES KI-010 Fixed, `decisions.md` [Fix KI-010], `saga.md` gaps list.
 - `./mvnw clean verify`: BUILD SUCCESS, 0 failures (notification-service: 6 unit + 5 IT).
 
-## Not done
-- Testing protocol steps 3-4 (run the app, `scripts/smoke-test.sh`): the frontend team's stack
-  (`~/projects/ecomdemo-backend-readonly`) is running on the same container names and ports. NOT touched.
+## Verified (2026-10-08)
+- Steps 3-4 ran on the kind cluster (the frontend team's compose stack was left alone): only the notification image was
+  rebuilt/loaded and the deployment restarted. New pod applied V2, started in 5 s, 0 ERROR lines.
+  `scripts/k8s-smoke.sh`: 446 passed, 0 failed, 7 skipped (compose-only checks).
+- Side effect: `docker compose build notification-service` retagged the local `ecomdemo-notification:latest`.
 
 ## Next action
-Ask the user how to run steps 3-4 (stop the other stack, or use the kind cluster). Then smoke, put results in the PR
-description, raise the PR, STOP. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-010-fixed`.
+STOP: wait for review. After `approved, merge it`: wait for checks, merge --merge, verify, tag `ki-010-fixed`.
 Still open: KI-011.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
