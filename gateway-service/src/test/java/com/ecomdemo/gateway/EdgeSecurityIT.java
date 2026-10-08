@@ -241,6 +241,28 @@ class EdgeSecurityIT extends GatewayTest {
     }
 
     /**
+     * KI-047. The management server reuses the gateway's route handlers, so without a guard
+     * {@code :8088/api/products} was proxied like the public port. The port meant for operations
+     * answers 404 for everything that is not under {@code /actuator}, before security and before routing.
+     */
+    @Test
+    @DisplayName("the management port routes nothing: the API paths answer 404, on any method")
+    void theManagementPortDoesNotServeTheApi() {
+        management.get().uri("/api/products").exchange().expectStatus().isNotFound();
+        management.get().uri("/api/orders").exchange().expectStatus().isNotFound();
+        management.post().uri("/api/auth/login").exchange().expectStatus().isNotFound();
+        management.get().uri("/swagger-ui.html").exchange().expectStatus().isNotFound();
+    }
+
+    @Test
+    @DisplayName("the public port still serves the API after the management guard")
+    void thePublicPortStillRoutesTheApi() {
+        web.get().uri("/api/orders").exchange().expectStatus().isUnauthorized();
+        web.get().uri("/swagger-ui.html").exchange().expectStatus().value(status ->
+                org.assertj.core.api.Assertions.assertThat(status).isNotEqualTo(404));
+    }
+
+    /**
      * The correlation ID is minted at the edge even for a request that never reaches a service.
      *
      * <p>A rejected request is the one somebody is most likely to be investigating, so it is the one

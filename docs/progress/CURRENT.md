@@ -3,31 +3,24 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-007, `GET /api/products` returns the whole catalogue, unpaginated
-- **Branch:** fix/ki-007-paginate-products (cut from `main` at `8fb9a01`)
-- **Step:** PR_OPEN
-- **PR:** #70 https://github.com/mr-sujay-patil/ecomdemo/pull/70
-- **Waiting for user:** YES (review of the KI-007 PR)
+- **Fix:** KI-047, the gateway's management port (8088) also served the API routes
+- **Branch:** fix/ki-047-mgmt-port-routes (cut from `main` at `d7be593`)
+- **Step:** PR_OPEN (PR number below once raised)
+- **Waiting for user:** YES (review of the KI-047 PR)
 
-## Merge verification of KI-006 (done 2026-10-08)
-PR #69 merged as `8fb9a01`; CI on `main` green incl. scans and publish; tag `ki-006-fixed`.
-
-## Decision (user, 2026-10-08)
-Array body + headers (`X-Total-Count`, `Link`); `page` from 0, `size` default 50, max 100 (else 400). Behaviour change: no
-parameters means the first 50.
+## Merge verification of KI-007 (done 2026-10-08)
+PR #70 merged as `d7be593`; CI on `main` green; tag `ki-007-fixed` on origin.
 
 ## Done
-- catalog-service: `ProductService.findPage` (cache per page `p<page>:<size>`, every write clears `productList`), `ProductPage`
-  record, controller params + headers; `CatalogClient.findAll()` follows pages; gateway CORS exposes the headers; Gatling
-  `TestData` follows pages. Tests: `ProductApiIT` (seen failing first), `ProductControllerTest`, `ProductServiceTest`,
-  `CatalogClientPagingTest`, `CorsIT`, `ProductCacheEvictorTest`, `CacheApiIT`. Smoke: paging checks + `listing_all` helper.
-- Docs: `security.md` API4, `decisions.md` [Fix KI-007], README endpoint table + cache table, KNOWN_ISSUES.
-- `./mvnw clean verify` exit 0; kind smoke 447/0/9 (also first run of KI-006's 8088 probe in k8s).
-- NOT run: compose smoke (the frontend team's stack, ~/projects/ecomdemo-backend-readonly, held the container names; user chose kind).
+- `ManagementPortGuardFilter` (gateway-service): 404 for non-`/actuator` paths on the management port, found through
+  `local.management.port` + the request's local port. `EdgeSecurityIT` gained two tests (seen failing first).
+- Docs: `decisions.md` [Fix KI-047], KNOWN_ISSUES row.
+- `./mvnw clean verify` exit 0 (42/253/68 tests, 0 failures).
+- NOT run: `scripts/smoke-test.sh` (compose or kind); k8s probes and Prometheus only use `/actuator/**`, which the filter lets through.
 
 ## Next action
 STOP: wait for the user's review. After `approved, merge it`: wait for the required check, merge with `--merge`, verify (tip in
-`main`, CI on `main` incl. scans and publish), tag `ki-007-fixed`. Still open: KI-008..011, KI-047.
+`main`, CI on `main` incl. scans and publish), tag `ki-047-fixed`. Still open: KI-008..011.
 `stash@{0}` (KI-045 noise) is the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
