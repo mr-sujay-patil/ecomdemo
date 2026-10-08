@@ -282,6 +282,7 @@ internal paths with the product name or order id as a *parameter*, never as a UR
 
 ### API8 Security Misconfiguration ⚠️
 
+- ✅ **Redis requires a password (KI-050).** `REDIS_PASSWORD` (no default; compose refuses to start without it, and `scripts/k8s-up.sh` generates one into the `cache-secrets` Secret) is passed to the cache with `--requirepass` and to the four services that use it as `SPRING_DATA_REDIS_PASSWORD`. The smoke test asserts that a client without the password gets `NOAUTH`. Not done: TLS to Redis (KI-051) and a replica (KI-054).
 - ✅ **compose publishes every port on `127.0.0.1` only (KI-003).** It used to publish all of them
   on every interface: the eight services, the six PostgreSQL databases (with default passwords),
   Redis and Kafka (no authentication), which is what made the API5 gap reachable. Every mapping is

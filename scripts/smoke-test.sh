@@ -453,10 +453,26 @@ fi
 # Returns non-zero when neither is available, so the caller can SKIP rather than invent a pass.
 redis_cli() {
     if command -v redis-cli >/dev/null 2>&1; then
-        redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>/dev/null
+        # KI-050: Redis requires a password. REDISCLI_AUTH keeps it off the command line; it comes
+        # from the environment, else .env. (The container path below already has it set.)
+        REDISCLI_AUTH="${REDIS_PASSWORD:-$(sed -n 's/^REDIS_PASSWORD=//p' .env 2>/dev/null | tail -1)}" \
+            redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>/dev/null
     elif command -v docker >/dev/null 2>&1 \
         && ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
         ctr_exec "$REDIS_CONTAINER" redis-cli "$@" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# redis_cli_noauth <args...> -> the same, as a client that has NO password; prints stdout and stderr
+# because the point is the refusal message. KI-050.
+redis_cli_noauth() {
+    if command -v redis-cli >/dev/null 2>&1; then
+        REDISCLI_AUTH= redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>&1
+    elif command -v docker >/dev/null 2>&1 \
+        && ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
+        ctr_exec "$REDIS_CONTAINER" sh -c 'unset REDISCLI_AUTH; redis-cli "$@"' sh "$@" 2>&1
     else
         return 1
     fi
@@ -1421,6 +1437,11 @@ pass "the ownership probe order is left in history, as an order should be"
 section "Caching"
 
 if redis_cli PING >/dev/null 2>&1; then
+    # KI-050: the cache is not open to a client without the password. Before, anything that could
+    # reach the port could read the cached catalogue, flush it, or plant entries.
+    check "Redis refuses a client that has no password" "True" \
+        "$(case "$(redis_cli_noauth PING || true)" in *NOAUTH* | *"Authentication required"*) echo True ;; *) echo False ;; esac)"
+    check "and answers one that has it" "PONG" "$(redis_cli PING | tr -d '\r ')"
     as_admin
     STATUS="$(request POST /api/products \
         '{"name":"Cache Probe","description":"read me twice","price":77.00,"stockQuantity":4,"category":"TEST"}')"

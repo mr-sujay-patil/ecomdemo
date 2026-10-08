@@ -22,7 +22,9 @@ for name, service in json.load(sys.stdin).get("services", {}).items():
 PY
 
 render() { # render <compose file> -> lines on stdout; BIND_ADDRESS comes from the caller
-    docker compose -f "$1" --profile '*' config --format json 2>"$WORK/err.log" \
+    # REDIS_PASSWORD is required by compose.yaml (KI-050); any value renders, nothing is started.
+    REDIS_PASSWORD="${REDIS_PASSWORD:-render-only}" \
+        docker compose -f "$1" --profile '*' config --format json 2>"$WORK/err.log" \
         | python3 -I "$WORK/ports.py"
 }
 
