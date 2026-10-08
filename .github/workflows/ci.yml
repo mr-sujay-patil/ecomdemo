@@ -55,8 +55,13 @@ jobs:
   # -------------------------------------------------------------------------------------------
   build:
     name: Build and test
-    # Not on a schedule or a manual scan run: the code has not changed since its last green run.
-    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    # Only on a pull request. Not on a push to main, a schedule or a manual scan run: the PR run
+    # already tested exactly the tree that lands on main, because branch protection requires a
+    # branch to be up to date with main before it can merge (and does not allow bypassing that).
+    # Running the same tests again on the merge commit would only repeat that result. This is
+    # safe ONLY while those two branch-protection settings stay on; if they are turned off, a
+    # merge can land a tree nobody tested and this condition must go back to also running on push.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     # `./mvnw verify` starts a PostgreSQL container through Testcontainers. GitHub's ubuntu
     # runners ship a working Docker daemon, so this needs no service container and no extra
@@ -100,8 +105,8 @@ jobs:
         with:
           name: test-reports
           path: |
-            ecomdemo-app/target/surefire-reports/
-            ecomdemo-app/target/failsafe-reports/
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
           retention-days: 14
           # Nothing to upload is not a failure: a compilation error fails before any test runs.
           if-no-files-found: ignore
@@ -117,13 +122,12 @@ jobs:
             echo "| Suite | Tests | Failures | Errors | Skipped |"
             echo "|---|---:|---:|---:|---:|"
             for suite in surefire failsafe; do
-              dir="ecomdemo-app/target/${suite}-reports"
-              [ -d "$dir" ] || continue
-              python3 - "$dir" "$suite" <<'PY'
+              # Every module's reports, not just the application's.
+              python3 - "$suite" <<'PY'
           import glob, sys, xml.etree.ElementTree as ET
-          directory, suite = sys.argv[1], sys.argv[2]
+          suite = sys.argv[1]
           totals = dict(tests=0, failures=0, errors=0, skipped=0)
-          for path in glob.glob(f"{directory}/TEST-*.xml"):
+          for path in glob.glob(f"**/target/{suite}-reports/TEST-*.xml", recursive=True):
               attrib = ET.parse(path).getroot().attrib
               for key in totals:
                   totals[key] += int(attrib.get(key, 0))
@@ -306,12 +310,21 @@ jobs:
     name: Publish image to GHCR
     runs-on: ubuntu-latest
     # `needs` is the gate that makes this meaningful: no image is ever published from a commit
-    # whose tests did not pass. Without it the two jobs would run in parallel and a red build
-    # would still publish.
+    # whose scans did not pass. Without it the jobs would run in parallel and a red scan would
+    # still publish. `build` is listed too, but it is SKIPPED on a push to main (see its `if:`):
+    # the tests ran on the pull request, against exactly the tree that merged.
     needs: [build, dependency-scan, image-scan]
-    # Only on a push to main. A pull_request run must not publish: its code has not been reviewed
-    # or merged, and on a fork it is not even trusted.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Only on a push to main, and only when both scans passed and `build` either passed or was
+    # skipped. `always()` is required: without it a skipped `build` makes GitHub skip this job
+    # too, and nothing would ever be published. The explicit result checks put back the gate
+    # that `always()` removes. A pull_request run must not publish: its code has not been
+    # reviewed or merged, and on a fork it is not even trusted.
+    if: >-
+      always()
+      && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.dependency-scan.result == 'success'
+      && needs.image-scan.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
     permissions:
       contents: read
       # Widened here and nowhere else. This is what lets GITHUB_TOKEN write to GHCR — there is no
