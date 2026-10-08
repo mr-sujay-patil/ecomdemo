@@ -1,0 +1,226 @@
+# One TLS certificate per service (KI-056), issued and renewed by cert-manager from the local CA
+# (platform/ca.yaml). cert-manager writes tls.crt, tls.key and ca.crt into the Secret `<service>-tls`;
+# the Deployment mounts it at /etc/ecomdemo-tls, Spring Boot serves it through an SSL bundle
+# (SERVER_SSL_BUNDLE in the ConfigMap) and reloads it when cert-manager renews it, and the `trust-ca`
+# init container adds ca.crt to the JVM truststore so the service trusts the others.
+#
+# The names are what a caller puts in its URL: the Service name inside the namespace, its longer forms,
+# and `localhost` / 127.0.0.1 for `kubectl port-forward` (the smoke test checks app and payment-service
+# that way). Server-side TLS only: callers are still identified by their JWT service tokens, not by a
+# client certificate.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: app-tls
+  labels:
+    app.kubernetes.io/name: app
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: app-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - app
+    - app.ecomdemo
+    - app.ecomdemo.svc
+    - app.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: catalog-service-tls
+  labels:
+    app.kubernetes.io/name: catalog-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: catalog-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - catalog-service
+    - catalog-service.ecomdemo
+    - catalog-service.ecomdemo.svc
+    - catalog-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: customer-service-tls
+  labels:
+    app.kubernetes.io/name: customer-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: customer-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - customer-service
+    - customer-service.ecomdemo
+    - customer-service.ecomdemo.svc
+    - customer-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: inventory-service-tls
+  labels:
+    app.kubernetes.io/name: inventory-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: inventory-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - inventory-service
+    - inventory-service.ecomdemo
+    - inventory-service.ecomdemo.svc
+    - inventory-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: notification-service-tls
+  labels:
+    app.kubernetes.io/name: notification-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: notification-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - notification-service
+    - notification-service.ecomdemo
+    - notification-service.ecomdemo.svc
+    - notification-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: payment-service-tls
+  labels:
+    app.kubernetes.io/name: payment-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: payment-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - payment-service
+    - payment-service.ecomdemo
+    - payment-service.ecomdemo.svc
+    - payment-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: assistant-service-tls
+  labels:
+    app.kubernetes.io/name: assistant-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: assistant-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - assistant-service
+    - assistant-service.ecomdemo
+    - assistant-service.ecomdemo.svc
+    - assistant-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-service-tls
+  labels:
+    app.kubernetes.io/name: gateway-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: gateway-service-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - gateway-service
+    - gateway-service.ecomdemo
+    - gateway-service.ecomdemo.svc
+    - gateway-service.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer

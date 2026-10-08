@@ -165,6 +165,15 @@ done
 # reference it. A placeholder key keeps `kubectl create secret` happy.
 ensure_key assistant-service-secrets PHASE33_NO_SECRETS "none"
 
+# KI-056: the cluster CA's PUBLIC certificate as a Secret in the application namespace, for Traefik's
+# ServersTransport (k8s/gateway-transport.yaml) to verify the gateway with. Key name `tls.ca` is what
+# Traefik reads. Re-applied every run, so a renewed CA is picked up.
+CA_PUBLIC_FILE="$(mktemp)"
+k -n cert-manager get secret ecomdemo-local-ca -o 'jsonpath={.data.ca\.crt}' | base64 -d > "$CA_PUBLIC_FILE"
+k -n "$NS" create secret generic ecomdemo-ca-public --from-file=tls.ca="$CA_PUBLIC_FILE" \
+    --dry-run=client -o yaml | k apply -f - >/dev/null
+rm -f "$CA_PUBLIC_FILE"
+
 step "Manifests (kubectl apply -k k8s/)"
 k apply -k k8s/
 

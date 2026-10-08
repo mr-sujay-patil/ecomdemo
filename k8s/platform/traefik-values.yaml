@@ -44,4 +44,5 @@ providers:
   kubernetesIngress:
     enabled: true
   kubernetesCRD:
-    enabled: false      # our routing is plain Ingress; Traefik's own CRDs are not needed
+    enabled: true       # KI-056: only for ServersTransport (k8s/gateway-transport.yaml), which is how Traefik
+                        # verifies the gateway's certificate. Our routing is still plain Ingress.

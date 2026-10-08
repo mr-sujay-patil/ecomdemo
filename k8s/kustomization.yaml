@@ -31,5 +31,7 @@ resources:
   - services/gateway-service.yaml
   # the edge and the autoscaler
   - tls-certificate.yaml
+  - service-certificates.yaml
+  - gateway-transport.yaml
   - ingress.yaml
   - hpa.yaml

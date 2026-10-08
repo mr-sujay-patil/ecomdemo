@@ -79,6 +79,13 @@ SMOKE_PLATFORM="${SMOKE_PLATFORM:-compose}"
 K8S_NAMESPACE="${K8S_NAMESPACE:-ecomdemo}"
 K8S_CONTEXT="${K8S_CONTEXT:-kind-ecomdemo}"
 
+# KI-056: inside the k8s cluster the services speak HTTPS. The white-box checks that run BusyBox `wget`
+# inside a pod are about tokens, scopes and metrics, and BusyBox wget cannot be handed the cluster CA, so
+# they skip verification; the TLS itself is proven by every service-to-service call in the run working
+# with verification ON (each JVM trusts the CA). Compose is plain HTTP.
+IN_SCHEME=http; WGET_TLS=""
+if [ "$SMOKE_PLATFORM" = "k8s" ]; then IN_SCHEME=https; WGET_TLS="--no-check-certificate"; fi
+
 k8s_workload() { # k8s_workload <container name> -> statefulset/<n> or deployment/<n>
     local name="${1#ecomdemo-}"
     [ "$name" = "postgres" ] && name="db"
@@ -2787,7 +2794,7 @@ as_anonymous
 GATEWAY_CONTAINER="${GATEWAY_CONTAINER:-ecomdemo-gateway-service}"
 GATEWAY_MANAGEMENT_PORT="${GATEWAY_MANAGEMENT_PORT:-8088}"
 in_gateway_management() { # in_gateway_management <path> -> the body
-    ctr_exec "$GATEWAY_CONTAINER" wget -qO- "http://localhost:${GATEWAY_MANAGEMENT_PORT}$1" 2>/dev/null
+    ctr_exec "$GATEWAY_CONTAINER" wget $WGET_TLS -qO- "$IN_SCHEME://localhost:${GATEWAY_MANAGEMENT_PORT}$1" 2>/dev/null
 }
 check "the gateway answers on 8080" "200" "$(request GET /api/products)"
 check "its health is UP on the management port" "UP" \
@@ -3649,7 +3656,7 @@ fi
 # client secret (SERVICE_CLIENT_SECRET). The secret never leaves the container and is never printed.
 section "Authentication hardening"
 
-JWKS_JSON="$(ctr_exec "$CATALOG_CONTAINER" wget -qO- http://customer-service:8083/oauth2/jwks 2>/dev/null)"
+JWKS_JSON="$(ctr_exec "$CATALOG_CONTAINER" wget $WGET_TLS -qO- "$IN_SCHEME://customer-service:8083/oauth2/jwks" 2>/dev/null)"
 check "customer-service publishes its public keys at /oauth2/jwks" "True" \
     "$(python3 -c "import json,sys; k=json.loads(sys.argv[1])['keys']; print(bool(k) and all(x['kty']=='RSA' and x.get('kid') for x in k))" "$JWKS_JSON" 2>/dev/null)"
 check "and no private key material (no 'd', 'p' or 'q')" "True" \
@@ -3673,10 +3680,10 @@ check "a token signed with any other key is rejected (401), even claiming ADMIN"
 # The gateway's own token: it asks with its own secret (inside its container) and gets catalog:read,
 # nothing more. Until Phase 33 every service token carried one SERVICE role that allowed all of this.
 GATEWAY_CONTAINER="${GATEWAY_CONTAINER:-ecomdemo-gateway-service}"
-SCOPED_JSON="$(ctr_exec "$GATEWAY_CONTAINER" sh -c 'wget -qO- \
+SCOPED_JSON="$(ctr_exec "$GATEWAY_CONTAINER" sh -c 'wget '"$WGET_TLS"' -qO- \
     --header "Authorization: Basic $(printf "gateway-service:%s" "$SERVICE_CLIENT_SECRET" | base64 | tr -d "\n")" \
     --header "Content-Type: application/x-www-form-urlencoded" \
-    --post-data "grant_type=client_credentials" http://customer-service:8083/oauth2/token' 2>/dev/null)"
+    --post-data "grant_type=client_credentials" '"$IN_SCHEME"'://customer-service:8083/oauth2/token' 2>/dev/null)"
 check "the gateway gets a service token scoped to catalog:read only" "catalog:read" \
     "$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['scope'])" "$SCOPED_JSON" 2>/dev/null)"
 SCOPED_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['access_token'])" "$SCOPED_JSON" 2>/dev/null)"
@@ -3685,17 +3692,17 @@ SCOPED_TOKEN="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['acce
 # after "HTTP/x.x" rather than from a fixed word position.
 in_gateway_status() {
     ctr_exec "$GATEWAY_CONTAINER" sh -c 'if [ -n "$3" ]; then
-            wget -q -S -O /dev/null --header "Authorization: Bearer $1" --header "Content-Type: application/json" --post-data "$3" "$2"
+            wget '"$WGET_TLS"' -q -S -O /dev/null --header "Authorization: Bearer $1" --header "Content-Type: application/json" --post-data "$3" "$2"
         else
-            wget -q -S -O /dev/null --header "Authorization: Bearer $1" "$2"
+            wget '"$WGET_TLS"' -q -S -O /dev/null --header "Authorization: Bearer $1" "$2"
         fi 2>&1 | sed -n "s/.*HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p" | tail -1' _ "$1" "$2" "${3:-}" 2>/dev/null
 }
 check "with it, the gateway may read the catalogue (200)" "200" \
-    "$(in_gateway_status "$SCOPED_TOKEN" http://catalog-service:8081/api/products/1)"
+    "$(in_gateway_status "$SCOPED_TOKEN" "$IN_SCHEME://catalog-service:8081/api/products/1")"
 check "but a service token cannot call outside its scope: reading stock is 403" "403" \
-    "$(in_gateway_status "$SCOPED_TOKEN" http://inventory-service:8082/api/inventory/1)"
+    "$(in_gateway_status "$SCOPED_TOKEN" "$IN_SCHEME://inventory-service:8082/api/inventory/1")"
 check "and asking payment-service to settle an order is 403" "403" \
-    "$(in_gateway_status "$SCOPED_TOKEN" http://payment-service:8086/internal/saga/orders/1/settle '{"amount":1.00}')"
+    "$(in_gateway_status "$SCOPED_TOKEN" "$IN_SCHEME://payment-service:8086/internal/saga/orders/1/settle" '{"amount":1.00}')"
 
 # Throttling: five wrong passwords for one username, then the sixth attempt is refused before the
 # password is even checked. The username is unique per run; an account need not exist to be throttled.
@@ -3796,7 +3803,7 @@ CATALOG_URL="${CATALOG_URL:-http://localhost:8081}"
 catalog_scrape() {
     if [ "$SMOKE_PLATFORM" = "k8s" ]; then
         for pod in $(kube get pods -l app.kubernetes.io/name=catalog-service -o name 2>/dev/null); do
-            kube exec "$pod" -- wget -qO- http://localhost:8081/actuator/prometheus 2>/dev/null
+            kube exec "$pod" -- wget $WGET_TLS -qO- "$IN_SCHEME://localhost:8081/actuator/prometheus" 2>/dev/null
         done
     else
         curl -sS "$CATALOG_URL/actuator/prometheus" 2>/dev/null
@@ -4043,7 +4050,7 @@ ASSISTANT_URL="${ASSISTANT_URL:-http://localhost:8087}"
 assistant_scrape() {
     if [ "$SMOKE_PLATFORM" = "k8s" ]; then
         for pod in $(kube get pods -l app.kubernetes.io/name=assistant-service -o name 2>/dev/null); do
-            kube exec "$pod" -- wget -qO- http://localhost:8087/actuator/prometheus 2>/dev/null
+            kube exec "$pod" -- wget $WGET_TLS -qO- "$IN_SCHEME://localhost:8087/actuator/prometheus" 2>/dev/null
         done
     else
         curl -sS "$ASSISTANT_URL/actuator/prometheus" 2>/dev/null
@@ -4233,6 +4240,34 @@ check "the certificate verifies against the local CA, for localhost" "Verify ret
     "$(echo | openssl s_client -connect "${BASE_URL#https://}" -servername localhost -CAfile "$TLS_CA" -verify_hostname localhost 2>/dev/null | sed -n 's/^ *\(Verify return code: 0 (ok)\).*/\1/p' | head -1)"
 check "cert-manager has the certificate Ready" "True" \
     "$(kube get certificate ecomdemo-tls -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
+
+# --- TLS between the services (KI-056) ----------------------------------------------------------
+# Every service serves HTTPS on the cluster network, with a certificate cert-manager issued from the same
+# CA, and trusts that CA when it calls another service. Server-side TLS only: a caller is still identified
+# by its JWT service token, not a client certificate. That the JVMs verify each other is proven by this whole
+# run working: the gateway, the saga and the token endpoint all cross these hops.
+check "cert-manager has all 9 certificates Ready (the Ingress and the 8 services)" "9" \
+    "$(kube get certificates -o json | python3 -c "
+import json, sys
+print(sum(1 for c in json.load(sys.stdin)['items']
+          if any(x['type'] == 'Ready' and x['status'] == 'True' for x in c['status'].get('conditions', []))))")"
+check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
+    "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"
+check "payment-service too" "0" \
+    "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$PAYMENT_URL/actuator/health")"
+check "plain HTTP sent to a service's HTTPS port is not answered with the API (not 200)" "True" \
+    "$([ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://${APP_URL#https://}/actuator/health")" != "200" ] && echo True || echo False)"
+check "no Deployment probes a service over plain HTTP (the gateway's management port included)" "0" \
+    "$(kube get deployments -l app.kubernetes.io/part-of=ecomdemo -o json | python3 -c "
+import json, sys
+bad = 0
+for d in json.load(sys.stdin)['items']:
+    for c in d['spec']['template']['spec']['containers']:
+        for probe in ('startupProbe', 'livenessProbe', 'readinessProbe'):
+            http = c.get(probe, {}).get('httpGet')
+            if http and http.get('scheme') != 'HTTPS':
+                bad += 1
+print(bad)")"
 
 # The HPA needs metrics-server: until it reports, the target reads <unknown> and nothing scales.
 HPA_CPU=""
