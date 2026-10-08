@@ -4,8 +4,8 @@ package com.ecomdemo.metrics;
  * The closed set of values the {@code outcome} tag on {@code checkout.duration} may take.
  *
  * <p>An enum rather than free strings so that the cardinality of the tag is fixed by the type
- * system: there are exactly five checkout outcomes and there is no code path that can invent a
- * sixth at runtime.
+ * system: there are exactly six checkout outcomes and there is no code path that can invent a
+ * seventh at runtime.
  *
  * <p>Deliberately separate from {@link com.ecomdemo.order.internal.OrderOutcome}, which has two values and
  * records what the audit log needs to know (was an order created, yes or no). Monitoring needs a
@@ -33,6 +33,15 @@ public enum CheckoutOutcome {
      * rises because the application is under contention it cannot absorb.
      */
     CONFLICT("conflict"),
+
+    /**
+     * Checkout was refused at the door because too many were already in progress (KI-005).
+     *
+     * <p>Like {@link #CONFLICT}, a property of the system rather than of the request, and worth an
+     * alert: it rises because demand is past what the database pool can serve. It is the outcome
+     * that replaces ten seconds of waiting for a connection with an immediate 503.
+     */
+    SHED("shed"),
 
     /**
      * Checkout failed for a reason this application does not model — the catch-all.

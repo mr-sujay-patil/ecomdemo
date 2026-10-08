@@ -165,9 +165,9 @@ Can a client read or write a *field* it shouldn't?
   client) but no breaker.
 - ⚠️ `GET /api/products` returns the **whole catalogue**, unpaginated. That's harmless at 40
   products, but it grows without limit. Recommended: pagination with a maximum page size.
-- ⚠️ **No load shedding at checkout.** Phase 30 showed an overload waiting 10 s per request for a
-  database connection instead of failing fast. Recommended: a concurrency limit that answers 503
-  with `Retry-After`.
+- ✅ **Load shedding at checkout** (KI-005): at most 8 checkouts in progress; the ninth is refused at
+  once with 503 and `Retry-After: 1` (outcome `shed` on `checkout.duration`) instead of waiting 10 s
+  for a database connection. The limit is a judgement tied to the pool size of 10, not a measurement.
 - 🟡 **No per-user budget for AI calls,** which cost money on a paid provider. This is a
   follow-up from Phase 29.
 

@@ -237,8 +237,9 @@ Browse wasn't affected at all, since catalog-service is a separate service with 
 That's the bulkhead that splitting the monolith bought. Checkout, though, queued without limit:
 every request waited 10 s for a connection before failing, and the backlog outlasted the spike.
 Nothing sheds load early. A limit on concurrent checkouts that answers 503 at once (a bulkhead in
-front of the pool) would fail a few requests fast instead of making them all slow. That's a
-follow-up.
+front of the pool) would fail a few requests fast instead of making them all slow. That was a
+follow-up, and KI-005 added it: 8 concurrent checkouts, the rest refused with a 503 at once. The
+spike above has NOT been re-run against it, so the effect on those numbers is unmeasured.
 
 ## Concepts, briefly
 
