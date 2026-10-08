@@ -39,7 +39,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-006 | The gateway's `/actuator/prometheus` is public, and reveals route names, error rates and JVM details | Low | Phase 21 | `security.md` API8 | Fixed (PR #69) |
 | KI-007 | `GET /api/products` returns the whole catalogue, unpaginated | Low | Phase 1 | `security.md` API4 | Fixed (PR #70) |
 | KI-008 | Nothing prunes `processed_event`, which grows forever (its index already exists) | Low | Phase 17 | `architecture/saga.md` | Fixed (this PR) |
-| KI-009 | The README's "Known gaps (closed by later phases)" sections are stale: some items are closed, some still open, and the heading says all are closed. Replace them with a link to this file | Low | n/a | `README.md:3989` | Open |
+| KI-009 | The README's "Known gaps (closed by later phases)" sections are stale: some items are closed, some still open, and the heading says all are closed. Replace them with a link to this file | Low | n/a | `README.md:3989` | Fixed (this PR) |
 | KI-010 | notification-service keeps its own copy of the idempotent-consumer code instead of using `ProcessedEvents` from the library | Low | Phase 24 | `ProcessedEvents.java:21`, `saga.md` | Open |
 | KI-011 | Dead code: `InventoryGateway.reserve`/`release` and inventory's matching HTTP endpoints are no longer called by checkout | Low | Phase 24 | `architecture/saga.md` | Open |
 | KI-039 | compose's Kafka keeps nothing across `down`/`up`: the `kafka-data` volume is mounted at `/var/lib/kafka/data`, but the broker writes to `/tmp/kafka-logs`. Every topic, offset and consumer group is lost while the PostgreSQL volumes survive | Medium | Phase 17 | Phase 32 merge verification (2026-09-30): `kafka-log-dirs.sh` reports `/tmp/kafka-logs` | Fixed (PR #55) |
@@ -163,6 +163,10 @@ and `Dependency scan` pass on the PR, and the build and smoke tests pass.
 | KI-022 | Performance: stock check outside the checkout transaction, pipelined outbox sends, shorter poll delay, push order status (SSE), gateway cost per request and replicas, a soak test, a separate load machine | `performance.md` |
 | KI-023 | Trivy config/IaC scanning of the Dockerfile and k8s manifests; Dependabot for Docker base images and compose images (Maven and GitHub Actions are already covered, `.github/dependabot.yml`) | `RECENT.md` (Phase 31) |
 | KI-024 | Tempo retention and object storage; span metrics (traces to metrics) | README "Known gaps" |
+| KI-048 | The SonarQube quality gate runs only locally, on demand; nothing checks it on a pull request (SonarQube Cloud with PR decoration is the usual answer) | README "Known gaps", moved here by KI-009 |
+| KI-049 | CI does not run `scripts/smoke-test.sh`; the compose stack and the images are exercised only on a developer's machine | README "Known gaps", moved here by KI-009 |
+| KI-050 | Redis is a single node with no password (`requirepass`) and no replica | README "Known gaps", moved here by KI-009 |
+| KI-051 | No TLS anywhere: the Ingress has no `tls` section, so a Bearer token travels in clear text; fine on localhost only | README "Known gaps", moved here by KI-009 |
 | KI-044 | Run the image scan (and the dependency scan) on a daily schedule, as `nvd-data.yml` already runs for the NVD cache, so a newly disclosed CVE shows up on its own and not on the next unrelated push (KI-042 turned a docs-and-tests merge red) | KI-042. **Fixed (PR #64)** |
 | KI-045 | `mvnw.cmd` on `main` (from Dependabot PR #57) has line endings that disagree with `.gitattributes` (`*.cmd text eol=crlf`): a fresh checkout shows it modified, with a whitespace-only diff of the whole file. Renormalize it (`git add --renormalize mvnw.cmd`) in its own commit | KI-043 (seen when merging #57). **Fixed (PR #62)** |
 

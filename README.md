@@ -283,7 +283,7 @@ atomic checkout protected by optimistic locking, and an OpenAPI 3 document at `/
 Swagger UI at **<http://localhost:8080/swagger-ui.html>** — whose **Authorize** button now takes a
 token. 220 tests in total (190 unit and slice, 30 integration), and the smoke test has grown to
 125 checks. A token still cannot be revoked before it expires and there is no refresh endpoint;
-both are deliberate gaps, explained under "Known gaps".
+both are deliberate gaps, tracked as KI-017 in `docs/KNOWN_ISSUES.md`.
 
 </details>
 
@@ -3946,7 +3946,7 @@ A token cannot be withdrawn. Nothing consults a database once one is issued, so:
 A short expiry is the only lever, and a **refresh token** is what normally makes a short expiry
 comfortable: a second, longer-lived, single-purpose credential that *is* stored server-side, so
 it can be revoked, and whose only power is to mint a new access token. This phase deliberately
-does not build one — see "Known gaps". Production systems that need instant revocation add a
+does not build one — see KI-017 in `docs/KNOWN_ISSUES.md`. Production systems that need instant revocation add a
 deny-list of token ids checked on each request, which trades some of the statelessness back.
 
 ### What OAuth2 and OIDC would add
@@ -4228,127 +4228,8 @@ H2 did not go away, and that is a choice rather than an oversight: the point of 
 the fast tests stay fast. If every test needed Docker, the suite you run fifty times a day would
 cost a container start each time.
 
-## Known gaps (closed by later phases)
+## Known gaps
 
-- **Traces are kept on one disk, for as long as it lasts.** Tempo runs as a single binary with local
-  storage and no retention setting, which is right for a laptop and wrong for anything shared.
-- **Nothing turns traces into metrics.** Tempo's metrics-generator can derive request rates, error
-  rates and a service graph from spans; it is not switched on.
-- **The gateway still writes no request log.** Its lines now carry a `traceId`, but the only lines it
-  writes during a request are errors. The trace itself covers the gateway's side of each request.
-- **The "logs link to traces" rule is checked for the gateway by hand only.** The smoke test finds a
-  checkout's trace id in the logs of at least three services; that the gateway's error line has one
-  was verified by stopping catalog-service once (see `docs/test-reports/phase-23.md`).
-- **Two stat panels on the overview dashboard mislead.** `Orders placed / min` and
-  `Failed checkouts` reduce an *instantaneous* rate with `lastNotNull`, while `Revenue` and
-  `Average order value` beside them aggregate over the *selected range* — so one row of four panels
-  answers questions about two different time windows. With traffic paused the first reads `0.00`
-  for an hour in which 34 orders were placed, and the failed-checkout ratio goes `NaN`, which
-  `lastNotNull` skips, leaving a stale figure displayed as if it were current. Found by looking at
-  the dashboard rather than by any test: `DashboardMetricsTest` checks that panels reference meters
-  that exist, and these do. The fix is to make all four range-scoped; it is deliberately not
-  bundled into an unrelated refactor.
-- **Two application instances used to both publish every outbox row (closed by KI-002).** Only one
-  relay per database publishes at a time now (an advisory lock taken per batch); the one duplicate
-  left is the documented crash seam (sent, then the process died before the commit), which the
-  consumer's `processed_event` table absorbs as before.
-- **Nothing watches the outbox.** A pending count that stops falling is the single clearest signal
-  that publication has broken, and there is no gauge on it and no health indicator for it — the
-  `attempts` and `last_error` columns make a stuck row visible only to somebody already looking.
-  A Micrometer gauge and an Actuator contributor are the obvious follow-up and were out of scope.
-- **Nothing delivers the alert anywhere.** Prometheus evaluates `CheckoutConflictRateHigh` and
-  would mark it firing, and that is where it stops: there is no Alertmanager, so no email, no
-  pager, no Slack. The rule was proven to fire in shape — the identical expression with a label
-  that *was* over the threshold returns a row — but an alert nobody receives is a graph with
-  extra steps. Alertmanager is not in this phase's scope.
-- **`/actuator/prometheus` is anonymous.** Deliberate, bounded, and not a recommendation: the
-  scraper carries no token and a 15-minute JWT would need re-issuing for ever. The page holds no
-  customer data but does describe the system — every URI template, the pool sizes, the heap. The
-  real fix is reachability, not authentication: `management.server.port` on a port published only
-  to the internal network. That is a deployment concern and was left to a later phase.
-- **The dashboard has only ever had one instance to draw.** The `application` common tag and the
-  choice of histograms over client-side percentiles both exist so that the panels keep meaning
-  something when there are two. There is one, so neither has actually been exercised.
-- **No cardinality budget is asserted anywhere.** Tag values are bounded by an enum and URI
-  templates, and both facts are tested — but nothing counts total series and fails when the number
-  grows. The failure mode is gradual and nobody notices it until the Prometheus host does.
-- **Cache hit rate is published but not graphed.** Phase 13 listed hit-rate metrics as a follow-up
-  for this phase. Spring Boot's `cache_gets_total{result=...}` is in the scrape, and no panel uses
-  it; the dashboard covers checkout, HTTP and the JVM instead.
-- **The fast suite is still only ever run on H2.** `./mvnw verify` runs the migrations and the
-  checkout race against a real PostgreSQL container, so the gap is covered — but only by the 62
-  integration tests. The other 241 still run on H2, so a PostgreSQL-specific problem in a code
-  path no `*IT` exercises would still reach production.
-- **Restart across a process restart is inferred, not tested.** The JobRepository is on disk and
-  staged uploads are on a named volume, so an import that failed before a container was replaced
-  should be restartable afterwards. Nothing in the suite kills a container and checks.
-- **`@Scheduled` fires in every instance.** Two copies of the application both start the nightly
-  report; the second is refused because the day's JobInstance is already COMPLETE. That refusal
-  is tested, two instances actually racing are not, and a real deployment wants a leader election
-  or an external scheduler rather than a JobRepository collision.
-- **A token cannot be revoked before it expires.** A role taken away, or a deleted account, stays
-  effective for up to fifteen minutes, and there is no "log out everywhere". That is the price of
-  statelessness rather than a bug, and a short expiry is the only mitigation in place. A
-  deny-list of token ids checked per request is the usual production answer, and it trades some
-  of the statelessness back.
-- **There is no refresh token.** The phase file lists one as optional and it was deliberately not
-  built. Without it, a short expiry means users log in again every fifteen minutes — which is
-  exactly the discomfort a refresh token exists to remove: a second, longer-lived, revocable
-  credential whose only power is to mint a new access token.
-- ~~**Signing is symmetric (HS256).**~~ Closed by Phase 33: RS256, with the private key in
-  customer-service only and the public keys at `/oauth2/jwks`.
-- **The application is its own authorization server.** A textbook OAuth2 deployment separates the
-  two. Nothing here implements OAuth2 flows, scopes or OIDC; it issues plain JWTs.
-- **Passwords cannot be changed through the API.** A password change needs rules of its own
-  (re-authenticate, re-encode, invalidate sessions) rather than riding along with a profile edit,
-  so `PUT /api/customers/me` deliberately only takes a display name. The seeded admin's password
-  is changed with SQL, as shown above.
-- **A 403 on somebody else's order admits that it exists.** Answering 404 instead would tell the
-  caller nothing, and for something more sensitive than an order that is the right trade. It is a
-  judgement call, made consciously: see `OrderService.findById`.
-- **There is no account lockout and no rate limit on login attempts.** BCrypt's cost makes a
-  brute-force attempt expensive, which is not the same as making it impossible.
-- **Nothing rate-limits a stampede.** Three retries then 409 is the right answer for a momentary
-  collision; under sustained contention every attempt still costs a transaction. Backoff and
-  bulkheads arrive with **Phase 22**.
-- **Nothing rolls a migration back.** Flyway's community edition has no `undo`, so a bad
-  migration is corrected by writing the next one. That is the normal production answer; it is
-  worth knowing it is the *only* answer here.
-- **Still no TLS.** A Bearer token is as sensitive as a password and travels in a header in
-  clear text, so this is safe on localhost and nowhere else. Terminating TLS is the reverse
-  proxy's job, and arrives with the deployment phases.
-- **The compose stack is a development stack.** One replica, the `dev` profile, the database
-  beside the application, and credentials in a local `.env`. A real deployment separates them,
-  runs a managed database, and takes its secrets from something that is not a file — Phases 25
-  and 26.
-- **The image is not scanned, signed or pinned by digest.** Base images are pinned by tag
-  (`eclipse-temurin:21-jre-alpine`), which is reproducible until the tag moves. Vulnerability
-  scanning arrives with **Phase 31**.
-- **CI does not run the smoke test.** `./mvnw verify` covers the Java; the compose stack and the
-  image are still only exercised on a developer's machine. The phase file offers this as an
-  optional addition and it was deliberately left out of scope — it is the most obviously worthwhile
-  next thing to add to `ci.yml`.
-- **There is no CD.** The publish job pushes an image to GHCR and stops. Nothing pulls it and
-  nothing runs it; deployment arrives with **Phases 25–26**.
-- **Nothing scans the published image.** Dependabot watches the Maven dependencies and the
-  actions, not the base image or the built artefact. **Phase 31** adds scanning.
-- **The quality gate is not enforced in CI.** SonarQube runs locally, on demand; nothing checks
-  it on a pull request. SonarQube Cloud with PR decoration is the usual answer and was left out
-  of scope deliberately — so the gate is a tool you run, not a gate that stops you.
-- **Branch coverage sits at 81% against 97% line coverage.** Several `else` paths are defensive
-  and only reachable through states the API does not permit. That gap is the honest one to look
-  at; the line figure flatters.
-- ~~**The catalogue shows stale stock for up to 10 minutes after a sale.**~~ **Closed after
-  Phase 16** by an `AFTER_COMMIT` transactional listener that evicts both catalogue caches — see
-  "Invalidation" above and `docs/decisions.md` [Phase 16 follow-up]. The Phase 13 reasoning for
-  deferring it was sound about the hazard and wrong about the cost: the stale figure was visible to
-  shoppers, who could be refused at checkout over stock the page had just advertised.
-- **Nothing measures the cache hit rate.** Hit and miss are logged at DEBUG, which answers "is it
-  working?" and not "is it worth it?". Hit ratios belong in metrics — **Phase 15**.
-- **Redis is a single node with no password.** Fine on a compose network that publishes it only
-  for `redis-cli`; a real deployment needs at least `requirepass` and a replica.
-- **No coverage report.** The suite is broad but nothing measures or enforces how much of the
-  code it reaches. **Phase 12** adds JaCoCo and SonarQube.
-- **The build now needs Docker.** `./mvnw verify` starts a container, so a machine without
-  Docker can only run `./mvnw test`. That is the deliberate trade for testing against the real
-  engine, and **Phase 11** is where CI has to be given a Docker daemon of its own.
+This section used to list every gap as if later phases had closed them all. Some were closed, some
+are still open, and the list went stale. The one maintained list of known defects, gaps and deferred
+work is now [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md): each item has an ID, a triage value and a status.
