@@ -403,6 +403,12 @@ cp .env.example .env            # then add the signing key and client secrets (c
 docker compose up --build       # add -d to detach
 ```
 
+**Every port compose publishes is bound to `127.0.0.1`** (KI-003): your browser, `psql` and `curl` on this
+machine work as always, but another machine on the network cannot reach the databases (default
+passwords), Redis or Kafka (no authentication). To reach the stack from elsewhere on purpose, set
+`BIND_ADDRESS=0.0.0.0` in `.env` and accept that everything is then exposed.
+`scripts/test-compose-ports.sh` checks the compose files and the smoke test checks what Docker bound.
+
 That builds **five** images and starts sixteen containers on a private network. Each service waits
 for its own PostgreSQL to be genuinely *ready*, not merely started, applies its own migrations, and
 comes up:

@@ -207,8 +207,8 @@ How far it reached depended on how the stack was run:
 
 - **Kubernetes:** these services are `ClusterIP` only, so an attacker needed to be inside the
   cluster already.
-- **compose:** every service port is published on `0.0.0.0` (see API8), so anyone who could reach
-  the machine could do it.
+- **compose:** every service port was published on `0.0.0.0` (see API8), so anyone who could reach
+  the machine could do it. Since KI-003 they are bound to `127.0.0.1`.
 
 **The fix** is defence in depth: each service now repeats the gateway's rule for its own paths.
 
@@ -272,12 +272,15 @@ internal paths with the product name or order id as a *parameter*, never as a UR
 
 ### API8 Security Misconfiguration ⚠️
 
-- ⚠️ **compose publishes every port on all interfaces:** the eight services, the six PostgreSQL
-  databases (with default passwords), Redis and Kafka (no authentication). That's convenient for
-  learning, and it's what made the API5 gap reachable. Recommended: bind to `127.0.0.1`, or keep
-  only the gateway, Grafana and Prometheus published. (The services now check roles themselves,
-  API5, so a published port is no longer a way around authorization, but the databases, Redis
-  and Kafka still have no such second check.)
+- ✅ **compose publishes every port on `127.0.0.1` only (KI-003).** It used to publish all of them
+  on every interface: the eight services, the six PostgreSQL databases (with default passwords),
+  Redis and Kafka (no authentication), which is what made the API5 gap reachable. Every mapping is
+  now `${BIND_ADDRESS:-127.0.0.1}:<host>:<container>`; this machine's browser, `psql` and `curl` are
+  unaffected (including from Windows to WSL2, checked), and other machines are refused. Verified by
+  connecting to this machine's LAN address: refused on every port, open on loopback; with
+  `BIND_ADDRESS=0.0.0.0` the same port was open. `scripts/test-compose-ports.sh` renders the
+  compose files and the smoke test's **Published ports** section reads what Docker actually bound.
+  Opting out is one variable and is on purpose.
 - ⚠️ **The gateway's `/actuator/prometheus` is public.** Metrics reveal route names, error rates
   and JVM details. Recommended: scrape it on an internal port, or require a token.
 - ✅ **CSRF off** is deliberate. The API uses bearer tokens, not cookies, so a browser can't be

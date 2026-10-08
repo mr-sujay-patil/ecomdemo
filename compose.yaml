@@ -11,6 +11,13 @@
 #
 # The file is `compose.yaml`, not `docker-compose.yml`: that is the name the Compose
 # specification settled on, and `version:` at the top is long obsolete.
+#
+# PORTS ARE PUBLISHED ON THE LOOPBACK INTERFACE ONLY (KI-003). A bare "8080:8080" listens on every
+# interface of the machine, which would put the PostgreSQL databases (default passwords), Redis and
+# Kafka (no authentication) in reach of everyone on the same network. Every mapping below is
+# "${BIND_ADDRESS:-127.0.0.1}:<host port>:<container port>": your own browser, psql and curl work as
+# before, other machines cannot connect. To reach the stack from another machine on purpose, set
+# BIND_ADDRESS=0.0.0.0 in .env, knowing what that exposes. scripts/test-compose-ports.sh checks it.
 
 # ---------------------------------------------------------------------------------------------
 # Observability settings every Spring service shares (Phase 23)
@@ -50,7 +57,7 @@ services:
       # The application does NOT use this: it talks to the container directly over the compose
       # network (see the app service). Changing the left-hand side moves the host port and
       # nothing else — that is the one to change if 5432 is already taken locally.
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # A VOLUME is storage that outlives the container. A container's own writable layer is
       # destroyed with it, so without this line `docker compose down` would delete the database
@@ -105,7 +112,7 @@ services:
     ports:
       # Published so `redis-cli` and the smoke test can look inside from the host. The
       # application does not use this: it reaches Redis at `cache:6379` over the compose network.
-      - "${REDIS_PORT:-6379}:6379"
+      - "${BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -211,7 +218,7 @@ services:
       # scrape target, Alloy's log discovery and the gateway's own route needed no edit at all. What
       # 8084 is for is the WHITE-BOX checks - /actuator/health, /actuator/prometheus, heapdump -
       # which are about this service and must not be answered by the gateway.
-      - "${APP_PORT:-8084}:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8084}:8080"
     # A limit matters here even locally, because it is what MaxRAMPercentage is a percentage OF.
     # Without one the JVM sizes its heap against the whole host, and the "75% of the container"
     # setting in the Dockerfile silently means "75% of your laptop".
@@ -244,7 +251,7 @@ services:
     ports:
       # 5433 on the host, because 5432 is the catalogue's. Inside the network both are 5432 -
       # a container gets its own address, so the ports only collide on the host.
-      - "${INVENTORY_DB_PORT:-5433}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${INVENTORY_DB_PORT:-5433}:5432"
     volumes:
       # /var/lib/postgresql, NOT /var/lib/postgresql/data - matching the catalogue's db above.
       # PostgreSQL 18 wants a single mount at the parent and puts its data in a subdirectory of
@@ -270,7 +277,7 @@ services:
       POSTGRES_USER: ${CUSTOMER_DB_USER:-customer}
       POSTGRES_PASSWORD: ${CUSTOMER_DB_PASSWORD:-customer}
     ports:
-      - "${CUSTOMER_DB_PORT:-5435}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${CUSTOMER_DB_PORT:-5435}:5432"
     volumes:
       # /var/lib/postgresql, NOT .../data - see the note on the first db service.
       - customer-data:/var/lib/postgresql
@@ -323,7 +330,7 @@ services:
       CATALOG_CLIENT_SECRET: ${CATALOG_CLIENT_SECRET:-}
       JWT_EXPIRY: ${JWT_EXPIRY:-15m}
     ports:
-      - "${CUSTOMER_PORT:-8083}:8083"
+      - "${BIND_ADDRESS:-127.0.0.1}:${CUSTOMER_PORT:-8083}:8083"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8083/actuator/health/readiness"]
       interval: 10s
@@ -350,7 +357,7 @@ services:
       POSTGRES_USER: ${NOTIFICATION_DB_USER:-notification}
       POSTGRES_PASSWORD: ${NOTIFICATION_DB_PASSWORD:-notification}
     ports:
-      - "${NOTIFICATION_DB_PORT:-5436}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${NOTIFICATION_DB_PORT:-5436}:5432"
     volumes:
       - notification-data:/var/lib/postgresql
     healthcheck:
@@ -392,7 +399,7 @@ services:
     ports:
       # Published only so the smoke test can read its health and metrics. It has no business API:
       # its SecurityConfig answers denyAll on every other path.
-      - "${NOTIFICATION_PORT:-8085}:8085"
+      - "${BIND_ADDRESS:-127.0.0.1}:${NOTIFICATION_PORT:-8085}:8085"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8085/actuator/health/readiness"]
       interval: 10s
@@ -418,7 +425,7 @@ services:
       POSTGRES_USER: ${PAYMENT_DB_USER:-payment}
       POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:-payment}
     ports:
-      - "${PAYMENT_DB_PORT:-5437}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PAYMENT_DB_PORT:-5437}:5432"
     volumes:
       - payment-data:/var/lib/postgresql
     healthcheck:
@@ -460,7 +467,7 @@ services:
       PAYMENT_DECLINE_ABOVE: ${PAYMENT_DECLINE_ABOVE:-10000.00}
     ports:
       # Published only for health and metrics, like notification-service. No business API.
-      - "${PAYMENT_PORT:-8086}:8086"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PAYMENT_PORT:-8086}:8086"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8086/actuator/health/readiness"]
       interval: 10s
@@ -490,7 +497,7 @@ services:
     ports:
       # 5434: 5432 is the application's, 5433 is inventory's. Inside the network all three are
       # 5432 - a container gets its own address, so they only collide on the host.
-      - "${CATALOG_DB_PORT:-5434}:5432"
+      - "${BIND_ADDRESS:-127.0.0.1}:${CATALOG_DB_PORT:-5434}:5432"
     volumes:
       # /var/lib/postgresql, NOT /var/lib/postgresql/data - see the note on inventory-db above.
       - catalog-data:/var/lib/postgresql
@@ -582,7 +589,7 @@ services:
       # and `host-gateway` is how compose asks for the same thing there.
       - "host.docker.internal:host-gateway"
     ports:
-      - "${CATALOG_PORT:-8081}:8081"
+      - "${BIND_ADDRESS:-127.0.0.1}:${CATALOG_PORT:-8081}:8081"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8081/actuator/health/readiness"]
       interval: 10s
@@ -629,7 +636,7 @@ services:
       # Phase 33: verify tokens with customer-service's PUBLIC keys; no shared secret any more.
       JWT_JWK_SET_URI: http://customer-service:8083/oauth2/jwks
     ports:
-      - "${INVENTORY_PORT:-8082}:8082"
+      - "${BIND_ADDRESS:-127.0.0.1}:${INVENTORY_PORT:-8082}:8082"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8082/actuator/health/readiness"]
       interval: 10s
@@ -696,7 +703,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${ASSISTANT_PORT:-8087}:8087"
+      - "${BIND_ADDRESS:-127.0.0.1}:${ASSISTANT_PORT:-8087}:8087"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8087/actuator/health/readiness"]
       interval: 10s
@@ -766,7 +773,7 @@ services:
       SERVICE_TOKEN_URI: http://customer-service:8083/oauth2/token
       SERVICE_CLIENT_SECRET: ${GATEWAY_CLIENT_SECRET:-}
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-8080}:8080"
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/actuator/health/readiness"]
       interval: 10s
@@ -815,7 +822,7 @@ services:
       - ./docker/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "${PROMETHEUS_PORT:-19090}:9090"
+      - "${BIND_ADDRESS:-127.0.0.1}:${PROMETHEUS_PORT:-19090}:9090"
     healthcheck:
       # The image has no shell and no curl or wget: it is built FROM scratch with the binary and
       # nothing else. Prometheus itself is therefore the only thing available to make an HTTP
@@ -863,7 +870,7 @@ services:
       # matters.
       - grafana-data:/var/lib/grafana
     ports:
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/api/health || exit 1"]
       interval: 15s
@@ -888,7 +895,7 @@ services:
     ports:
       # Published so the smoke test can query the API from the host. Grafana does not use this -
       # it reaches Loki at `loki:3100` on the compose network.
-      - "${LOKI_PORT:-3100}:3100"
+      - "${BIND_ADDRESS:-127.0.0.1}:${LOKI_PORT:-3100}:3100"
     # NO HEALTHCHECK, deliberately. Loki's image is DISTROLESS - `docker exec ecomdemo-loki ls`
     # answers "executable file not found", because the whole filesystem is the loki binary and its
     # certificates. There is no shell, no wget and no curl for a `test:` command to use, and Loki
@@ -917,7 +924,7 @@ services:
       # The query API, published for the smoke test and for curl. Grafana reaches Tempo at
       # `tempo:3200`, and the services send spans to `tempo:4318`, both on the compose network -
       # so the OTLP receiver needs no host port at all.
-      - "${TEMPO_PORT:-3200}:3200"
+      - "${BIND_ADDRESS:-127.0.0.1}:${TEMPO_PORT:-3200}:3200"
     # NO HEALTHCHECK, for the reason Loki has none: the image is distroless (no shell, no wget).
     # GET /ready is the real readiness signal, and scripts/smoke-test.sh calls it from the host.
     restart: unless-stopped
@@ -958,7 +965,7 @@ services:
       # container's log, so a restart resumes instead of re-shipping everything.
       - alloy-data:/var/lib/alloy/data
     ports:
-      - "${ALLOY_PORT:-12345}:12345"
+      - "${BIND_ADDRESS:-127.0.0.1}:${ALLOY_PORT:-12345}:12345"
     healthcheck:
       # A PORT check, not an HTTP one, and the comment is here so nobody reads it as more than it
       # is: this image has bash but neither curl nor wget, and bash's /dev/tcp pseudo-device is
@@ -1048,7 +1055,7 @@ services:
       - kafka-data:/var/lib/kafka/data
     ports:
       # Only the HOST listener is published. 9092 stays inside the compose network.
-      - "${KAFKA_PORT:-29092}:29092"
+      - "${BIND_ADDRESS:-127.0.0.1}:${KAFKA_PORT:-29092}:29092"
     healthcheck:
       # Asks the broker to describe the cluster, which fails until it is genuinely serving
       # requests - unlike a port check, which passes while KRaft is still electing a controller.
@@ -1085,7 +1092,7 @@ services:
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
       DYNAMIC_CONFIG_ENABLED: "false"
     ports:
-      - "${KAFKA_UI_PORT:-8090}:8080"
+      - "${BIND_ADDRESS:-127.0.0.1}:${KAFKA_UI_PORT:-8090}:8080"
     restart: unless-stopped
 
 volumes:
