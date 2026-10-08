@@ -3,30 +3,28 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-08
-- **Fix:** KI-003, compose published every port on all interfaces (databases with default passwords, Redis, Kafka)
-- **Branch:** fix/ki-003-compose-loopback-ports (cut from `main` at `091cabe`)
-- **Step:** PR_OPEN
-- **PR:** #66 https://github.com/mr-sujay-patil/ecomdemo/pull/66
-- **Waiting for user:** YES (review of PR #66)
+- **Fix:** KI-004, no timeouts or circuit breaker on the app's inventory calls or on the gateway's `/api/products` route
+- **Branch:** fix/ki-004-timeouts-circuit-breaker (cut from `main` at `e7b0f98`)
+- **Step:** IMPLEMENTING
+- **PR:** none yet
+- **Waiting for user:** no
 
-## Merge verification of KI-002 (done 2026-10-06)
-PR #65 merged as `091cabe`; CI on `main` all green incl. publish; cold compose smoke on `main` 480/0/0 (also closes
-KI-040's owed cold run); tag `ki-002-fixed`. The daily scan (KI-044) has fired: 2026-10-07 11:21 UTC, success.
+## Merge verification of KI-003 (done 2026-10-08)
+PR #66 merged as `e7b0f98`; branch is an ancestor of `main`, diff empty, `./mvnw clean verify` exit 0, CI on `main` green
+incl. scans and publish; tag `ki-003-fixed` pushed. Cold compose smoke skipped (config-only change, run on the branch tree).
 
-## Done
-- All 23 mappings are `${BIND_ADDRESS:-127.0.0.1}:<host>:<container>` (`compose.yaml` 22, `compose.sonar.yaml` 1);
-  `BIND_ADDRESS=0.0.0.0` in `.env` is the opt-out. Chosen over "publish only gateway/Grafana/Prometheus".
-- Tests, seen failing first: `scripts/test-compose-ports.sh` (static) and the smoke test's "Published ports" section (live).
-- Live: LAN address 172.25.188.147 refused on every probed port, loopback open; Redis with the opt-out was open on the
-  LAN address (contrast); Windows `powershell.exe` reaches `localhost:8080`.
-- `./mvnw clean verify` exit 0; smoke 482/0/0; `scripts/test-smoke-guard.sh` passes. Not run: Kubernetes (untouched).
-- My compose stack is stopped (`docker compose down`, volumes kept).
+## Plan (KI-004 has only a table row; scope read from `security.md` API4/API10)
+1. [x] `common`: inventory client connect/read timeouts (`InventoryProperties`, `InventoryClientConfig`), `InventoryClientTimeoutTest`.
+2. [ ] app: `ResilientInventory` (bulkhead + breaker, retry on reads only) wrapped in place like `ResilientCatalog`; `resilience4j.*.instances.inventory.*`; test.
+3. [ ] gateway: split `/api/products` into a fast GET route (response timeout + CircuitBreaker, 503 fallback with Retry-After)
+   and the rest (long timeout: AI generation, search); test.
+4. [ ] docs: `security.md` API4/API10, KNOWN_ISSUES row, `decisions.md`; smoke-test additions if cheap.
+5. [ ] `./mvnw clean verify`, smoke on compose (`docker ps` first), PR.
 
 ## Next action
-STOP: wait for the user's review of PR #66. After `approved, merge it`: verify the merge (tip in `main`, CI on `main`
-incl. scans and publish), tag `ki-003-fixed`. A cold compose smoke on `main` is optional (config-only change, run on this
-tree already); do it if no foreign stack is up.
-Still open: KI-004..011. `stash@{0}` (KI-045 noise) is obsolete; the user's to drop.
+Continue at step 2. Not in scope (suggest only): catalog-service's own inventory calls get timeouts via the shared
+client but no breaker; the saga clients already have their own timeouts (Phase 32).
+`stash@{0}` (KI-045 noise) is obsolete; the user's to drop.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
