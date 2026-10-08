@@ -125,6 +125,8 @@
 			  jackson 2.21.5 -> 2.21.6          CVE-2026-68497 (HIGH), the 2.x line other libraries bring
 			  jackson 3.1.6 -> 3.1.7            CVE-2026-91776, CVE-2026-91777 (HIGH), found 2026-10-01
 			  jackson 2.21.6 -> 2.21.7          CVE-2026-91776, CVE-2026-91777 (HIGH), found 2026-10-01
+			  lz4-java 1.10.1 -> 1.11.4         CVE-2026-106451 (HIGH), found 2026-10-08. Not managed by Boot:
+			                                    kafka-clients brings it, so it is pinned in dependencyManagement below.
 
 			Remove each line when a Boot release manages that version or newer: an override left
 			behind would pin the project to an OLD version the day Boot moves past it.
@@ -133,6 +135,7 @@
 		<tomcat.version>11.0.25</tomcat.version>
 		<jackson-bom.version>3.1.7</jackson-bom.version>
 		<jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+		<lz4-java.version>1.11.4</lz4-java.version>
 
 		<!--
 			Empty defaults. The JaCoCo executions below fill these in, and Surefire and Failsafe
@@ -174,6 +177,12 @@
 	-->
 	<dependencyManagement>
 		<dependencies>
+			<!-- KI-053. Kafka's compression codec, reached through kafka-clients. See the comment on lz4-java.version. -->
+			<dependency>
+				<groupId>at.yawk.lz4</groupId>
+				<artifactId>lz4-java</artifactId>
+				<version>${lz4-java.version}</version>
+			</dependency>
 			<dependency>
 				<groupId>io.swagger.core.v3</groupId>
 				<artifactId>swagger-annotations-jakarta</artifactId>
