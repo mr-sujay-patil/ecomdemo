@@ -2940,6 +2940,10 @@ BURST_429="$(grep -c '^429$' "$BURST_RESULTS" 2>/dev/null || true)"
 BURST_OK="$(grep -c '^200$' "$BURST_RESULTS" 2>/dev/null || true)"
 BURST_429="${BURST_429:-0}"
 BURST_OK="${BURST_OK:-0}"
+# The distribution of what the 300 requests got, so a failure below says WHAT came back (a 503 from a
+# slow runner is not a rate limiter that bans) instead of only "False".
+printf '        burst of 300: %s\n' \
+    "$(sort "$BURST_RESULTS" 2>/dev/null | uniq -c | awk '{printf "%s x %s  ", $1, $2}')"
 rm -f "$BURST_RESULTS"
 
 check "a concurrent burst of 300 requests from one caller is rate limited" "True" \
