@@ -1,9 +1,11 @@
 package com.ecomdemo.clients.inventory;
 
 import com.ecomdemo.jwt.ServiceTokenProvider;
+import java.net.http.HttpClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 /**
@@ -32,8 +34,15 @@ class InventoryClientConfig {
             RestClient.Builder builder,
             InventoryProperties properties,
             ServiceTokenProvider tokens) {
+        // Connect and read timeouts catch different failures: a STOPPED container is never
+        // connected to, a HUNG one accepts the connection and goes quiet. See InventoryProperties.
+        HttpClient httpClient =
+                HttpClient.newBuilder().connectTimeout(properties.connectTimeout()).build();
+        JdkClientHttpRequestFactory requestFactory = new JdkClientHttpRequestFactory(httpClient);
+        requestFactory.setReadTimeout(properties.readTimeout());
         return builder.clone()
                 .baseUrl(properties.baseUrl())
+                .requestFactory(requestFactory)
                 .requestInterceptor((request, body, execution) -> {
                     request.getHeaders().setBearerAuth(tokens.token());
                     return execution.execute(request, body);

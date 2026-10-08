@@ -158,8 +158,11 @@ Can a client read or write a *field* it shouldn't?
 - ✅ **Upload limit:** 16 MB on the CSV import.
 - ✅ **Assistant limits:** input capped at 1 000 characters, at most 5 tool calls per message,
   and a model timeout.
-- 🟡 **Timeouts and circuit breakers:** on the app's catalog calls, but not on inventory calls or
-  the gateway's `/api/products` route (both carried since Phase 22).
+- ✅ **Timeouts and circuit breakers** (KI-004): on the app's catalog calls (Phase 22) and its inventory
+  calls (250 ms connect, 500 ms read, a bulkhead and a breaker; reads retried once, writes never), and on the
+  gateway's catalogue reads (2 s limit, breaker, 503 + `Retry-After`). Search and AI description generation
+  have their own, longer limit. catalog-service's own calls to inventory-service have the same timeouts (shared
+  client) but no breaker.
 - ⚠️ `GET /api/products` returns the **whole catalogue**, unpaginated. That's harmless at 40
   products, but it grows without limit. Recommended: pagination with a maximum page size.
 - ⚠️ **No load shedding at checkout.** Phase 30 showed an overload waiting 10 s per request for a
@@ -306,8 +309,7 @@ internal paths with the product name or order id as a *parameter*, never as a UR
 ### API10 Unsafe Consumption of APIs ✅ / 🟡
 
 - **Service-to-service:** responses are read into typed records, never passed through. The app's
-  catalog calls have timeouts, retries and a circuit breaker (Phase 22); inventory calls don't yet
-  (see API4).
+  catalog and inventory calls have timeouts, retries and a circuit breaker (Phase 22, KI-004).
 - **Language models** are treated as untrusted input:
   - Catalog's generated descriptions are validated, and an unusable answer is refused (Phase 27).
   - The assistant's writes need the customer's confirmation.

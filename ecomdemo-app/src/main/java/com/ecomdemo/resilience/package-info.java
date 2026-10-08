@@ -1,5 +1,6 @@
 /**
- * How this service behaves when catalog-service is slow, failing, or gone (Phase 22).
+ * How this service behaves when catalog-service (Phase 22) or inventory-service (KI-004) is slow,
+ * failing, or gone.
  *
  * <p>Nothing in {@code cart} or {@code batch} knows this module exists. They depend on
  * {@code CatalogGateway}; this module swaps the HTTP implementation of that interface for a
@@ -12,5 +13,5 @@
  */
 @org.springframework.modulith.ApplicationModule(
         displayName = "Resilience",
-        allowedDependencies = {"clients :: catalog", "shared"})
+        allowedDependencies = {"clients :: catalog", "clients :: inventory", "shared"})
 package com.ecomdemo.resilience;

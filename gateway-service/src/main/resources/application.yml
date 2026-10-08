@@ -60,10 +60,51 @@ spring:
             # catalog-service. The GET half is anonymous and the write half is ADMIN - enforced in
             # GatewaySecurityConfig, not here: a predicate decides WHERE a request goes, never
             # whether it is allowed.
+            #
+            # KI-004: THREE routes, not one, because "how long is too long" differs by operation and a
+            # route's timeout is one number. Evaluated in order; the first match wins.
+            #   1. catalog-slow: the calls that are slow when HEALTHY. Search embeds the query with a
+            #      language model, and description generation asks one to write (up to two attempts
+            #      of 30 s: catalog-service's AI_TIMEOUT). A 2 s limit would break them every time.
+            #   2. catalog-read: every other GET - the listing, one product, an image. Milliseconds
+            #      when healthy (Redis-cached), so a 2 s limit means "something is wrong", and a
+            #      circuit breaker stops a dead catalog-service costing every shopper that wait.
+            #   3. catalog: everything else (create, update, delete, the batch upsert). Admin writes
+            #      that call inventory-service; a generous limit, no breaker, never retried.
+            # The timeouts are route METADATA, in milliseconds - the gateway's per-route spelling.
+            - id: catalog-slow
+              uri: ${CATALOG_BASE_URL:http://localhost:8081}
+              predicates:
+                - Path=/api/products/search,/api/products/*/generate-description,/api/products/embeddings/**
+              metadata:
+                connect-timeout: 1000
+                response-timeout: 90000
+
+            - id: catalog-read
+              uri: ${CATALOG_BASE_URL:http://localhost:8081}
+              predicates:
+                - Method=GET
+                - Path=/api/products,/api/products/**
+              metadata:
+                connect-timeout: 250
+                response-timeout: 2000
+              filters:
+                # 502/503/504 count as failures and fall back; 500 does NOT: a bug in catalog-service
+                # should reach the client as the 500 it is, not be dressed up as an outage. A 404 or
+                # 400 is catalog-service working. The fallback is CatalogFallbackController.
+                - name: CircuitBreaker
+                  args:
+                    name: catalog
+                    fallbackUri: forward:/fallback/catalog
+                    statusCodes: 502,503,504
+
             - id: catalog
               uri: ${CATALOG_BASE_URL:http://localhost:8081}
               predicates:
                 - Path=/api/products/**
+              metadata:
+                connect-timeout: 1000
+                response-timeout: 30000
 
             # customer-service, which owns accounts and is the only issuer of tokens. Routing login
             # here is THE security win of this phase: until now /api/auth/login was proxied by the
