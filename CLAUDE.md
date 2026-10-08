@@ -55,3 +55,24 @@ Don't read other phase files or archives unless needed. Don't paste full logs or
 - Constructor injection only, `BigDecimal` for money, no Lombok
 - Conventional Commits, and stable GA dependencies compatible with the Spring Boot version
 - Build: `./mvnw clean verify` · Smoke test: `scripts/smoke-test.sh`
+
+## Workflow rules to reduce cycle time
+
+### Local builds and tests
+1. While iterating, build and test only the affected module: ./mvnw -pl <module> -am verify. Run the full ./mvnw -B verify once, just before opening the PR.
+2. To reproduce a CI failure, run the exact command from .github/workflows/ci.yml so there is no translation between local and CI.
+3. If a change touches the API used by performance-tests, also run ./mvnw -B -f performance-tests/pom.xml test-compile before opening the PR.
+4. Never use Thread.sleep in tests. Use Awaitility polling.
+
+### Kubernetes smoke test
+5. Run it only if the change touches deployment manifests, configuration, startup, or communication between services. Otherwise skip it and state why in the PR description.
+6. When debugging a smoke-test failure, rebuild and roll out only the affected service and re-run only the failing check. Run the full smoke test once at the end.
+7. Rebuild and kind-load images only for services whose code changed.
+
+### Long-running commands and CI
+8. Run any command expected to take more than a few minutes (smoke test, full verify, waiting on CI) in the background, then check its status. Do not block on it in the foreground or let it hit a tool timeout.
+9. Before asking me to approve a PR, confirm its CI run is green. If it is red, fix it first.
+10. After a merge, do not wait for the main-branch run unless the next task depends on the published image.
+
+### PRs
+11. Group related fixes into a single PR where reasonable, instead of one PR per fix.
