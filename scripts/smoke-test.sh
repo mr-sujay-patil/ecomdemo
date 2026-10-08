@@ -247,6 +247,25 @@ OTHER_TOKEN=""
 AUTH=""   # empty means "send no Authorization header at all"
 
 as_anonymous() { AUTH=""; }
+
+# KI-007: GET /api/products is paged (50 by default, 100 at most). Checks that need the WHOLE catalogue
+# - a count, or a product wherever it falls in id order - follow the pages into $BODY, so jget reads
+# one array as it always did. Anonymous, because the listing is public.
+listing_all() {
+    python3 - "$BASE_URL" > "$BODY" <<'PY'
+import json, sys, urllib.request
+base, items, page = sys.argv[1], [], 0
+while True:
+    with urllib.request.urlopen(f"{base}/api/products?page={page}&size=100") as r:
+        chunk = json.load(r)
+    items += chunk
+    if len(chunk) < 100:
+        break
+    page += 1
+print(json.dumps(items))
+PY
+}
+
 as_admin()     { AUTH="$ADMIN_TOKEN"; }
 as_customer()  { AUTH="$CUSTOMER_TOKEN"; }
 as_other()     { AUTH="$OTHER_TOKEN"; }
@@ -1510,7 +1529,7 @@ done
 # Warm both caches: the single product and the whole listing.
 request GET "/api/products/$EVICTION_ID" >/dev/null
 check "the catalogue shows 5 before the sale" "5" "$(jget "d['stockQuantity']")"
-request GET /api/products >/dev/null
+listing_all
 check "and the listing agrees" "5" \
     "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")"
 
@@ -1555,7 +1574,7 @@ check "the product page converges on 3, not the pre-sale 5 (took ${ELAPSED}ms)" 
 
 CONVERGED=false
 for _ in $(seq 1 300); do
-    request GET /api/products >/dev/null
+    listing_all
     if [ "$(jget "next(p['stockQuantity'] for p in d if p['id'] == $EVICTION_ID)")" = "3" ]; then
         CONVERGED=true
         break
@@ -1600,7 +1619,7 @@ IMPORT_CSV="$(mktemp)"
 
 # How many products there are now. Everything below is measured against this.
 as_anonymous
-request GET /api/products > /dev/null
+listing_all
 PRODUCTS_BEFORE="$(jget "len(d)")"
 
 # The upload. `request` only speaks JSON, so this one call uses curl directly: -F turns it into a
@@ -1633,7 +1652,7 @@ IMPORT_ERROR_FILE="$(jget "d['execution'] and d['errorFile']")"
 
 # The catalogue really grew, and by exactly the good rows.
 as_anonymous
-request GET /api/products > /dev/null
+listing_all
 check "the catalogue grew by exactly the good rows" "$((PRODUCTS_BEFORE + IMPORT_GOOD))" \
     "$(jget "len(d)")"
 
@@ -1685,7 +1704,7 @@ IMPORT_STATUS="$(curl -sS -o "$BODY" -w '%{http_code}' -X POST \
 check "re-importing the same file returns 200" "200" "$IMPORT_STATUS"
 check "and completes" "COMPLETED" "$(jget "d['execution']['status']")"
 as_anonymous
-request GET /api/products > /dev/null
+listing_all
 check "the catalogue did not grow again: the import upserts" \
     "$((PRODUCTS_BEFORE + IMPORT_GOOD))" "$(jget "len(d)")"
 
@@ -1702,12 +1721,12 @@ check "and an anonymous caller certainly cannot" "401" "$IMPORT_STATUS"
 
 # Clean up: leave the catalogue exactly as it was found.
 as_admin
-request GET /api/products > /dev/null
+listing_all   # the whole catalogue: a first page alone would miss the imports (KI-007)
 for id in $(jget "' '.join(str(p['id']) for p in d if p['name'].startswith('Smoke Import'))"); do
     request DELETE "/api/products/$id" > /dev/null
 done
 as_anonymous
-request GET /api/products > /dev/null
+listing_all
 check "the imported products are cleaned up again" "$PRODUCTS_BEFORE" "$(jget "len(d)")"
 rm -f "$IMPORT_CSV"
 as_customer
@@ -2339,7 +2358,7 @@ if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/n
         "$(wait_for_notification "$PROBE_ORDER_ID" 360)"
 
 
-    request GET /api/products >/dev/null
+    listing_all
     KAFKA_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1 and p['price'] * 1 <= $PAYMENT_LIMIT)")"
     OFFSETS_BEFORE="$(topic_message_count orders.placed)"
 
@@ -2421,7 +2440,7 @@ if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/n
 
     # The stronger claim, and the one a user would notice: the partition kept moving. A consumer
     # that retried the bad record in place would have stopped everything behind it.
-    request GET /api/products >/dev/null
+    listing_all
     POISON_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 1 and p['price'] * 1 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$POISON_PRODUCT_ID,\"quantity\":1}" >/dev/null
     check "an order placed AFTER the poison message still succeeds" "201" "$(request POST /api/orders)"
@@ -2506,7 +2525,7 @@ if command -v docker >/dev/null 2>&1 \
     check "and nothing is stuck in it before the outage" "0" "${OUTBOX_PENDING_BEFORE:-unknown}"
 
     # --- An ordinary order leaves a published row ----------------------------------------------
-    request GET /api/products >/dev/null
+    listing_all
     OUTBOX_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$OUTBOX_PRODUCT_ID,\"quantity\":1}" >/dev/null
     check "an order placed with the broker UP returns 201" "201" "$(request POST /api/orders)"
@@ -2594,7 +2613,7 @@ if command -v docker >/dev/null 2>&1 \
     # 97-second checkout here, because the AFTER_COMMIT send blocked the request thread waiting
     # for cluster metadata. Now the request never touches Kafka at all - it writes a row - so the
     # broker being down should be invisible to the customer.
-    request GET /api/products >/dev/null
+    listing_all
     OUTAGE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$OUTAGE_PRODUCT_ID,\"quantity\":1}" >/dev/null
 
@@ -3007,7 +3026,7 @@ NOT_PERMITTED_BEFORE="$(metric resilience4j_circuitbreaker_not_permitted_calls_t
 
 # --- Fill a cart while the catalogue is up ------------------------------------------------------
 as_customer
-request GET /api/products >/dev/null
+listing_all
 RES_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 3 and p['price'] * 3 <= $PAYMENT_LIMIT)")"
 check "with catalog-service UP, adding to the cart works" "200" \
     "$(request POST /api/cart/items "{\"productId\":$RES_PRODUCT_ID,\"quantity\":1}")"
@@ -3166,7 +3185,7 @@ if curl -fsS "$TEMPO_URL/ready" >/dev/null 2>&1; then
     # --- One checkout, with a trace id the script chose ------------------------------------------
     TRACE_ID="$(random_hex 16)"
     CLIENT_SPAN_ID="$(random_hex 8)"
-    request GET /api/products >/dev/null
+    listing_all
     TRACE_PRODUCT_ID="$(jget "next(p['id'] for p in d if p['stockQuantity'] >= 2 and p['price'] * 2 <= $PAYMENT_LIMIT)")"
     request POST /api/cart/items "{\"productId\":$TRACE_PRODUCT_ID,\"quantity\":1}" >/dev/null
     check "a checkout sent with a W3C traceparent returns 201" "201" \
