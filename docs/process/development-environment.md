@@ -90,6 +90,10 @@ Never paste a secret into a commit, a PR, or the conversation.
     ./scripts/smoke-test.sh      # ~315 checks against the live stack
     docker compose --profile tools down   # --profile tools, or the network survives the stop
 
+Compose publishes every port on `127.0.0.1` only (KI-003, `BIND_ADDRESS` in `.env` to change it). From
+Windows, `localhost:<port>` still reaches the stack through WSL2's localhost forwarding (checked with
+`powershell.exe`), but the machine's LAN address does not.
+
 ## No resource rationing on the workstation
 
 **Decided by the user on 2026-09-27: on the workstation, memory and CPU are not constraints.** Tests
