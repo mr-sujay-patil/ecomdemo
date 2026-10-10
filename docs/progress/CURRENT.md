@@ -5,22 +5,23 @@
 - **Updated:** 2026-10-10
 - **Fix:** KI-058, PostgreSQL TLS in k8s (the 6 databases)
 - **Branch:** fix/ki-058-postgres-tls (cut from `main` at `669a9ed`)
-- **Step:** BRANCHED
-- **Waiting for user:** NO. The k8s smoke test is run by the user locally (the cloud session's network policy blocks the Helm chart hosts and quay.io; same arrangement as KI-060). `ki-060-fixed` is for the user to push (the session's tag push got 403).
+- **Step:** PR_OPEN (PR #87)
+- **Waiting for user:** YES: CI on PR #87, the owner's local `scripts/k8s-smoke.sh` (after `k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`), then `approved, merge it`. The k8s smoke test is run by the user locally (the cloud session's network policy blocks the Helm chart hosts and quay.io; same arrangement as KI-060). `ki-060-fixed` is for the user to push (the session's tag push got 403).
 
 ## Plan (k8s only; compose unchanged, as KI-057 did for Redis)
 - Server: a cert-manager Certificate per database (`<db>-tls`, its Service names); Postgres started with `ssl=on`, the certificate files, and an `hba_file` that accepts only `hostssl` (scram) for TCP; a `cert-reload` sidecar that runs `pg_reload_conf()` when the certificate changes (Postgres re-reads its SSL files on reload).
 - Clients: `SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE=verify-full` and `..._SSLROOTCERT=/etc/ecomdemo-tls/ca.crt` in the 6 ConfigMaps (each pod already mounts the CA there); Flyway uses the same DataSource.
 
 ## Checklist
-- [ ] Regression tests: manifest test (fails first) and a real Postgres TLS check (plain refused, verify-full with the CA accepted, a wrong host name refused)
-- [ ] 6 Certificates, 6 StatefulSets (TLS, hba, sidecar), 6 ConfigMaps
-- [ ] `scripts/smoke-test.sh` (k8s only): a plain-text client is refused by each database; certificate count
-- [ ] Docs: KNOWN_ISSUES, README TLS, security.md, decisions [Fix KI-058]
-- [ ] `./mvnw -B clean verify`; PR; CI green
+- [x] Regression tests: manifest test (fails first) and a real Postgres TLS check (plain refused, verify-full with the CA accepted, a wrong host name refused)
+- [x] 6 Certificates, 6 StatefulSets (TLS, hba, sidecar), 6 ConfigMaps
+- [x] `scripts/smoke-test.sh` (k8s only): a plain-text client is refused by each database; certificate count
+- [x] Docs: KNOWN_ISSUES, README TLS, security.md, decisions [Fix KI-058]
+- [x] `./mvnw -B clean verify` (779 tests); PR #87
+- [ ] CI green on PR #87
 
 ## Next action
-Write the manifest regression test, see it fail, then the server side.
+Wait for CI on PR #87 and fix it if red. Then STOP for the owner: local k8s smoke test and `approved, merge it`. After the merge: merge verification, tag `ki-058-fixed` (the session's tag pushes get 403: give the owner the command). Remaining TLS gap: KI-059 (Kafka).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
