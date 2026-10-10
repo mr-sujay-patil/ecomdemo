@@ -84,6 +84,17 @@ final class KafkaTestBroker {
                 + signed(name, ca, commonName, "extendedKeyUsage=clientAuth"));
     }
 
+    /**
+     * An EC certificate for {@code commonName}, signed by {@code ca}, with the given X.509 extensions (one per
+     * line, as {@code openssl x509 -extfile} reads them). Used for Redis's own certificate (Phase 36), whose
+     * extended key usage is the point of a test.
+     */
+    static void issueLeaf(GenericContainer<?> issuer, Path files, String name, String ca, String commonName,
+            String extensions) throws Exception {
+        run(issuer, files, name, "openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out /tmp/" + name + ".key"
+                + signed(name, ca, commonName, extensions));
+    }
+
     private static String signed(String name, String ca, String commonName, String extension) {
         return " && openssl req -new -key /tmp/" + name + ".key -subj /CN=" + commonName + " -out /tmp/" + name + ".csr"
                 + " && printf '" + extension + "\\n' > /tmp/" + name + ".ext"

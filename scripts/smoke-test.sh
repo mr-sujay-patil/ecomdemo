@@ -86,9 +86,10 @@ K8S_CONTEXT="${K8S_CONTEXT:-kind-ecomdemo}"
 IN_SCHEME=http; WGET_TLS=""
 if [ "$SMOKE_PLATFORM" = "k8s" ]; then IN_SCHEME=https; WGET_TLS="--no-check-certificate"; fi
 # KI-057: Redis is TLS-only in k8s. redis-cli inside its pod verifies the certificate against the cluster CA
-# (the pod has the CA mounted), so these checks verify too, unlike BusyBox wget above.
+# (the pod has the CA mounted), so these checks verify too, unlike BusyBox wget above. Phase 36: Redis also
+# requires a client certificate, and redis-cli in its pod presents the pod's own (cache-tls, `client auth`).
 REDIS_TLS=""
-if [ "$SMOKE_PLATFORM" = "k8s" ]; then REDIS_TLS="--tls --cacert /etc/ecomdemo-tls/ca.crt"; fi
+if [ "$SMOKE_PLATFORM" = "k8s" ]; then REDIS_TLS="--tls --cacert /etc/ecomdemo-tls/ca.crt --cert /etc/ecomdemo-tls/tls.crt --key /etc/ecomdemo-tls/tls.key"; fi
 # KI-059: in k8s the broker's network listener (9092) is TLS-only; its own tools, run inside its pod, use the
 # plain LOCAL listener, which is bound to the pod's loopback (127.0.0.1:9094). compose is unchanged.
 KAFKA_IN_POD="localhost:9092"
@@ -4261,7 +4262,7 @@ check "cert-manager has the certificate Ready" "True" \
 # CA, and trusts that CA when it calls another service. Server-side TLS only: a caller is still identified
 # by its JWT service token, not a client certificate. That the JVMs verify each other is proven by this whole
 # run working: the gateway, the saga and the token endpoint all cross these hops.
-check "cert-manager has all 23 certificates Ready (the Ingress, the 8 services, Redis, the 6 databases, Kafka and the 6 client certificates)" "23" \
+check "cert-manager has all 25 certificates Ready (the Ingress, the 8 services, Redis, the 6 databases, Kafka and the 8 client certificates)" "25" \
     "$(kube get certificates -o json | python3 -c "
 import json, sys
 print(sum(1 for c in json.load(sys.stdin)['items']
@@ -4306,6 +4307,41 @@ for database in db catalog-db customer-db inventory-db notification-db payment-d
         "$(kube exec "statefulset/$database" -c postgres -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql \"host=$database sslmode=verify-full sslrootcert=/etc/ecomdemo-tls/ca.crt user=\$POSTGRES_USER dbname=\$POSTGRES_DB\" -Atc 'select 1' 2>&1" | grep -q 'requires a valid client certificate' && echo True || echo False)"
     check "$database: its service's connections present the client certificate /CN=$database_user" "/CN=$database_user" \
         "$(kube exec "statefulset/$database" -c postgres -- sh -c 'psql -h /var/run/postgresql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select distinct client_dn from pg_stat_ssl where client_dn is not null"' 2>&1 | tr -d '\r ')"
+done
+# Phase 36: Redis authenticates the CLIENT too, by certificate, and still asks for the password (the pod's
+# REDISCLI_AUTH supplies it to every redis-cli here, so only the certificate differs). From inside the Redis pod:
+# a TLS client that verifies the server but has no certificate is refused in the handshake, and so is one with a
+# certificate from another CA (made here with openssl, deleted after); Redis's log names the reason each time.
+# Then each of the four Redis clients' own certificates (copied from its Secret into the pod, never printed,
+# deleted after) gets PONG. Without the password a certificate is not enough: "Redis refuses a client that has
+# no password" in the Caching section runs with the pod's certificate.
+check "Redis refuses a TLS client without a client certificate" "True" \
+    "$(if ctr_exec "$REDIS_CONTAINER" sh -c 'redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt ping 2>&1' | grep -q PONG; then echo False
+       else kube logs deployment/cache -c redis --since=60s | grep -q 'peer did not return a certificate' && echo True || echo False; fi)"
+REDIS_FOREIGN="$(mktemp -d)"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$REDIS_FOREIGN/ca.key" -subj /CN=smoke-foreign-ca -days 1 \
+    -out "$REDIS_FOREIGN/ca.crt" 2>/dev/null
+openssl req -newkey rsa:2048 -nodes -keyout "$REDIS_FOREIGN/client.key" -subj /CN=catalog \
+    -out "$REDIS_FOREIGN/client.csr" 2>/dev/null
+printf 'extendedKeyUsage=clientAuth\n' > "$REDIS_FOREIGN/client.ext"
+openssl x509 -req -in "$REDIS_FOREIGN/client.csr" -CA "$REDIS_FOREIGN/ca.crt" -CAkey "$REDIS_FOREIGN/ca.key" \
+    -set_serial 1 -days 1 -extfile "$REDIS_FOREIGN/client.ext" -out "$REDIS_FOREIGN/client.crt" 2>/dev/null
+check "Redis refuses a client certificate from another CA" "True" \
+    "$(if cat "$REDIS_FOREIGN/client.key" "$REDIS_FOREIGN/client.crt" \
+            | ctr_exec -i "$REDIS_CONTAINER" sh -c 'umask 077 && cat > /tmp/smoke-foreign.pem && redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /tmp/smoke-foreign.pem --key /tmp/smoke-foreign.pem ping 2>&1; rm -f /tmp/smoke-foreign.pem' \
+            | grep -q PONG; then echo False
+       else kube logs deployment/cache -c redis --since=60s | grep -q 'certificate verify failed' && echo True || echo False; fi)"
+rm -f "$REDIS_FOREIGN/ca.key" "$REDIS_FOREIGN/ca.crt" "$REDIS_FOREIGN/client.key" "$REDIS_FOREIGN/client.csr" \
+    "$REDIS_FOREIGN/client.ext" "$REDIS_FOREIGN/client.crt"
+rmdir "$REDIS_FOREIGN"
+for redis_client in app catalog-service gateway-service assistant-service; do
+    check "$redis_client's client certificate, with the password, gets PONG from Redis" "PONG" \
+        "$(kube get secret "$redis_client-client-tls" -o json | python3 -c '
+import base64, json, sys
+data = json.load(sys.stdin)["data"]
+sys.stdout.write(base64.b64decode(data["tls.key"]).decode() + base64.b64decode(data["tls.crt"]).decode())' \
+            | ctr_exec -i "$REDIS_CONTAINER" sh -c 'umask 077 && cat > /tmp/smoke-client.pem && redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /tmp/smoke-client.pem --key /tmp/smoke-client.pem ping 2>&1; rm -f /tmp/smoke-client.pem' \
+            | tr -d '\r ')"
 done
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
     "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"

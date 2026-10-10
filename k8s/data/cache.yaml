@@ -38,19 +38,25 @@ spec:
           # KI-050: clients must authenticate. The password lives in the cache-secrets Secret
           # (scripts/k8s-up.sh creates it); Kubernetes expands $(REDIS_PASSWORD) in args from the env
           # below. REDISCLI_AUTH lets the probe and `kubectl exec ... redis-cli` authenticate without
-          # the password on a command line.
+          # the password on a command line. Phase 36: every redis-cli in this pod (the probe, the
+          # cert-reload sidecar, the smoke test) also presents a client certificate: this pod's own,
+          # cache-tls, which carries the `client auth` usage for that reason. The tools already run
+          # beside its key, so a second certificate here would prove nothing more.
           args: ["redis-server", "--save", "", "--appendonly", "no",
                  "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru",
                  "--requirepass", "$(REDIS_PASSWORD)",
                  # KI-057: TLS ONLY. `--port 0` closes the plain port; the TLS port keeps the number
                  # 6379, so the Service and every client's port are unchanged. The certificate is
-                 # cert-manager's (k8s/service-certificates.yaml: cache-tls). Server-side TLS: no
-                 # client certificate (`--tls-auth-clients no`), clients authenticate with the password.
+                 # cert-manager's (k8s/service-certificates.yaml: cache-tls).
                  "--port", "0", "--tls-port", "6379",
                  "--tls-cert-file", "/etc/ecomdemo-tls/tls.crt",
                  "--tls-key-file", "/etc/ecomdemo-tls/tls.key",
+                 # Phase 36: and the CLIENT proves itself too. The handshake fails unless the client
+                 # shows a certificate signed by this CA (the cluster CA), so a pod that only has the
+                 # password gets no further than TLS. The password above is still asked for after it:
+                 # a client needs both, the key it holds and the secret it knows.
                  "--tls-ca-cert-file", "/etc/ecomdemo-tls/ca.crt",
-                 "--tls-auth-clients", "no"]
+                 "--tls-auth-clients", "yes"]
           env:
             - name: REDIS_PASSWORD
               valueFrom:
@@ -69,7 +75,8 @@ spec:
             - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
           readinessProbe:
             exec:
-              command: ["redis-cli", "--tls", "--cacert", "/etc/ecomdemo-tls/ca.crt", "ping"]
+              command: ["redis-cli", "--tls", "--cacert", "/etc/ecomdemo-tls/ca.crt",
+                        "--cert", "/etc/ecomdemo-tls/tls.crt", "--key", "/etc/ecomdemo-tls/tls.key", "ping"]
             periodSeconds: 5
           livenessProbe:
             tcpSocket:
@@ -84,7 +91,8 @@ spec:
         # KI-057: Redis reads its certificate once, at start, so a certificate cert-manager renews at day 60
         # would sit unused in the volume and Redis would keep serving the old one until it expired at day 90.
         # This sidecar notices the file change and tells Redis to load the new one (`CONFIG SET tls-*`,
-        # supported at runtime), so a renewal needs no restart and no outage.
+        # supported at runtime), so a renewal needs no restart and no outage. Phase 36: it presents the
+        # renewed certificate as its client certificate (same CA, so Redis still accepts it).
         - name: cert-reload
           image: redis:8-alpine
           command: ["sh", "-c"]
@@ -97,6 +105,7 @@ spec:
                 now="$(sha256sum "$cert" | cut -d' ' -f1)"
                 if [ "$now" != "$last" ]; then
                   if redis-cli -h 127.0.0.1 --tls --cacert /etc/ecomdemo-tls/ca.crt \
+                       --cert /etc/ecomdemo-tls/tls.crt --key /etc/ecomdemo-tls/tls.key \
                        CONFIG SET tls-cert-file "$cert" tls-key-file /etc/ecomdemo-tls/tls.key \
                        tls-ca-cert-file /etc/ecomdemo-tls/ca.crt | grep -q OK; then
                     echo "reloaded the Redis certificate"; last="$now"

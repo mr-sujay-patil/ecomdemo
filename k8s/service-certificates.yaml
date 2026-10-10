@@ -7,8 +7,8 @@
 # The names are what a caller puts in its URL: the Service name inside the namespace, its longer forms,
 # and `localhost` / 127.0.0.1 for `kubectl port-forward` (the smoke test checks app and payment-service
 # that way). For HTTP, server-side TLS only: callers are still identified by their JWT service tokens, not by
-# a client certificate. Kafka and PostgreSQL DO identify their clients by certificate (Phase 35): those
-# client certificates are at the end of this file.
+# a client certificate. Kafka and PostgreSQL (Phase 35) and Redis (Phase 36) DO identify their clients by
+# certificate: those client certificates are at the end of this file.
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -227,6 +227,11 @@ spec:
     kind: ClusterIssuer
 ---
 # Redis (KI-057). The name every client connects to is `cache`; `localhost` is for `redis-cli` inside the pod.
+# Phase 36: Redis requires a client certificate, and the tools in its pod (the readiness probe, the cert-reload
+# sidecar, the smoke test's redis-cli) present this one. Without a usage list cert-manager's documented default
+# is `digital signature, key encipherment` and no extended key usage, which OpenSSL accepts for any purpose;
+# naming both makes the client role a decision rather than a default: Redis refuses a client certificate that
+# says `server auth` only ("certificate verify failed", RedisClientAuthIT).
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -238,6 +243,11 @@ spec:
   secretName: cache-tls
   duration: 2160h
   renewBefore: 720h
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
   dnsNames:
     - cache
     - cache.ecomdemo
@@ -453,8 +463,9 @@ spec:
     kind: ClusterIssuer
 
 # --------------------------------------------------------------------------------------------------------
-# Client certificates (Phase 35): how a service proves WHO it is to PostgreSQL and Kafka. One per database
-# client, separate from the service's server certificate above (`<service>-tls`), because the two answer
+# Client certificates (Phase 35): how a service proves WHO it is to PostgreSQL and Kafka, and (Phase 36) to
+# Redis. One per service that uses any of the three, the same certificate for all of them, so a service has one
+# identity everywhere; gateway-service and assistant-service use only Redis. One per database client, separate from the service's server certificate above (`<service>-tls`), because the two answer
 # different questions and are read by different code:
 #   - commonName is the identity, and it must be the DATABASE USER: with `scram-sha-256 clientcert=verify-full`
 #     PostgreSQL requires the CN to equal the login name (a `map=` is not allowed with a password method).
@@ -603,6 +614,58 @@ spec:
   duration: 2160h
   renewBefore: 720h
   commonName: payment
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    encoding: PKCS8
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+# Phase 36: the two Redis clients that use no database. Made like the six above (RSA, PKCS#8) although only a
+# Spring SSL bundle reads them, so every client certificate is one kind; the CN is the service's short name.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-service-client-tls
+  labels:
+    app.kubernetes.io/name: gateway-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: gateway-service-client-tls
+  duration: 2160h
+  renewBefore: 720h
+  commonName: gateway
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    encoding: PKCS8
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: assistant-service-client-tls
+  labels:
+    app.kubernetes.io/name: assistant-service
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: assistant-service-client-tls
+  duration: 2160h
+  renewBefore: 720h
+  commonName: assistant
   usages:
     - digital signature
     - key encipherment

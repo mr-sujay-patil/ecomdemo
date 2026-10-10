@@ -28,7 +28,16 @@ data:
   ASSISTANT_BASE_URL: "https://assistant-service:8087"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
-  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only; the JVM trusts the cluster CA (trust-ca)
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only
+  # Phase 36: Redis also requires a client certificate (and still the password). The client presents its client certificate
+  # through the SSL bundle `redis`, which also trusts the cluster CA. The bundle reloads when cert-manager
+  # renews the certificate, and com.ecomdemo.redis (in common) makes Lettuce use the current one on its next
+  # connection: Boot alone would keep the certificate of start-up.
+  SPRING_DATA_REDIS_SSL_BUNDLE: "redis"
+  SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_CERTIFICATE: "file:/etc/ecomdemo-client-tls/tls.crt"
+  SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_PRIVATEKEY: "file:/etc/ecomdemo-client-tls/tls.key"
+  SPRING_SSL_BUNDLE_PEM_REDIS_TRUSTSTORE_CERTIFICATE: "file:/etc/ecomdemo-client-tls/ca.crt"
+  SPRING_SSL_BUNDLE_PEM_REDIS_RELOAD_ON_UPDATE: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -57,6 +66,10 @@ spec:
         app.kubernetes.io/name: gateway-service
         app.kubernetes.io/part-of: ecomdemo
     spec:
+      # Phase 36: the volumes' files belong to the image's group (gid 1001), so the client key below can be
+      # 0440 and still readable by the service, which runs as 1001.
+      securityContext:
+        fsGroup: 1001
       # Kubernetes has no `depends_on`. Without this, the service would start before its database,
       # fail Flyway, crash, and be restarted with a growing back-off until the database happened
       # to be up. An init container runs to completion BEFORE the application container starts:
@@ -100,6 +113,12 @@ spec:
         - name: tls
           secret:
             secretName: gateway-service-tls
+        # Phase 36: this service's CLIENT certificate, for Redis (k8s/service-certificates.yaml). 0440: the key is
+        # for the service alone, as the database clients' are (Phase 35).
+        - name: client-tls
+          secret:
+            secretName: gateway-service-client-tls
+            defaultMode: 0440
         - name: trust
           emptyDir: {}
       containers:
@@ -132,6 +151,7 @@ spec:
           volumeMounts:
             - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
             - { name: trust, mountPath: /trust, readOnly: true }
+            - { name: client-tls, mountPath: /etc/ecomdemo-client-tls, readOnly: true }
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
