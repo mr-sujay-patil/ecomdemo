@@ -8,6 +8,19 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 36: Redis Client Certificates — in Kubernetes, Redis now knows WHO connects too.** Redis was
+the last store a pod could use with the password alone. Now:
+- Redis asks every client for a **certificate from the cluster CA** in the TLS handshake, and still for
+  the **password**: a client needs both.
+- Its four clients present one through a Spring SSL bundle `redis`: app and catalog-service the same
+  certificate they show PostgreSQL and Kafka (Phase 35), gateway-service and assistant-service a new one.
+- A renewed client certificate is used by the next connection, with no restart. Spring Boot alone would
+  keep the one of start-up (a test proves it), so `common` adds a small auto-configuration that hands
+  Lettuce the bundle's current keys. The tools in the Redis pod (probe, `cert-reload`, the smoke test's
+  `redis-cli`) present the pod's own certificate. Compose is unchanged. See
+  [Redis client certificates](#redis-client-certificates-phase-36) and
+  [`docs/test-reports/phase-36.md`](docs/test-reports/phase-36.md).
+
 **Phase 35: Client Authentication — in Kubernetes, Kafka and PostgreSQL now know WHO connects.** TLS
 already proved the server to each client; nothing proved the client to the server, so a database
 login needed only its password and any pod that reached Kafka could read or write any topic. Now:
@@ -3601,6 +3614,35 @@ client, by certificate, and Kafka decides what each one may do.
 - **On an existing cluster**, `scripts/k8s-up.sh` rolls out the databases, Kafka and the six services by
   itself (their pod templates change). Until all of them have rolled, a service that still has no
   certificate is refused by its database and by Kafka, and retries.
+
+### Redis client certificates (Phase 36)
+
+Redis was the last data store that took the password alone. Now it checks the client's certificate too.
+
+- **Redis** (`k8s/data/cache.yaml`) runs with `--tls-auth-clients yes`: the TLS handshake fails unless
+  the client shows a certificate signed by the cluster CA (`--tls-ca-cert-file`). `requirepass` stays, so a
+  client needs the key it holds AND the password it knows. Redis's log says why it refused one:
+  "peer did not return a certificate" or "certificate verify failed".
+- **The identities.** app and catalog-service present their Phase 35 `<service>-client-tls` certificates
+  (one identity per service, in every store); gateway-service and assistant-service get
+  `gateway-service-client-tls` (CN `gateway`) and `assistant-service-client-tls` (CN `assistant`), mounted
+  the same way (`/etc/ecomdemo-client-tls`, 0440, `fsGroup` 1001). 25 certificates in all.
+- **The clients** set `SPRING_DATA_REDIS_SSL_BUNDLE=redis` and `SPRING_SSL_BUNDLE_PEM_REDIS_*` (certificate,
+  key, the CA as truststore, `reload-on-update`). Spring Boot gives Lettuce the bundle's key managers once,
+  at start-up, so after a renewal it would keep presenting the old certificate until a restart, and be
+  refused on its first reconnect after day 90. `com.ecomdemo.redis.RedisClientCertificateAutoConfiguration`
+  (in `common`, active only when that bundle is set) hands Lettuce key and trust managers that ask the bundle
+  registry each time, and Lettuce builds an SSL engine per connection, so the next connection uses the
+  renewed certificate. A connection that is already open keeps its TLS session; Redis does not re-check it.
+- **Inside the Redis pod**, the readiness probe, the `cert-reload` sidecar and `kubectl exec ... redis-cli`
+  present Redis's own certificate (`cache-tls`, which now names both `server auth` and `client auth`):
+  `kubectl -n ecomdemo exec deploy/cache -c redis -- redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /etc/ecomdemo-tls/tls.crt --key /etc/ecomdemo-tls/tls.key ping`
+  (`REDISCLI_AUTH` in the container supplies the password).
+- **On an existing cluster**, run `scripts/k8s-up.sh` and then `kubectl -n ecomdemo rollout restart deploy`:
+  Redis, the gateway and the assistant roll out by themselves, but app and catalog-service change only in
+  their ConfigMaps, and until they restart Redis refuses them (their Redis calls fail).
+- **Not done:** every client still logs in as Redis's `default` user, so a certificate proves the caller is
+  one of our services, not which keys it may touch (per-service ACL users: KI-065).
 
 **What is not covered.** Compose stays HTTP on `127.0.0.1` (KI-003): the same images run there, and the TLS settings live only
 in the k8s ConfigMaps. If the CA ever has to be replaced, every service must restart to rebuild its

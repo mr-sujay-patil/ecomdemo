@@ -5,22 +5,26 @@
 - **Updated:** 2026-10-10
 - **Phase:** 36, Redis Client Certificates (`docs/phases/phase-36-redis-client-certificates.md`), KI-063
 - **Branch:** feature/phase-36-redis-client-certificates (cut from `main` at `b2aa553`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** NO. Approved by the user on 2026-10-10. Previous: Phase 35 merged (`bf0c109`, PR #89; its last commit `d21d639` is a parent of the merge), KI-055 merged (`b2aa553`, PR #90). Tags `phase-35-complete`, `ki-055-fixed`, `ki-059-fixed` are the owner's to push (403 here).
 
 ## Checklist
-- [ ] Manifest test (fails first): Redis requires client certificates, every Redis client presents one through the `redis` SSL bundle, in-pod tools present one
-- [ ] Redis: `--tls-auth-clients yes`; probe, `cert-reload` sidecar use a client certificate
-- [ ] Client certificates for gateway-service and assistant-service; app and catalog reuse theirs
-- [ ] Clients: `SPRING_DATA_REDIS_SSL_BUNDLE=redis` + `SPRING_SSL_BUNDLE_PEM_REDIS_*`; renewal (current-bundle key manager in `common`)
-- [ ] `RedisClientAuthIT`: cert+password OK; no cert, other CA, no password refused; renewal used by next connection; probe and sidecar work
-- [ ] Smoke test (k8s): no-cert and foreign-CA refusals, each service certificate PONG, 25 certificates
-- [ ] Per-service ACL users: candidate KI row (not built)
-- [ ] Docs: README, decisions, security, KI-063, test report, RECENT rotation, tracker 🔵
+- [x] Manifest test (fails first): Redis requires client certificates, every Redis client presents one through the `redis` SSL bundle, in-pod tools present one
+- [x] Redis: `--tls-auth-clients yes`; probe, `cert-reload` sidecar use a client certificate
+- [x] Client certificates for gateway-service and assistant-service; app and catalog reuse theirs
+- [x] Clients: `SPRING_DATA_REDIS_SSL_BUNDLE=redis` + `SPRING_SSL_BUNDLE_PEM_REDIS_*`; renewal (current-bundle key manager in `common`)
+- [x] `RedisClientAuthIT`: cert+password OK; no cert, other CA, no password refused; renewal used by next connection; probe and sidecar work
+- [x] Smoke test (k8s): no-cert and foreign-CA refusals, each service certificate PONG, 25 certificates
+- [x] Per-service ACL users: candidate KI row (not built)
+- [ ] Docs: README, decisions, security, KI-063..065, RECENT rotation (done); test report, tracker 🔵 (after the full build)
 - [ ] `./mvnw -B clean verify` (baseline 846 tests); PR
 
 ## Next action
-Write the manifest test `ecomdemo-app/src/test/java/com/ecomdemo/RedisClientAuthConfigTest.java` (it must fail on `main`), then change `k8s/data/cache.yaml`.
+Full `./mvnw -B clean verify` is running (log `~/.cache/ecomdemo-claude/p36-full.log`); if green, write
+`docs/test-reports/phase-36.md` (also: counter-check RedisClientAuthIT against main's `k8s/data/cache.yaml`), set
+the tracker to 🔵 and KI-063 to Fixed, push, open the PR `Phase 36: Redis Client Certificates`, then STOP.
+Smoke snippets were validated against a Redis container (scratchpad harness): new checks PASS, and the two
+refusals FAIL against KI-057's `--tls-auth-clients no`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
