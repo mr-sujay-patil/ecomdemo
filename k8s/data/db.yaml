@@ -51,13 +51,15 @@ spec:
           # Secret's files belong to root, so the certificate is first copied, as postgres and 0600, into a
           # pod-private volume; then the image's own entrypoint starts the server with TLS on, those files,
           # and pg_hba.conf from the `postgres-hba` ConfigMap (TCP only as `hostssl`). `cert-reload` below
-          # repeats the copy when cert-manager renews the certificate.
+          # repeats the copy when cert-manager renews the certificate. Phase 35: `ssl_ca_file` is the cluster CA
+          # (public, so read where the Secret mounts it), against which pg_hba.conf's `clientcert=verify-full`
+          # checks each client's certificate.
           command: ["sh", "-c"]
           args:
             - |
               install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key
               install -o postgres -g postgres -m 0644 /etc/ecomdemo-tls/tls.crt /etc/postgres-tls/tls.crt
-              exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/etc/postgres-tls/tls.crt -c ssl_key_file=/etc/postgres-tls/tls.key -c hba_file=/etc/postgresql-hba/pg_hba.conf
+              exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/etc/postgres-tls/tls.crt -c ssl_key_file=/etc/postgres-tls/tls.key -c ssl_ca_file=/etc/ecomdemo-tls/ca.crt -c hba_file=/etc/postgresql-hba/pg_hba.conf
           env:
             - name: POSTGRES_DB
               value: ecomdemo

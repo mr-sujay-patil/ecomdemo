@@ -8,6 +8,8 @@ import com.zaxxer.hikari.HikariConfig;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
@@ -47,12 +49,19 @@ import org.testcontainers.images.builder.Transferable;
  *   <li>a host name the certificate does not carry is refused by the client;</li>
  *   <li>the {@code cert-reload} sidecar's script puts a renewed certificate in service without a restart.</li>
  * </ul>
+ * Phase 35 added client authentication: the client also sends its certificate ({@code sslcert}, {@code sslkey}
+ * from the same ConfigMap), and {@code clientcert=verify-full} refuses a client with no certificate, with one
+ * from another CA, or with one whose CN is not the login; the driver reads a renewed certificate for the next
+ * connection; and an EC key, which the driver reads only with {@code pemKeyAlgorithm}, is why the client
+ * certificates are RSA.
  */
-@DisplayName("PostgreSQL TLS on the real images (KI-058)")
+@DisplayName("PostgreSQL TLS and client certificates on the real images (KI-058, Phase 35)")
 class PostgresTlsIT {
 
     private static final String SSLMODE = "SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE";
     private static final String SSLROOTCERT = "SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLROOTCERT";
+    private static final String SSLCERT = "SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLCERT";
+    private static final String SSLKEY = "SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLKEY";
 
     /** Issues the test certificates: a container of an image that has openssl, kept for the whole class. */
     private static GenericContainer<?> issuer;
@@ -71,6 +80,10 @@ class PostgresTlsIT {
         issuer.start();
         issue("ca", null, "test-ca");
         issue("other-ca", null, "other-ca");
+        // Each database's client certificate, as k8s/service-certificates.yaml asks for it: CN = the login, RSA, PKCS#8.
+        for (String database : databases().toList()) {
+            issueClient(database + "-client", "ca", login(database).get("POSTGRES_USER"), "RSA");
+        }
     }
 
     @AfterAll
@@ -138,6 +151,97 @@ class PostgresTlsIT {
         }
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("databases")
+    @DisplayName("the password AND the user's own certificate from the cluster CA: anything less is refused")
+    void clientCertificateRequired(String database) throws Exception {
+        String user = login(database).get("POSTGRES_USER");
+        issue(database + "-server", "ca", "localhost");
+        issueClient(database + "-other-ca-client", "other-ca", user, "RSA");
+        issueClient(database + "-wrong-user", "ca", "someone-else", "RSA");
+        issueClient(database + "-ec-client", "ca", user, "EC");
+        try (GenericContainer<?> postgres = startDatabase(database, database + "-server", "ca")) {
+            String url = "jdbc:postgresql://localhost:" + postgres.getMappedPort(5432) + "/" + login(database).get("POSTGRES_DB");
+
+            // The client's certificate is what the server saw: its subject is the login.
+            try (Connection connection = DriverManager.getConnection(url, clientProperties(database, "ca"))) {
+                assertThat(clientDn(connection)).isEqualTo("/CN=" + user);
+            }
+
+            Properties none = clientProperties(database, "ca");
+            // Without sslcert/sslkey the driver offers ~/.postgresql/postgresql.crt if there is one, here: none.
+            none.remove("sslcert");
+            none.remove("sslkey");
+            assertThatThrownBy(() -> DriverManager.getConnection(url, none).close())
+                    .isInstanceOf(SQLException.class).hasMessageContaining("requires a valid client certificate");
+
+            assertThatThrownBy(() -> DriverManager.getConnection(url,
+                    withClientCertificate(clientProperties(database, "ca"), database + "-other-ca-client")).close())
+                    .as("a certificate from another CA").isInstanceOf(SQLException.class);
+
+            // The right password, a valid certificate from the cluster CA, but issued to another name.
+            assertThatThrownBy(() -> DriverManager.getConnection(url,
+                    withClientCertificate(clientProperties(database, "ca"), database + "-wrong-user")).close())
+                    .isInstanceOf(SQLException.class).hasMessageContaining("authentication failed");
+            assertThat(postgres.getLogs()).contains("CN mismatch");
+
+            // The right certificate with a wrong password: the certificate alone does not log in.
+            Properties wrongPassword = clientProperties(database, "ca");
+            wrongPassword.setProperty("password", "not-the-password");
+            assertThatThrownBy(() -> DriverManager.getConnection(url, wrongPassword).close())
+                    .isInstanceOf(SQLException.class).hasMessageContaining("password authentication failed");
+
+            // A key file others may read is refused by the driver itself: why the Secret's defaultMode is 0440.
+            Path readable = Files.copy(files.resolve(database + "-client.key"), files.resolve(database + "-readable.key"),
+                    StandardCopyOption.REPLACE_EXISTING);
+            Files.setPosixFilePermissions(readable, PosixFilePermissions.fromString("rw-r--r--"));
+            Properties readableKey = clientProperties(database, "ca");
+            readableKey.setProperty("sslkey", readable.toString());
+            assertThatThrownBy(() -> DriverManager.getConnection(url, readableKey).close())
+                    .isInstanceOf(SQLException.class).hasMessageContaining("has group or world access");
+
+            // Why the client certificates are RSA: pgjdbc reads a PEM key as RSA unless `pemKeyAlgorithm` is set,
+            // and that camelCase driver property cannot come from an environment variable (Boot lowercases the key).
+            assertThat(boundDriverProperties(Map.of("SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_PEMKEYALGORITHM", "EC")))
+                    .containsOnlyKeys("pemkeyalgorithm");
+            assertThatThrownBy(() -> DriverManager.getConnection(url,
+                    withClientCertificate(clientProperties(database, "ca"), database + "-ec-client")).close())
+                    .as("an EC key").isInstanceOf(SQLException.class);
+        }
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("databases")
+    @DisplayName("a renewed client certificate is sent by the next connection, with no restart")
+    void clientRenewalIsReadPerConnection(String database) throws Exception {
+        String user = login(database).get("POSTGRES_USER");
+        issue(database + "-server-r", "ca", "localhost");
+        issueClient(database + "-renewed-client", "ca", user, "RSA");
+        Path mounted = Files.createDirectories(files.resolve(database + "-mounted"));
+        Files.copy(files.resolve(database + "-client.crt"), mounted.resolve("tls.crt"));
+        ownerOnly(Files.copy(files.resolve(database + "-client.key"), mounted.resolve("tls.key")));
+        try (GenericContainer<?> postgres = startDatabase(database, database + "-server-r", "ca")) {
+            String url = "jdbc:postgresql://localhost:" + postgres.getMappedPort(5432) + "/" + login(database).get("POSTGRES_DB");
+            Properties properties = clientProperties(database, "ca");
+            properties.setProperty("sslcert", mounted.resolve("tls.crt").toString());
+            properties.setProperty("sslkey", mounted.resolve("tls.key").toString());
+
+            String before;
+            try (Connection connection = DriverManager.getConnection(url, properties)) {
+                before = clientSerial(connection);
+            }
+            // cert-manager renews the Secret; the kubelet swaps the mounted files.
+            Files.copy(files.resolve(database + "-renewed-client.crt"), mounted.resolve("tls.crt"), StandardCopyOption.REPLACE_EXISTING);
+            ownerOnly(Files.copy(files.resolve(database + "-renewed-client.key"), mounted.resolve("tls.key"),
+                    StandardCopyOption.REPLACE_EXISTING));
+
+            try (Connection connection = DriverManager.getConnection(url, properties)) {
+                assertThat(clientSerial(connection)).isNotEqualTo(before)
+                        .isEqualTo(serial(database + "-renewed-client"));
+            }
+        }
+    }
+
     /** The database container, started as its StatefulSet starts it, with the leaf certificate where the Secret is. */
     private static GenericContainer<?> startDatabase(String database, String leaf, String ca) throws IOException {
         Map<String, Object> container = PostgresTlsConfigTest.container(pod(database), "postgres");
@@ -182,10 +286,31 @@ class PostgresTlsIT {
         Properties properties = new Properties();
         properties.putAll(hikari.getDataSourceProperties());
         assertThat(properties).containsEntry("sslmode", environment.get(SSLMODE))
-                .containsEntry("sslrootcert", environment.get(SSLROOTCERT));
+                .containsEntry("sslrootcert", environment.get(SSLROOTCERT))
+                .containsEntry("sslcert", environment.get(SSLCERT))
+                .containsEntry("sslkey", environment.get(SSLKEY));
         properties.setProperty("sslrootcert", files.resolve(ca + ".crt").toString());
+        withClientCertificate(properties, database + "-client");
         properties.setProperty("user", login(database).get("POSTGRES_USER"));
         properties.setProperty("password", "test");
+        return properties;
+    }
+
+    /** The driver properties Spring Boot binds from the given environment variables (only the Hikari ones). */
+    private static Map<String, String> boundDriverProperties(Map<String, String> environment) {
+        HikariConfig hikari = new HikariConfig();
+        new Binder(ConfigurationPropertySources.from(new SystemEnvironmentPropertySource(
+                StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, new HashMap<>(environment))))
+                .bind("spring.datasource.hikari", Bindable.ofInstance(hikari));
+        Map<String, String> bound = new HashMap<>();
+        hikari.getDataSourceProperties().forEach((name, value) -> bound.put((String) name, (String) value));
+        return bound;
+    }
+
+    /** The client certificate and key the driver sends: the pod's paths, here the test's copies of {@code name}. */
+    private static Properties withClientCertificate(Properties properties, String name) {
+        properties.setProperty("sslcert", files.resolve(name + ".crt").toString());
+        properties.setProperty("sslkey", files.resolve(name + ".key").toString());
         return properties;
     }
 
@@ -206,6 +331,39 @@ class PostgresTlsIT {
         try (ResultSet result = connection.createStatement()
                 .executeQuery("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")) {
             return result.next() && result.getBoolean(1);
+        }
+    }
+
+    /**
+     * The driver refuses a key file others may read (libpq's rule: at most 0600, or 0640 if root owns it). In the
+     * pod the Secret makes it root's and 0440 (`defaultMode`, with `fsGroup` so the service can read it); here the
+     * test owns it, so 0600.
+     */
+    private static Path ownerOnly(Path key) throws IOException {
+        return Files.setPosixFilePermissions(key, PosixFilePermissions.fromString("rw-------"));
+    }
+
+    /** The subject of the certificate this connection's client presented, as the server saw it. */
+    private static String clientDn(Connection connection) throws SQLException {
+        try (ResultSet result = connection.createStatement()
+                .executeQuery("SELECT client_dn FROM pg_stat_ssl WHERE pid = pg_backend_pid()")) {
+            return result.next() ? result.getString(1) : null;
+        }
+    }
+
+    /** The serial number of the client certificate, in decimal, as the server saw it. */
+    private static String clientSerial(Connection connection) throws SQLException {
+        try (ResultSet result = connection.createStatement()
+                .executeQuery("SELECT client_serial::text FROM pg_stat_ssl WHERE pid = pg_backend_pid()")) {
+            return result.next() ? result.getString(1) : null;
+        }
+    }
+
+    /** The serial number of a certificate written by {@link #issueClient}, in decimal. */
+    private static String serial(String name) throws Exception {
+        try (var in = Files.newInputStream(files.resolve(name + ".crt"))) {
+            return ((java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+                    .generateCertificate(in)).getSerialNumber().toString();
         }
     }
 
@@ -232,5 +390,27 @@ class PostgresTlsIT {
             issuer.copyFileFromContainer("/tmp/" + name + suffix, in -> Files.write(files.resolve(name + suffix),
                     in.readAllBytes()));
         }
+    }
+
+    /**
+     * Writes {@code <name>.crt} and {@code <name>.key} to {@link #files}: a client certificate for {@code commonName}
+     * signed by {@code ca}, with the `client auth` usage and an unencrypted PKCS#8 key ({@code RSA} or {@code EC}),
+     * as cert-manager issues the {@code <service>-client-tls} certificates.
+     */
+    private static void issueClient(String name, String ca, String commonName, String algorithm) throws Exception {
+        String key = "RSA".equals(algorithm)
+                ? "openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/" + name + ".key"
+                : "openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out /tmp/" + name + ".key";
+        String certificate = "openssl req -new -key /tmp/" + name + ".key -subj /CN=" + commonName + " -out /tmp/" + name + ".csr"
+                + " && printf 'extendedKeyUsage=clientAuth\\n' > /tmp/" + name + ".ext"
+                + " && openssl x509 -req -in /tmp/" + name + ".csr -CA /tmp/" + ca + ".crt -CAkey /tmp/" + ca
+                + ".key -CAcreateserial -days 1 -extfile /tmp/" + name + ".ext -out /tmp/" + name + ".crt";
+        var result = issuer.execInContainer("sh", "-c", key + " && " + certificate);
+        assertThat(result.getExitCode()).as(result.getStderr()).isZero();
+        for (String suffix : List.of(".crt", ".key")) {
+            issuer.copyFileFromContainer("/tmp/" + name + suffix, in -> Files.write(files.resolve(name + suffix),
+                    in.readAllBytes()));
+        }
+        ownerOnly(files.resolve(name + ".key"));
     }
 }

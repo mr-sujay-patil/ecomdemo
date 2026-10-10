@@ -9,8 +9,8 @@
 - **Waiting for user:** NO
 
 ## Checklist (from the phase file; k8s only, compose unchanged)
-- [ ] Client certificates `<service>-client-tls` for the 6 database clients (+ manifest test)
-- [ ] PostgreSQL: `clientcert=verify-full`, `ssl_ca_file`; JDBC clients send certificate and key (+ IT)
+- [x] Client certificates `<service>-client-tls` for the 6 database clients (+ manifest test)
+- [x] PostgreSQL: `clientcert=verify-full`, `ssl_ca_file`; JDBC clients send certificate and key (+ IT: PostgresTlsIT 8 pass)
 - [ ] Kafka broker: `ssl.client.auth=required`, CA truststore, principal mapping, `StandardAuthorizer`, ACLs created by the pod
 - [ ] Kafka clients: SSL bundle with the client certificate; every Kafka client in a service carries it; renewal
 - [ ] ITs: with / without / other-CA certificate, CN != user, allowed / disallowed topic, renewal
@@ -26,9 +26,13 @@
   a camelCase name an environment variable cannot express (Boot lowercases map keys): client certificates are RSA, PKCS#8.
 - Boot 4.1 applies `spring.kafka.ssl.bundle` only through `KafkaConnectionDetails`: `KafkaProperties.build*Properties()`
   has no SSL; catalog's `StockChangedListenerConfig` used it and must copy Boot's consumer factory instead.
+- pgjdbc refuses a key others may read (root-owned: at most 0640): client-tls volume `defaultMode: 0440` + pod `fsGroup: 1001`.
+- Kafka clients: Boot SSL bundle `kafka` + `CurrentSslBundle` (outbox) so new connections use a renewed certificate.
+- ACLs: `k8s/data/kafka-acls.yaml` (table + sync.sh, add missing / remove extra, ~60 s first start, 2 s after);
+  `acls` container in the broker pod, Ready only after the sync. Super user `User:ANONYMOUS` (loopback listeners only).
 
 ## Next action
-Write the 6 client Certificates in `k8s/service-certificates.yaml` and `ClientAuthConfigTest` (fails before).
+Write `KafkaClientAuthIT` (one broker for the class, sync.sh run inside, Boot context with app's ConfigMap) and adapt `KafkaTlsIT` to send a client certificate; then commit the Kafka half.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
