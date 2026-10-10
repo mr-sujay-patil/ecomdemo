@@ -3559,7 +3559,9 @@ with its JWT service token, not a client certificate.
 
 **Redis (KI-057).** In the cluster Redis is TLS-only too: it listens on 6379 with its own certificate and the plain port is closed. Its four clients connect over TLS and verify it against the CA. Redis reads its certificate once, so a small sidecar (`cert-reload` in `k8s/data/cache.yaml`) applies a renewed one at runtime; a renewal needs no restart.
 
-**What is not covered.** PostgreSQL and Kafka are still plain on the cluster network (KI-058, KI-059),
+**PostgreSQL (KI-058).** The six databases are TLS-only in the cluster as well. Each has its own certificate (`<db>-tls`, naming its Service) and starts with `ssl=on` and a `pg_hba.conf` from the `postgres-hba` ConfigMap that accepts TCP connections only as `hostssl`: a plain-text client is refused with "no encryption". Postgres refuses a private key owned by root, which is how a Secret's files are mounted, so the start command first copies the certificate into a pod-private in-memory volume as `postgres` (mode 0600). The six services connect with `sslmode=verify-full` and the CA (`SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE` and `..._SSLROOTCERT` in their ConfigMaps; Flyway uses the same pool), so the driver checks both the certificate and the host name. A `cert-reload` sidecar repeats the copy after a renewal and calls `pg_reload_conf()`: no restart. On an existing cluster, `scripts/k8s-up.sh` restarts the databases (their pods changed) but not the services, so run `kubectl -n ecomdemo rollout restart deploy` too (until then the old pods connect with the driver's default `sslmode=prefer`: encrypted, but nothing verified).
+
+**What is not covered.** Kafka is still plain on the cluster network (KI-059),
 and compose stays HTTP on `127.0.0.1` (KI-003): the same images run there, and the TLS settings live only
 in the k8s ConfigMaps. If the CA ever has to be replaced, every service must restart to rebuild its
 truststore (a renewed *service* certificate does not: it is reloaded).
