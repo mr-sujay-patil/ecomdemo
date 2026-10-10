@@ -3,25 +3,19 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-10
-- **Fix:** KI-058, PostgreSQL TLS in k8s (the 6 databases)
-- **Branch:** fix/ki-058-postgres-tls (cut from `main` at `669a9ed`)
-- **Step:** PR_OPEN (PR #87)
-- **Waiting for user:** YES: CI on PR #87, the owner's local `scripts/k8s-smoke.sh` (after `k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`), then `approved, merge it`. The k8s smoke test is run by the user locally (the cloud session's network policy blocks the Helm chart hosts and quay.io; same arrangement as KI-060). `ki-060-fixed` is for the user to push (the session's tag push got 403).
+- **Fix:** KI-059, Kafka TLS in k8s (the last TLS gap of KI-056)
+- **Branch:** fix/ki-059-kafka-tls (cut from `main` at `553a02d`)
+- **Step:** BRANCHED
+- **Waiting for user:** NO. The k8s smoke test is run by the user locally (as for KI-060/058). Tags `ki-060-fixed` and `ki-058-fixed` are for the user to push (the session's tag pushes get 403).
 
-## Plan (k8s only; compose unchanged, as KI-057 did for Redis)
-- Server: a cert-manager Certificate per database (`<db>-tls`, its Service names); Postgres started with `ssl=on`, the certificate files, and an `hba_file` that accepts only `hostssl` (scram) for TCP; a `cert-reload` sidecar that runs `pg_reload_conf()` when the certificate changes (Postgres re-reads its SSL files on reload).
-- Clients: `SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE=verify-full` and `..._SSLROOTCERT=/etc/ecomdemo-tls/ca.crt` in the 6 ConfigMaps (each pod already mounts the CA there); Flyway uses the same DataSource.
-
-## Checklist
-- [x] Regression tests: manifest test (fails first) and a real Postgres TLS check (plain refused, verify-full with the CA accepted, a wrong host name refused)
-- [x] 6 Certificates, 6 StatefulSets (TLS, hba, sidecar), 6 ConfigMaps
-- [x] `scripts/smoke-test.sh` (k8s only): a plain-text client is refused by each database; certificate count
-- [x] Docs: KNOWN_ISSUES, README TLS, security.md, decisions [Fix KI-058]
-- [x] `./mvnw -B clean verify` (779 tests); PR #87
-- [ ] CI green on PR #87
+## Plan (k8s only; compose unchanged)
+- Broker: certificate `kafka-tls` (PKCS#8, which Kafka's PEM keystore needs); `INTERNAL://:9092` becomes SSL; a `LOCAL` plaintext listener on 127.0.0.1:9094 (inter-broker traffic, the in-pod CLI, the reload) and `CONTROLLER` on 127.0.0.1:9093, so nothing plain is reachable from the network. The start command writes key+chain to `keystore.pem` in an emptyDir.
+- `cert-reload` sidecar: on renewal rewrites `keystore.pem` and runs `kafka-configs --alter ... listener.name.internal.ssl.keystore.location` (Kafka reloads the keystore). Prototype: new serial served, 0 restarts.
+- Clients (5: app, catalog, inventory, notification, payment; `common`/`outbox` are libraries): `SPRING_KAFKA_SECURITY_PROTOCOL=SSL`, `SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE=PEM`, `..._LOCATION=/etc/ecomdemo-tls/ca.crt`; Kafka's hostname check (`https`) stays on.
+- Smoke (k8s): in-pod CLI moves to localhost:9094; checks: plaintext to 9092 refused, TLS verified as `kafka`, 17 certificates.
 
 ## Next action
-Wait for CI on PR #87 and fix it if red. Then STOP for the owner: local k8s smoke test and `approved, merge it`. After the merge: merge verification, tag `ki-058-fixed` (the session's tag pushes get 403: give the owner the command). Remaining TLS gap: KI-059 (Kafka).
+Regression tests (manifest test, then a Testcontainers IT like `PostgresTlsIT`), see them fail, then the manifests.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
