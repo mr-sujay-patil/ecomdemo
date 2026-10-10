@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-10
 - **Phase:** 36, Redis Client Certificates (`docs/phases/phase-36-redis-client-certificates.md`), KI-063
 - **Branch:** feature/phase-36-redis-client-certificates (cut from `main` at `b2aa553`)
-- **Step:** PR_OPEN
+- **Step:** PR_OPEN (PR #91)
 - **Waiting for user:** YES: review of the Phase 36 PR, CI, and the k8s smoke test on kind (`k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, `k8s-smoke.sh`). Approved by the user on 2026-10-10. Previous: Phase 35 merged (`bf0c109`, PR #89; its last commit `d21d639` is a parent of the merge), KI-055 merged (`b2aa553`, PR #90). Tags `phase-35-complete`, `ki-055-fixed`, `ki-059-fixed` are the owner's to push (403 here).
 
 ## Checklist

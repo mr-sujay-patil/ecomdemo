@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 36: Redis Client Certificates (tag: phase-36-complete, PR #TBD)
+## Phase 36: Redis Client Certificates (tag: phase-36-complete, PR #91)
 **What exists now:** in k8s, Redis requires a client certificate from the cluster CA AND the password
 (`--tls-auth-clients yes`, `requirepass` kept). Clients: app (CN ecomdemo), catalog-service (catalog) reuse their
 Phase 35 `<service>-client-tls`; new `gateway-service-client-tls` (gateway), `assistant-service-client-tls`
