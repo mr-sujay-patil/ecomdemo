@@ -5,17 +5,17 @@
 - **Updated:** 2026-10-10
 - **Phase:** 35, Client Authentication (mTLS for Kafka and PostgreSQL, per-service Kafka ACLs; KI-061)
 - **Branch:** feature/phase-35-client-authentication (cut from `main` at `a371e15`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING (done) → PR
 - **Waiting for user:** NO
 
 ## Checklist (from the phase file; k8s only, compose unchanged)
 - [x] Client certificates `<service>-client-tls` for the 6 database clients (+ manifest test)
 - [x] PostgreSQL: `clientcert=verify-full`, `ssl_ca_file`; JDBC clients send certificate and key (+ IT: PostgresTlsIT 8 pass)
-- [ ] Kafka broker: `ssl.client.auth=required`, CA truststore, principal mapping, `StandardAuthorizer`, ACLs created by the pod
-- [ ] Kafka clients: SSL bundle with the client certificate; every Kafka client in a service carries it; renewal
-- [ ] ITs: with / without / other-CA certificate, CN != user, allowed / disallowed topic, renewal
-- [ ] Smoke test (k8s blocks), certificate count 23
-- [ ] Testing protocol, `docs/test-reports/phase-35.md`, README, decisions, security.md, RECENT.md, tracker 🔵
+- [x] Kafka broker: `ssl.client.auth=required`, CA truststore, principal mapping, `StandardAuthorizer`, ACLs created by the pod
+- [x] Kafka clients: SSL bundle with the client certificate; every Kafka client in a service carries it; renewal
+- [x] ITs: with / without / other-CA certificate, CN != user, allowed / disallowed topic, renewal
+- [x] Smoke test (k8s blocks), certificate count 23
+- [x] Testing protocol, `docs/test-reports/phase-35.md`, README, decisions, security.md, RECENT.md, tracker 🔵
 - [ ] PR
 
 ## Decisions so far
@@ -32,7 +32,9 @@
   `acls` container in the broker pod, Ready only after the sync. Super user `User:ANONYMOUS` (loopback listeners only).
 
 ## Next action
-Write `KafkaClientAuthIT` (one broker for the class, sync.sh run inside, Boot context with app's ConfigMap) and adapt `KafkaTlsIT` to send a client certificate; then commit the Kafka half.
+Open the PR (`Phase 35: Client Authentication`), put its number into KI-061 and RECENT.md, then STOP for the owner.
+Results: `./mvnw -B clean verify` 846 tests (634 unit, 212 IT), 0 failures; `ClientAuthConfigTest` 33/44 fail on main's
+manifests; smoke lines validated on containers; `scripts/k8s-smoke.sh` is the owner's to run (no kind here).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
