@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 35: Client Authentication (tag: phase-35-complete, PR #TBD)
+## Phase 35: Client Authentication (tag: phase-35-complete, PR #89)
 **What exists now:** in k8s, PostgreSQL and Kafka authenticate clients by certificate; Kafka authorizes per service.
 Six client certs `<service>-client-tls` (cert-manager, `client auth`, RSA PKCS#8, CN = DB user: ecomdemo, catalog,
 customer, inventory, notification, payment), mounted `/etc/ecomdemo-client-tls` (0440, pod `fsGroup: 1001`).

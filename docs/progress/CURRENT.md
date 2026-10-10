@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-10
 - **Phase:** 35, Client Authentication (mTLS for Kafka and PostgreSQL, per-service Kafka ACLs; KI-061)
 - **Branch:** feature/phase-35-client-authentication (cut from `main` at `a371e15`)
-- **Step:** TESTING (done) → PR
-- **Waiting for user:** NO
+- **Step:** PR_OPEN (PR #89)
+- **Waiting for user:** YES: CI on PR #89, the owner's `scripts/k8s-up.sh` + `scripts/k8s-smoke.sh`, then `approved, merge it`
 
 ## Checklist (from the phase file; k8s only, compose unchanged)
 - [x] Client certificates `<service>-client-tls` for the 6 database clients (+ manifest test)
@@ -16,7 +16,7 @@
 - [x] ITs: with / without / other-CA certificate, CN != user, allowed / disallowed topic, renewal
 - [x] Smoke test (k8s blocks), certificate count 23
 - [x] Testing protocol, `docs/test-reports/phase-35.md`, README, decisions, security.md, RECENT.md, tracker 🔵
-- [ ] PR
+- [x] PR #89
 
 ## Decisions so far
 - pg_hba `map=` is refused with `scram-sha-256` (prototype: "only valid for ident, peer, gssapi, sspi, cert, and oauth"),
@@ -32,7 +32,7 @@
   `acls` container in the broker pod, Ready only after the sync. Super user `User:ANONYMOUS` (loopback listeners only).
 
 ## Next action
-Open the PR (`Phase 35: Client Authentication`), put its number into KI-061 and RECENT.md, then STOP for the owner.
+STOP: PR #89 awaits review. Not waited for CI (instructed). After the merge: merge verification, tag `phase-35-complete` (the owner pushes tags; this session gets 403).
 Results: `./mvnw -B clean verify` 846 tests (634 unit, 212 IT), 0 failures; `ClientAuthConfigTest` 33/44 fail on main's
 manifests; smoke lines validated on containers; `scripts/k8s-smoke.sh` is the owner's to run (no kind here).
 
