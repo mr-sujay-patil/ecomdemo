@@ -8,6 +8,18 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 35: Client Authentication — in Kubernetes, Kafka and PostgreSQL now know WHO connects.** TLS
+already proved the server to each client; nothing proved the client to the server, so a database
+login needed only its password and any pod that reached Kafka could read or write any topic. Now:
+- Each service that uses a database has a **client certificate** (cert-manager, `<service>-client-tls`)
+  whose common name is its database user. A database requires the password **and** that certificate.
+- **Kafka** refuses a client without a certificate from the cluster CA, turns the certificate into a
+  principal (`User:catalog`), and **ACLs** allow each service only the topics and consumer groups its
+  code uses (`k8s/data/kafka-acls.yaml`; the broker's pod applies them itself before it reports Ready).
+- A renewed client certificate (every 60 days) is used by the next connection, with no restart.
+  Compose is unchanged. See [Client authentication](#client-authentication-phase-35) and
+  [`docs/test-reports/phase-35.md`](docs/test-reports/phase-35.md).
+
 **Phase 34: Product Images — the catalogue API can now say where a product's picture is.** The web
 team's storefront needs real pictures, and an `<img>` tag cannot send a bearer token. So:
 - Every product response (the list, one product, and the semantic-search hits) has an **`imageUrl`**:
@@ -3561,7 +3573,34 @@ with its JWT service token, not a client certificate.
 
 **PostgreSQL (KI-058).** The six databases are TLS-only in the cluster as well. Each has its own certificate (`<db>-tls`, naming its Service) and starts with `ssl=on` and a `pg_hba.conf` from the `postgres-hba` ConfigMap that accepts TCP connections only as `hostssl`: a plain-text client is refused with "no encryption". Postgres refuses a private key owned by root, which is how a Secret's files are mounted, so the start command first copies the certificate into a pod-private in-memory volume as `postgres` (mode 0600). The six services connect with `sslmode=verify-full` and the CA (`SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE` and `..._SSLROOTCERT` in their ConfigMaps; Flyway uses the same pool), so the driver checks both the certificate and the host name. A `cert-reload` sidecar repeats the copy after a renewal and calls `pg_reload_conf()`: no restart. On an existing cluster, `scripts/k8s-up.sh` restarts the databases (their pods changed) but not the services, so run `kubectl -n ecomdemo rollout restart deploy` too (until then the old pods connect with the driver's default `sslmode=prefer`: encrypted, but nothing verified).
 
-**Kafka (KI-059).** The broker's one network listener, `kafka:9092`, is TLS-only, with its own certificate (`kafka-tls`, PKCS#8 because Kafka's PEM keystore reads only that). The plain listeners are bound to the pod's loopback: the KRaft controller (9093), and `LOCAL` on `127.0.0.1:9094` for the broker's own inter-broker traffic and for tools run inside the pod (`kubectl exec statefulset/kafka -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9094 --list`). The five clients use `SPRING_KAFKA_SECURITY_PROTOCOL=SSL` with the cluster CA as a PEM truststore, and Kafka's own host-name check stays on. A `cert-reload` sidecar rewrites the keystore after a renewal and updates the listener's keystore setting at runtime, which makes the broker load it without a restart. On an existing cluster, run `kubectl -n ecomdemo rollout restart deploy` after `scripts/k8s-up.sh`: until then the old service pods speak plain text to a TLS port and their events stall.
+**Kafka (KI-059).** The broker's one network listener, `kafka:9092`, is TLS-only, with its own certificate (`kafka-tls`, PKCS#8 because Kafka's PEM keystore reads only that). The plain listeners are bound to the pod's loopback: the KRaft controller (9093), and `LOCAL` on `127.0.0.1:9094` for the broker's own inter-broker traffic and for tools run inside the pod (`kubectl exec statefulset/kafka -- /opt/kafka/bin/kafka-topics.sh --bootstrap-server 127.0.0.1:9094 --list`). The five clients use `SPRING_KAFKA_SECURITY_PROTOCOL=SSL` with the cluster CA as a PEM truststore (since Phase 35, inside their SSL bundle with their client certificate), and Kafka's own host-name check stays on. A `cert-reload` sidecar rewrites the keystore after a renewal and updates the listener's keystore setting at runtime, which makes the broker load it without a restart. On an existing cluster, run `kubectl -n ecomdemo rollout restart deploy` after `scripts/k8s-up.sh`: until then the old service pods speak plain text to a TLS port and their events stall.
+
+### Client authentication (Phase 35)
+
+Everything above is server-side TLS: the client checks the server. Kafka and PostgreSQL also check the
+client, by certificate, and Kafka decides what each one may do.
+
+- **The identities.** `k8s/service-certificates.yaml` ends with six client certificates,
+  `<service>-client-tls`, one per service with a database: `client auth` only, RSA with a PKCS#8 key,
+  and a common name that is the service's **database user** (`ecomdemo` for app, then `catalog`,
+  `customer`, `inventory`, `notification`, `payment`). They are mounted at `/etc/ecomdemo-client-tls`,
+  mode 0440 with the pod's `fsGroup` 1001: the PostgreSQL driver refuses a key file others may read.
+- **PostgreSQL.** `pg_hba.conf` is `hostssl all all all scram-sha-256 clientcert=verify-full`: the
+  password AND a certificate from the cluster CA (`ssl_ca_file`) whose CN is the login. The services
+  send theirs with `SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLCERT` and `..._SSLKEY`.
+- **Kafka.** `kafka:9092` requires a client certificate; `CN=catalog` becomes `User:catalog`; the KRaft
+  authorizer refuses anything no ACL allows. The ACLs are a table in `k8s/data/kafka-acls.yaml`, one line per
+  service and topic or group, each saying which code needs it. The broker pod's `acls` container makes
+  the broker's ACLs exactly that table (adding and removing) before the pod reports Ready. To change one,
+  edit the line, `kubectl apply -k k8s/` and `kubectl -n ecomdemo rollout restart statefulset/kafka`.
+  The in-pod tools use the loopback listener, which is the super user (nothing outside the pod reaches it):
+  `kubectl -n ecomdemo exec statefulset/kafka -c kafka -- /opt/kafka/bin/kafka-acls.sh --bootstrap-server 127.0.0.1:9094 --list`.
+- **The services' Kafka clients** present their certificate through a Spring SSL bundle (`SPRING_KAFKA_SSL_BUNDLE=kafka`,
+  `SPRING_SSL_BUNDLE_PEM_KAFKA_*`), reloaded on renewal; the outbox library makes the producer and
+  consumer factories always use the current bundle, so the next connection has the new certificate.
+- **On an existing cluster**, `scripts/k8s-up.sh` rolls out the databases, Kafka and the six services by
+  itself (their pod templates change). Until all of them have rolled, a service that still has no
+  certificate is refused by its database and by Kafka, and retries.
 
 **What is not covered.** Compose stays HTTP on `127.0.0.1` (KI-003): the same images run there, and the TLS settings live only
 in the k8s ConfigMaps. If the CA ever has to be replaced, every service must restart to rebuild its
