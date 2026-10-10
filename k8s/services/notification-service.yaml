@@ -25,6 +25,11 @@ data:
   NOTIFICATION_DB_NAME: "notification"
   NOTIFICATION_DB_USER: "notification"
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  # KI-059: the broker's listener is SSL; the client checks its certificate and name ("kafka") against the
+  # cluster CA mounted in every pod. Kafka's own name check (ssl.endpoint.identification.algorithm=https) stays on.
+  SPRING_KAFKA_SECURITY_PROTOCOL: "SSL"
+  SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE: "PEM"
+  SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_LOCATION: "/etc/ecomdemo-tls/ca.crt"
 ---
 apiVersion: apps/v1
 kind: Deployment

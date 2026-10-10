@@ -89,6 +89,10 @@ if [ "$SMOKE_PLATFORM" = "k8s" ]; then IN_SCHEME=https; WGET_TLS="--no-check-cer
 # (the pod has the CA mounted), so these checks verify too, unlike BusyBox wget above.
 REDIS_TLS=""
 if [ "$SMOKE_PLATFORM" = "k8s" ]; then REDIS_TLS="--tls --cacert /etc/ecomdemo-tls/ca.crt"; fi
+# KI-059: in k8s the broker's network listener (9092) is TLS-only; its own tools, run inside its pod, use the
+# plain LOCAL listener, which is bound to the pod's loopback (127.0.0.1:9094). compose is unchanged.
+KAFKA_IN_POD="localhost:9092"
+if [ "$SMOKE_PLATFORM" = "k8s" ]; then KAFKA_IN_POD="127.0.0.1:9094"; fi
 
 k8s_workload() { # k8s_workload <container name> -> statefulset/<n> or deployment/<n>
     local name="${1#ecomdemo-}"
@@ -2308,10 +2312,10 @@ KAFKA_CONTAINER="${KAFKA_CONTAINER:-ecomdemo-kafka}"
 
 # kafka <script> <args...> -> runs one of the broker's own CLI tools inside its container.
 # The image ships them, which is why - unlike Loki in Phase 16 - there is something here to ask
-# with. Always against localhost:9092, the INTERNAL listener, because this runs inside the broker.
+# with. Always against $KAFKA_IN_POD, a listener of the broker itself, because this runs inside it.
 kafka() {
     local script="$1"; shift
-    ctr_exec "$KAFKA_CONTAINER" "/opt/kafka/bin/$script" --bootstrap-server localhost:9092 "$@" 2>/dev/null
+    ctr_exec "$KAFKA_CONTAINER" "/opt/kafka/bin/$script" --bootstrap-server "$KAFKA_IN_POD" "$@" 2>/dev/null
 }
 
 # topic_message_count <topic> -> total messages across every partition, from the END offsets.
@@ -2320,7 +2324,7 @@ kafka() {
 # written to it.
 topic_message_count() {
     ctr_exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-get-offsets.sh \
-        --bootstrap-server localhost:9092 --topic "$1" 2>/dev/null \
+        --bootstrap-server "$KAFKA_IN_POD" --topic "$1" 2>/dev/null \
         | awk -F: '{total += $3} END {print (total == "" ? 0 : total)}'
 }
 
@@ -2444,7 +2448,7 @@ if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/n
     # message count, because the interesting assertion is about a specific order somewhere in the
     # topic rather than about whichever message happens to be last.
     TOPIC_DUMP="$(ctr_exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-consumer.sh \
-        --bootstrap-server localhost:9092 --topic orders.placed --from-beginning \
+        --bootstrap-server "$KAFKA_IN_POD" --topic orders.placed --from-beginning \
         --property print.key=true --timeout-ms 8000 2>/dev/null)"
 
     check "the order's event is on the topic" "True" \
@@ -2463,7 +2467,7 @@ if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/n
     # nothing to catch it and the offset is never committed.
     printf 'poison:{"not":"an OrderPlacedEvent"}\n' \
         | ctr_exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
-            --bootstrap-server localhost:9092 --topic orders.placed \
+            --bootstrap-server "$KAFKA_IN_POD" --topic orders.placed \
             --property parse.key=true --property key.separator=: >/dev/null 2>&1
 
     DLT_AFTER="$DLT_BEFORE"
@@ -2498,7 +2502,7 @@ if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/n
     for _ in 1 2; do
         printf '%s:%s\n' "$DUPLICATE_ORDER_ID" "$DUPLICATE_EVENT" \
             | ctr_exec -i "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-console-producer.sh \
-                --bootstrap-server localhost:9092 --topic orders.placed \
+                --bootstrap-server "$KAFKA_IN_POD" --topic orders.placed \
                 --property parse.key=true --property key.separator=: >/dev/null 2>&1
     done
 
@@ -2709,7 +2713,7 @@ if command -v docker >/dev/null 2>&1 \
 
     for _ in $(seq 1 60); do
         ctr_exec "$KAFKA_CONTAINER" /opt/kafka/bin/kafka-topics.sh \
-            --bootstrap-server localhost:9092 --list >/dev/null 2>&1 && break
+            --bootstrap-server "$KAFKA_IN_POD" --list >/dev/null 2>&1 && break
         sleep 1
     done
 
@@ -3361,7 +3365,7 @@ check "and has no business API: a payment cannot be asked for, only caused by an
 
 if command -v docker >/dev/null 2>&1 && ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1; then
     SAGA_TOPICS="$(ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-topics.sh \
-        --bootstrap-server localhost:9092 --list 2>/dev/null)"
+        --bootstrap-server "$KAFKA_IN_POD" --list 2>/dev/null)"
     MISSING_TOPICS=""
     for topic in orders.created inventory.stock-reserved inventory.stock-rejected \
         payments.completed payments.failed; do
@@ -3584,7 +3588,7 @@ if command -v docker >/dev/null 2>&1 \
     printf 'kafka_dlt-original-topic:inventory.stock-reserved,kafka_dlt-exception-message:dead-lettered by the smoke test\t%s\n' \
         "$RESERVED_RECORD" \
         | ctr_exec -i "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-console-producer.sh \
-            --bootstrap-server localhost:9092 --topic inventory.stock-reserved-dlt \
+            --bootstrap-server "$KAFKA_IN_POD" --topic inventory.stock-reserved-dlt \
             --property parse.key=true --property key.separator='|' --property parse.headers=true >/dev/null 2>&1
     check "the StockReserved is now in inventory.stock-reserved-dlt" "1" \
         "$(delta "$DLT_BEFORE" "$(topic_message_count inventory.stock-reserved-dlt)")"
@@ -4256,11 +4260,18 @@ check "cert-manager has the certificate Ready" "True" \
 # CA, and trusts that CA when it calls another service. Server-side TLS only: a caller is still identified
 # by its JWT service token, not a client certificate. That the JVMs verify each other is proven by this whole
 # run working: the gateway, the saga and the token endpoint all cross these hops.
-check "cert-manager has all 16 certificates Ready (the Ingress, the 8 services, Redis and the 6 databases)" "16" \
+check "cert-manager has all 17 certificates Ready (the Ingress, the 8 services, Redis, the 6 databases and Kafka)" "17" \
     "$(kube get certificates -o json | python3 -c "
 import json, sys
 print(sum(1 for c in json.load(sys.stdin)['items']
           if any(x['type'] == 'Ready' and x['status'] == 'True' for x in c['status'].get('conditions', []))))")"
+# KI-059: Kafka's network listener is TLS-only. From inside the broker's pod, as other pods reach it
+# (kafka:9092): its certificate verifies against the cluster CA for the name "kafka", and a plain-text client
+# gets no answer (it waits for a Kafka response that a TLS listener never sends, then gives up).
+check "kafka:9092 is TLS: the certificate verifies against the cluster CA, as kafka" "Verify return code: 0 (ok)" \
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'echo | timeout 20 openssl s_client -connect kafka:9092 -servername kafka -CAfile /etc/ecomdemo-tls/ca.crt -verify_hostname kafka 2>/dev/null' | sed -n 's/^ *\(Verify return code: 0 (ok)\).*/\1/p' | head -1)"
+check "a plain-text Kafka client gets no answer from kafka:9092" "True" \
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'printf "request.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/plain.properties && timeout 60 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --command-config /tmp/plain.properties --list >/dev/null 2>&1' && echo False || echo True)"
 # KI-058: every database is TLS-only. From inside its own pod (with the password): a plain-text TCP client
 # is refused by pg_hba.conf ("no encryption"), and a client that verifies the certificate and the Service
 # name against the cluster CA gets a TLS session. That the six services verify too is proven by this run.
