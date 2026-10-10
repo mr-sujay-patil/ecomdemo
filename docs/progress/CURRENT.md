@@ -1,40 +1,26 @@
 # Current Checkpoint
 
-> The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
+> The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-10
-- **Phase:** 35, Client Authentication (mTLS for Kafka and PostgreSQL, per-service Kafka ACLs; KI-061)
-- **Branch:** feature/phase-35-client-authentication (cut from `main` at `a371e15`)
-- **Step:** PR_OPEN (PR #89)
-- **Waiting for user:** YES: CI on PR #89, the owner's `scripts/k8s-up.sh` + `scripts/k8s-smoke.sh`, then `approved, merge it`
+- **Fix:** KI-055, the smoke test's rate-limit burst check counts only 200 as "served"
+- **Branch:** fix/ki-055-burst-counts-admitted (cut from `main` at `bf0c109`)
+- **Step:** PR_OPEN (PR #90, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #90, then `approved, merge it`. Chosen by the assistant after the user said "continue" (offered earlier as the default). Tags `ki-059-fixed`, `phase-35-complete` and older ones are for the user to push (403 here).
 
-## Checklist (from the phase file; k8s only, compose unchanged)
-- [x] Client certificates `<service>-client-tls` for the 6 database clients (+ manifest test)
-- [x] PostgreSQL: `clientcert=verify-full`, `ssl_ca_file`; JDBC clients send certificate and key (+ IT: PostgresTlsIT 8 pass)
-- [x] Kafka broker: `ssl.client.auth=required`, CA truststore, principal mapping, `StandardAuthorizer`, ACLs created by the pod
-- [x] Kafka clients: SSL bundle with the client certificate; every Kafka client in a service carries it; renewal
-- [x] ITs: with / without / other-CA certificate, CN != user, allowed / disallowed topic, renewal
-- [x] Smoke test (k8s blocks), certificate count 23
-- [x] Testing protocol, `docs/test-reports/phase-35.md`, README, decisions, security.md, RECENT.md, tracker 🔵
-- [x] PR #89
+## Root cause (evidence: burst lines of `smoke.yml` runs 2 to 7)
+Admitted requests (not 429) are 100 to 150 every run; the non-200 part of them is `503` from the catalog route's circuit-breaker fallback (2 s timeout) on a cold runner, 0 to 39 per run. Run 1 failed when too many admitted requests were 503s. The limiter never banned.
 
-## Decisions so far
-- pg_hba `map=` is refused with `scram-sha-256` (prototype: "only valid for ident, peer, gssapi, sspi, cert, and oauth"),
-  so with password AND certificate the CN must BE the database user: CNs are ecomdemo, catalog, customer, inventory,
-  notification, payment; Kafka principals are the same names.
-- pgjdbc 42.7.13 reads an unencrypted PKCS#8 PEM key (`BEGIN PRIVATE KEY`) but assumes RSA unless `pemKeyAlgorithm` is set,
-  a camelCase name an environment variable cannot express (Boot lowercases map keys): client certificates are RSA, PKCS#8.
-- Boot 4.1 applies `spring.kafka.ssl.bundle` only through `KafkaConnectionDetails`: `KafkaProperties.build*Properties()`
-  has no SSL; catalog's `StockChangedListenerConfig` used it and must copy Boot's consumer factory instead.
-- pgjdbc refuses a key others may read (root-owned: at most 0640): client-tls volume `defaultMode: 0440` + pod `fsGroup: 1001`.
-- Kafka clients: Boot SSL bundle `kafka` + `CurrentSslBundle` (outbox) so new connections use a renewed certificate.
-- ACLs: `k8s/data/kafka-acls.yaml` (table + sync.sh, add missing / remove extra, ~60 s first start, 2 s after);
-  `acls` container in the broker pod, Ready only after the sync. Super user `User:ANONYMOUS` (loopback listeners only).
+## Checklist
+- [x] Regression test `scripts/test-smoke-burst.sh` (fails first): the 6 real distributions pass, a run-1-like cold burst passes, a real ban fails, no 429 fails
+- [x] `scripts/smoke-burst.sh`: the verdict, sourced by `smoke-test.sh`; the check counts admitted requests and names the 503s
+- [x] KI-062 recorded (the 503s themselves; Needs check), not fixed here
+- [x] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-055]
+- [x] `./mvnw -B clean verify` (846 tests); PR #90
+- [ ] CI green on PR #90, including the `run-smoke` compose smoke test
 
 ## Next action
-STOP: PR #89 awaits review. Not waited for CI (instructed). After the merge: merge verification, tag `phase-35-complete` (the owner pushes tags; this session gets 403).
-Results: `./mvnw -B clean verify` 846 tests (634 unit, 212 IT), 0 failures; `ClientAuthConfigTest` 33/44 fail on main's
-manifests; smoke lines validated on containers; `scripts/k8s-smoke.sh` is the owner's to run (no kind here).
+Wait for CI on PR #90 (with `run-smoke`, the compose smoke test runs the burst on this branch); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-055-fixed`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
