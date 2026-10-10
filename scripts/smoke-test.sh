@@ -2957,23 +2957,22 @@ BURST_RESULTS="$(mktemp)"
 # shellcheck disable=SC2086
 curl -sS -w '%{http_code}\n' --parallel --parallel-max 40 \
     -H "Authorization: Bearer $BURST_TOKEN" $BURST_ARGS > "$BURST_RESULTS" 2>/dev/null
-BURST_429="$(grep -c '^429$' "$BURST_RESULTS" 2>/dev/null || true)"
-BURST_OK="$(grep -c '^200$' "$BURST_RESULTS" 2>/dev/null || true)"
-BURST_429="${BURST_429:-0}"
-BURST_OK="${BURST_OK:-0}"
+# The verdicts are in scripts/smoke-burst.sh, where scripts/test-smoke-burst.sh tests them against real runs.
+# shellcheck source=scripts/smoke-burst.sh
+. "$(dirname "${BASH_SOURCE[0]}")/smoke-burst.sh"
+BURST_LIMITED="$(burst_limited "$BURST_RESULTS")"
+BURST_THROTTLES="$(burst_throttles "$BURST_RESULTS")"
 # The distribution of what the 300 requests got, so a failure below says WHAT came back (a 503 from a
 # slow runner is not a rate limiter that bans) instead of only "False".
 printf '        burst of 300: %s\n' \
     "$(sort "$BURST_RESULTS" 2>/dev/null | uniq -c | awk '{printf "%s x %s  ", $1, $2}')"
 rm -f "$BURST_RESULTS"
 
-check "a concurrent burst of 300 requests from one caller is rate limited" "True" \
-    "$(python3 -c "import sys; print(int(sys.argv[1]) > 0)" "$BURST_429")"
+check "a concurrent burst of 300 requests from one caller is rate limited" "True" "$BURST_LIMITED"
 # Not a ban: the bucket's capacity is served before anything is refused. "More than 50 served" rather
 # than "exactly 100" on purpose - the bucket refills DURING the burst, so the number served depends on
 # how long the burst took, and pinning it would be a performance assertion wearing a correctness name.
-check "but plenty were served first - it throttles, it does not ban" "True" \
-    "$(python3 -c "import sys; print(int(sys.argv[1]) > 50)" "$BURST_OK")"
+check "but plenty were served first - it throttles, it does not ban" "True" "$BURST_THROTTLES"
 # above and be useless. 50 tokens a second replenish, so a short wait is enough - polled rather
 # than slept, because a fixed sleep is a performance assertion in disguise.
 RECOVERED=no
