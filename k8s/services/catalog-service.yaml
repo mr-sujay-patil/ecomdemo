@@ -33,6 +33,11 @@ data:
   SPRING_DATA_REDIS_PORT: "6379"
   SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only; the JVM trusts the cluster CA (trust-ca)
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+  # KI-059: the broker's listener is SSL; the client checks its certificate and name ("kafka") against the
+  # cluster CA mounted in every pod. Kafka's own name check (ssl.endpoint.identification.algorithm=https) stays on.
+  SPRING_KAFKA_SECURITY_PROTOCOL: "SSL"
+  SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE: "PEM"
+  SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_LOCATION: "/etc/ecomdemo-tls/ca.crt"
   # Phase 27. No language model in the cluster: generate-description answers 503 "not configured".
   # To switch one on, set this to openai and add OPENAI_API_KEY to catalog-service-secrets.
   AI_CHAT_PROVIDER: "none"

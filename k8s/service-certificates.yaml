@@ -420,3 +420,33 @@ spec:
   issuerRef:
     name: ecomdemo-ca
     kind: ClusterIssuer
+---
+# KI-059: the Kafka broker's certificate. PKCS#8 because Kafka's PEM keystore reads only that form; the
+# pod writes key and chain into one keystore file (k8s/data/kafka.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kafka-tls
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: kafka-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - kafka
+    - kafka.ecomdemo
+    - kafka.ecomdemo.svc
+    - kafka.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    encoding: PKCS8
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer

@@ -42,17 +42,32 @@ spec:
       containers:
         - name: kafka
           image: apache/kafka:4.2.1
+          # KI-059: the keystore is the Secret's key and certificate in one file, written to a pod-private
+          # in-memory volume readable by this user only; then the image's own start script.
+          command: ["sh", "-c"]
+          args:
+            - |
+              umask 077
+              cat /etc/ecomdemo-tls/tls.key /etc/ecomdemo-tls/tls.crt > /etc/kafka-tls/keystore.pem
+              exec /etc/kafka/docker/run
           env:
             - { name: KAFKA_NODE_ID, value: "1" }
             - { name: KAFKA_PROCESS_ROLES, value: "broker,controller" }
             - { name: CLUSTER_ID, value: "ecomdemo-kraft-cluster" }
-            - { name: KAFKA_LISTENERS, value: "INTERNAL://:9092,CONTROLLER://:9093" }
-            - { name: KAFKA_ADVERTISED_LISTENERS, value: "INTERNAL://kafka:9092" }
-            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT" }
-            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "INTERNAL" }
+            # KI-059: the one listener other pods can reach, INTERNAL on 9092, is SSL (the certificate is
+            # kafka-tls, read from the keystore the start command writes). The plain ones are bound to the
+            # loopback, so only this pod reaches them: CONTROLLER (KRaft), and LOCAL for the broker's own
+            # inter-broker traffic, the tools run inside the pod (the smoke test) and the cert-reload sidecar.
+            - { name: KAFKA_LISTENERS, value: "INTERNAL://:9092,LOCAL://127.0.0.1:9094,CONTROLLER://127.0.0.1:9093" }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: "INTERNAL://kafka:9092,LOCAL://127.0.0.1:9094" }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: "CONTROLLER:PLAINTEXT,INTERNAL:SSL,LOCAL:PLAINTEXT" }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: "LOCAL" }
             - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: "CONTROLLER" }
             # One broker is also the whole controller quorum, so it votes for itself.
-            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@localhost:9093" }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: "1@127.0.0.1:9093" }
+            # Kafka reads a PEM keystore: the private key (PKCS#8) followed by the certificate chain, one file.
+            - { name: KAFKA_SSL_KEYSTORE_TYPE, value: "PEM" }
+            - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: "/etc/kafka-tls/keystore.pem" }
             - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false" }
             - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
             - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
@@ -90,6 +105,56 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/kafka/data
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: server-tls, mountPath: /etc/kafka-tls }
+        # KI-059: Kafka reads its keystore at start, and again when the listener's keystore setting is
+        # updated at runtime. This checks the mounted certificate every 30 s; when cert-manager has renewed
+        # it, it rewrites the keystore and updates the setting (same path) through the pod's own plain
+        # listener: Kafka loads the new certificate with no restart and no dropped connection.
+        - name: cert-reload
+          image: apache/kafka:4.2.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              cert=/etc/ecomdemo-tls/tls.crt
+              last="$(sha256sum "$cert" | cut -d' ' -f1)"
+              while true; do
+                sleep "${RELOAD_INTERVAL:-30}"
+                now="$(sha256sum "$cert" | cut -d' ' -f1)"
+                if [ "$now" != "$last" ]; then
+                  if (umask 077 && cat /etc/ecomdemo-tls/tls.key "$cert" > /etc/kafka-tls/keystore.pem.new) \
+                    && mv -f /etc/kafka-tls/keystore.pem.new /etc/kafka-tls/keystore.pem \
+                    && /opt/kafka/bin/kafka-configs.sh --bootstrap-server 127.0.0.1:9094 --entity-type brokers \
+                         --entity-name 1 --alter \
+                         --add-config listener.name.internal.ssl.keystore.location=/etc/kafka-tls/keystore.pem \
+                         > /dev/null; then
+                    echo "reloaded the Kafka certificate"; last="$now"
+                  else
+                    echo "could not reload the Kafka certificate; retrying"
+                  fi
+                fi
+              done
+          env:
+            # Only for the short-lived kafka-configs JVM.
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx64m" }
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: server-tls, mountPath: /etc/kafka-tls }
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: kafka-tls
+        # The keystore (key and chain in one file); in memory, never on the data volume.
+        - name: server-tls
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
   volumeClaimTemplates:
     - metadata:
         name: data
