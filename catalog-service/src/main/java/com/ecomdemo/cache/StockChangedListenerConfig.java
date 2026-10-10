@@ -1,12 +1,13 @@
 package com.ecomdemo.cache;
 
+import java.util.HashMap;
 import java.util.Map;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.support.serializer.ErrorHandlingDeserializer;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
@@ -55,7 +56,7 @@ class StockChangedListenerConfig {
 
     @Bean(FACTORY)
     ConcurrentKafkaListenerContainerFactory<String, ProductCacheEvictor.ProductStockChanged>
-            stockChangedListenerContainerFactory(KafkaProperties properties) {
+            stockChangedListenerContainerFactory(ConsumerFactory<?, ?> applicationConsumerFactory) {
 
         // The JSON deserializer is told the ONE type this topic carries, and told not to look for a
         // type header - the producer does not send one, and `useTypeHeaders(false)` is what stops it
@@ -67,7 +68,11 @@ class StockChangedListenerConfig {
         // Wrapped the same way the default consumer is: a message that cannot be deserialised at
         // all must not become a poison record that stops the partition. ErrorHandlingDeserializer
         // turns the failure into a null payload plus a header the error handler can act on.
-        Map<String, Object> config = properties.buildConsumerProperties();
+        // The settings of Boot's own consumer factory, not `KafkaProperties.buildConsumerProperties()`: in
+        // Spring Boot 4 the SSL bundle (`spring.kafka.ssl.bundle`, the client certificate Kafka requires in
+        // Kubernetes since Phase 35) is applied only to the factories Boot builds, so a map built from the
+        // properties has no certificate, and this consumer would be refused while every other one worked.
+        Map<String, Object> config = new HashMap<>(applicationConsumerFactory.getConfigurationProperties());
         config.put(ConsumerConfig.GROUP_ID_CONFIG, ProductCacheEvictor.CACHE_GROUP);
 
         // EVERY `spring.json.*` and `spring.deserializer.*` KEY HAS TO GO, and leaving them in is

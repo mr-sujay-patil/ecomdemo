@@ -60,7 +60,8 @@ class PostgresTlsConfigTest {
     void hbaAcceptsOnlyTls() throws IOException {
         List<String> rules = hbaRules();
 
-        assertThat(rules).contains("hostssl all all all scram-sha-256");
+        // Phase 35 appends `clientcert=verify-full` to this line (ClientAuthConfigTest); TLS-only is what this checks.
+        assertThat(rules).anyMatch(rule -> rule.startsWith("hostssl all all all scram-sha-256"));
         assertThat(rules).allSatisfy(rule -> assertThat(rule).matches("(local|hostssl) .*"));
     }
 

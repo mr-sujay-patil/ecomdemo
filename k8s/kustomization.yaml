@@ -19,6 +19,7 @@ resources:
   - data/inventory-db.yaml
   - data/notification-db.yaml
   - data/payment-db.yaml
+  - data/kafka-acls.yaml
   - data/kafka.yaml
   - data/cache.yaml
   # our services

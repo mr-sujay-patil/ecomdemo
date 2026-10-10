@@ -1,21 +1,40 @@
 # Current Checkpoint
 
-> The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
+> The single source of truth for **in-phase** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-10
-- **Fix:** KI-059, Kafka TLS in k8s (the last TLS gap of KI-056)
-- **Branch:** fix/ki-059-kafka-tls (cut from `main` at `553a02d`)
-- **Step:** PR_OPEN (PR #88)
-- **Waiting for user:** YES: CI on PR #88, the owner's local `scripts/k8s-smoke.sh` (after `k8s-up.sh` and `kubectl -n ecomdemo rollout restart deploy`), then `approved, merge it`. The k8s smoke test is run by the user locally (as for KI-060/058). Tags `ki-060-fixed` and `ki-058-fixed` are for the user to push (the session's tag pushes get 403).
+- **Phase:** 35, Client Authentication (mTLS for Kafka and PostgreSQL, per-service Kafka ACLs; KI-061)
+- **Branch:** feature/phase-35-client-authentication (cut from `main` at `a371e15`)
+- **Step:** PR_OPEN (PR #89)
+- **Waiting for user:** YES: CI on PR #89, the owner's `scripts/k8s-up.sh` + `scripts/k8s-smoke.sh`, then `approved, merge it`
 
-## Plan (k8s only; compose unchanged)
-- Broker: certificate `kafka-tls` (PKCS#8, which Kafka's PEM keystore needs); `INTERNAL://:9092` becomes SSL; a `LOCAL` plaintext listener on 127.0.0.1:9094 (inter-broker traffic, the in-pod CLI, the reload) and `CONTROLLER` on 127.0.0.1:9093, so nothing plain is reachable from the network. The start command writes key+chain to `keystore.pem` in an emptyDir.
-- `cert-reload` sidecar: on renewal rewrites `keystore.pem` and runs `kafka-configs --alter ... listener.name.internal.ssl.keystore.location` (Kafka reloads the keystore). Prototype: new serial served, 0 restarts.
-- Clients (5: app, catalog, inventory, notification, payment; `common`/`outbox` are libraries): `SPRING_KAFKA_SECURITY_PROTOCOL=SSL`, `SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE=PEM`, `..._LOCATION=/etc/ecomdemo-tls/ca.crt`; Kafka's hostname check (`https`) stays on.
-- Smoke (k8s): in-pod CLI moves to localhost:9094; checks: plaintext to 9092 refused, TLS verified as `kafka`, 17 certificates.
+## Checklist (from the phase file; k8s only, compose unchanged)
+- [x] Client certificates `<service>-client-tls` for the 6 database clients (+ manifest test)
+- [x] PostgreSQL: `clientcert=verify-full`, `ssl_ca_file`; JDBC clients send certificate and key (+ IT: PostgresTlsIT 8 pass)
+- [x] Kafka broker: `ssl.client.auth=required`, CA truststore, principal mapping, `StandardAuthorizer`, ACLs created by the pod
+- [x] Kafka clients: SSL bundle with the client certificate; every Kafka client in a service carries it; renewal
+- [x] ITs: with / without / other-CA certificate, CN != user, allowed / disallowed topic, renewal
+- [x] Smoke test (k8s blocks), certificate count 23
+- [x] Testing protocol, `docs/test-reports/phase-35.md`, README, decisions, security.md, RECENT.md, tracker 🔵
+- [x] PR #89
+
+## Decisions so far
+- pg_hba `map=` is refused with `scram-sha-256` (prototype: "only valid for ident, peer, gssapi, sspi, cert, and oauth"),
+  so with password AND certificate the CN must BE the database user: CNs are ecomdemo, catalog, customer, inventory,
+  notification, payment; Kafka principals are the same names.
+- pgjdbc 42.7.13 reads an unencrypted PKCS#8 PEM key (`BEGIN PRIVATE KEY`) but assumes RSA unless `pemKeyAlgorithm` is set,
+  a camelCase name an environment variable cannot express (Boot lowercases map keys): client certificates are RSA, PKCS#8.
+- Boot 4.1 applies `spring.kafka.ssl.bundle` only through `KafkaConnectionDetails`: `KafkaProperties.build*Properties()`
+  has no SSL; catalog's `StockChangedListenerConfig` used it and must copy Boot's consumer factory instead.
+- pgjdbc refuses a key others may read (root-owned: at most 0640): client-tls volume `defaultMode: 0440` + pod `fsGroup: 1001`.
+- Kafka clients: Boot SSL bundle `kafka` + `CurrentSslBundle` (outbox) so new connections use a renewed certificate.
+- ACLs: `k8s/data/kafka-acls.yaml` (table + sync.sh, add missing / remove extra, ~60 s first start, 2 s after);
+  `acls` container in the broker pod, Ready only after the sync. Super user `User:ANONYMOUS` (loopback listeners only).
 
 ## Next action
-Wait for CI on PR #88 and fix it if red. Then STOP for the owner. After the merge: merge verification, tag `ki-059-fixed` (the owner pushes tags; the session gets 403). Results: `KafkaTlsConfigTest` 8 failing before; `KafkaTlsIT` 2 pass; `./mvnw -B clean verify` 789 tests. With this, KI-056's TLS work is complete (services, Redis, PostgreSQL, Kafka).
+STOP: PR #89 awaits review. Not waited for CI (instructed). After the merge: merge verification, tag `phase-35-complete` (the owner pushes tags; this session gets 403).
+Results: `./mvnw -B clean verify` 846 tests (634 unit, 212 IT), 0 failures; `ClientAuthConfigTest` 33/44 fail on main's
+manifests; smoke lines validated on containers; `scripts/k8s-smoke.sh` is the owner's to run (no kind here).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

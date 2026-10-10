@@ -3,10 +3,12 @@ package com.ecomdemo.cache;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import org.apache.kafka.common.serialization.Deserializer;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
+import org.springframework.boot.kafka.autoconfigure.DefaultKafkaConsumerFactoryCustomizer;
 import org.springframework.boot.kafka.autoconfigure.KafkaAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -87,5 +89,28 @@ class StockChangedListenerConfigTest {
         runner.run(context -> assertThat(context)
                 .as("Boot's default listener factory must still be there for the other listeners")
                 .hasBean("kafkaListenerContainerFactory"));
+    }
+
+    @Test
+    @DisplayName("carries everything Boot's own consumer factory has, the SSL bundle's client certificate included")
+    @SuppressWarnings("unchecked")
+    void carriesTheApplicationsConnectionSettings() {
+        // Phase 35: in Spring Boot 4 the SSL bundle (`spring.kafka.ssl.bundle`, the client certificate Kafka
+        // requires in Kubernetes) reaches only the factories Boot builds: KafkaProperties.buildConsumerProperties()
+        // leaves it out. This factory used that map, so its consumer would have been the one Kafka client of
+        // catalog-service with no certificate. A customizer stands in for the bundle here: anything Boot's factory
+        // has, this one must have too.
+        runner.withPropertyValues("spring.kafka.security.protocol=SSL")
+                .withBean(DefaultKafkaConsumerFactoryCustomizer.class,
+                        () -> factory -> factory.updateConfigs(Map.of("ecomdemo.test.applied-by-boot", "yes")))
+                .run(context -> {
+                    var factory = (ConcurrentKafkaListenerContainerFactory<String, ProductCacheEvictor.ProductStockChanged>)
+                            context.getBean(StockChangedListenerConfig.FACTORY);
+                    Map<String, Object> config = factory.getConsumerFactory().getConfigurationProperties();
+
+                    assertThat(config).containsEntry("ecomdemo.test.applied-by-boot", "yes")
+                            .containsEntry("security.protocol", "SSL")
+                            .containsEntry("group.id", ProductCacheEvictor.CACHE_GROUP);
+                });
     }
 }

@@ -81,11 +81,13 @@ class KafkaTlsConfigTest {
     @CsvSource({"app", "catalog-service", "inventory-service", "notification-service", "payment-service"})
     @DisplayName("each client speaks SSL and trusts the cluster CA")
     void eachClientUsesTls(String service) throws IOException {
+        // Since Phase 35 the CA is the truststore of the client's SSL bundle (with its client certificate,
+        // ClientAuthConfigTest), no longer Kafka's own ssl.truststore.* settings.
         assertThat(clientSettings(service))
                 .containsEntry("SPRING_KAFKA_BOOTSTRAP_SERVERS", "kafka:9092")
                 .containsEntry("SPRING_KAFKA_SECURITY_PROTOCOL", "SSL")
-                .containsEntry("SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE", "PEM")
-                .containsEntry("SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_LOCATION", "/etc/ecomdemo-tls/ca.crt")
+                .containsEntry("SPRING_KAFKA_SSL_BUNDLE", "kafka")
+                .containsEntry("SPRING_SSL_BUNDLE_PEM_KAFKA_TRUSTSTORE_CERTIFICATE", "file:/etc/ecomdemo-client-tls/ca.crt")
                 .doesNotContainKey("SPRING_KAFKA_PROPERTIES_SSL_ENDPOINT_IDENTIFICATION_ALGORITHM");
     }
 

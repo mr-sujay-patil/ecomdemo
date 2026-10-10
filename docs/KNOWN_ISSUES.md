@@ -150,6 +150,7 @@ and `Dependency scan` pass on the PR, and the build and smoke tests pass.
 | KI-013 | No reconciliation of `stock_reservation` against orders | Phase 32 | Fixed in Phase 32 (close + fence) |
 | KI-014 | No login throttling or lockout (BCrypt cost is the only brake) | Phase 33 | Fixed in Phase 33 (per-username and per-client throttling, 429 + Retry-After) |
 | KI-015 | Symmetric JWT signing (HS256): every verifier can also mint tokens; one shared SERVICE role | Phase 33 | Fixed in Phase 33 (RS256 + JWKS, scoped client-credentials service tokens) |
+| KI-061 | Kafka and PostgreSQL do not authenticate their clients in k8s: TLS proves the server to the client only (KI-058, KI-059). Any pod that can reach Kafka can produce or consume ANY topic (there is no authorization at all), and a database login needs only the password | Phase 35 | Fixed in Phase 35 (PR #89: client certificates for PostgreSQL and Kafka, per-service Kafka ACLs) |
 
 ## Candidates: new capabilities (a phase only if approved)
 

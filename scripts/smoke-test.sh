@@ -4260,7 +4260,7 @@ check "cert-manager has the certificate Ready" "True" \
 # CA, and trusts that CA when it calls another service. Server-side TLS only: a caller is still identified
 # by its JWT service token, not a client certificate. That the JVMs verify each other is proven by this whole
 # run working: the gateway, the saga and the token endpoint all cross these hops.
-check "cert-manager has all 17 certificates Ready (the Ingress, the 8 services, Redis, the 6 databases and Kafka)" "17" \
+check "cert-manager has all 23 certificates Ready (the Ingress, the 8 services, Redis, the 6 databases, Kafka and the 6 client certificates)" "23" \
     "$(kube get certificates -o json | python3 -c "
 import json, sys
 print(sum(1 for c in json.load(sys.stdin)['items']
@@ -4272,14 +4272,39 @@ check "kafka:9092 is TLS: the certificate verifies against the cluster CA, as ka
     "$(kube exec statefulset/kafka -c kafka -- sh -c 'echo | timeout 20 openssl s_client -connect kafka:9092 -servername kafka -CAfile /etc/ecomdemo-tls/ca.crt -verify_hostname kafka 2>/dev/null' | sed -n 's/^ *\(Verify return code: 0 (ok)\).*/\1/p' | head -1)"
 check "a plain-text Kafka client gets no answer from kafka:9092" "True" \
     "$(kube exec statefulset/kafka -c kafka -- sh -c 'printf "request.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/plain.properties && timeout 60 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --command-config /tmp/plain.properties --list >/dev/null 2>&1' && echo False || echo True)"
+# Phase 35: Kafka also authenticates the CLIENT, by certificate, and authorizes it by ACL (k8s/data/kafka-acls.yaml).
+# From inside the broker's pod, through kafka:9092 as the services reach it: a TLS client that trusts the CA but has
+# no certificate is refused in the handshake. Then notification-service's own certificate (copied from its Secret
+# into the broker's pod for these checks, never printed, deleted after) reads orders.placed, its topic, without a
+# consumer group (one partition at a time), and is refused payments.completed, which no ACL gives it.
+check "a TLS client without a client certificate is refused by kafka:9092" "True" \
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'printf "security.protocol=SSL\nssl.truststore.type=PEM\nssl.truststore.location=/etc/ecomdemo-tls/ca.crt\nrequest.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/smoke-no-cert.properties && timeout 60 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-no-cert.properties --list 2>&1; rm -f /tmp/smoke-no-cert.properties' | grep -q 'SslAuthenticationException' && echo True || echo False)"
+check "notification-service's client certificate is copied into the broker's pod for the next two checks" "True" \
+    "$(kube get secret notification-service-client-tls -o json | python3 -c '
+import base64, json, sys
+data = json.load(sys.stdin)["data"]
+sys.stdout.write(base64.b64decode(data["tls.key"]).decode() + base64.b64decode(data["tls.crt"]).decode())' \
+        | kube exec -i statefulset/kafka -c kafka -- sh -c 'umask 077 && cat > /tmp/smoke-notification.pem && printf "security.protocol=SSL\nssl.truststore.type=PEM\nssl.truststore.location=/etc/ecomdemo-tls/ca.crt\nssl.keystore.type=PEM\nssl.keystore.location=/tmp/smoke-notification.pem\nrequest.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/smoke-notification.properties' \
+        && echo True || echo False)"
+check "notification-service's certificate reads orders.placed, its own topic" "True" \
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'for partition in 0 1 2; do timeout 60 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-notification.properties --topic orders.placed --partition "$partition" --offset earliest --max-messages 1 --timeout-ms 10000 2>&1; done' | grep -q 'Processed a total of 1 messages' && echo True || echo False)"
+check "but may not read payments.completed: no ACL gives it that topic" "True" \
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'timeout 60 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-notification.properties --topic payments.completed --partition 0 --offset earliest --max-messages 1 --timeout-ms 10000 2>&1' | grep -q 'TopicAuthorizationException' && echo True || echo False)"
+kube exec statefulset/kafka -c kafka -- rm -f /tmp/smoke-notification.pem /tmp/smoke-notification.properties
 # KI-058: every database is TLS-only. From inside its own pod (with the password): a plain-text TCP client
-# is refused by pg_hba.conf ("no encryption"), and a client that verifies the certificate and the Service
-# name against the cluster CA gets a TLS session. That the six services verify too is proven by this run.
+# is refused by pg_hba.conf ("no encryption"). Phase 35: the database also requires the CLIENT's certificate.
+# A client that verifies the server's certificate and Service name against the cluster CA completes the TLS
+# handshake, and is then refused for having no certificate of its own (that refusal comes only after a verified
+# TLS session, which is what the KI-058 check here showed). And the service's own pool is connected with its client
+# certificate, whose subject is the database user. That the six services verify the servers too is proven by this run.
 for database in db catalog-db customer-db inventory-db notification-db payment-db; do
+    case "$database" in db) database_user=ecomdemo ;; *) database_user="${database%-db}" ;; esac
     check "$database refuses a plain-text client" "True" \
         "$(kube exec "statefulset/$database" -c postgres -- sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql "host=127.0.0.1 sslmode=disable user=$POSTGRES_USER dbname=$POSTGRES_DB" -Atc "select 1" 2>&1' | grep -q 'no encryption' && echo True || echo False)"
-    check "$database: verify-full against the cluster CA, as its Service name, is TLS" "t" \
-        "$(kube exec "statefulset/$database" -c postgres -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql \"host=$database sslmode=verify-full sslrootcert=/etc/ecomdemo-tls/ca.crt user=\$POSTGRES_USER dbname=\$POSTGRES_DB\" -Atc 'select ssl from pg_stat_ssl where pid = pg_backend_pid()'" 2>&1 | tr -d '\r ')"
+    check "$database: verify-full TLS as its Service name, then refused without a client certificate" "True" \
+        "$(kube exec "statefulset/$database" -c postgres -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql \"host=$database sslmode=verify-full sslrootcert=/etc/ecomdemo-tls/ca.crt user=\$POSTGRES_USER dbname=\$POSTGRES_DB\" -Atc 'select 1' 2>&1" | grep -q 'requires a valid client certificate' && echo True || echo False)"
+    check "$database: its service's connections present the client certificate /CN=$database_user" "/CN=$database_user" \
+        "$(kube exec "statefulset/$database" -c postgres -- sh -c 'psql -h /var/run/postgresql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select distinct client_dn from pg_stat_ssl where client_dn is not null"' 2>&1 | tr -d '\r ')"
 done
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
     "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"

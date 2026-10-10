@@ -1,0 +1,122 @@
+# Who may do what on Kafka (Phase 35). The broker requires a client certificate on its network listener and
+# maps the certificate's CN to the principal (`CN=catalog` is `User:catalog`, the same name as the service's
+# database user); the StandardAuthorizer then refuses anything no line below allows. The table is derived from
+# the code, and each line says which code needs it. A service is allowed:
+#   WRITE     on what it publishes: its outbox routes (`OutboxRoutes`), direct sends, and the `-dlt` twins of
+#             the topics it consumes (`SagaListenerErrors` and notification's `@RetryableTopic` dead-letter there);
+#   READ      on what it consumes, and on its consumer group;
+#   CREATE    on the topics it declares as `NewTopic` beans (`KafkaAdmin` creates them at start), plus DESCRIBE
+#             where it neither reads nor writes them (READ and WRITE already imply DESCRIBE).
+# Nothing else: no cluster rights, no ALTER or DELETE, no topic of another service unless the code uses it.
+#
+# The `acls` container of the broker's pod (k8s/data/kafka.yaml) runs sync.sh at start, through the pod's
+# loopback listener: it ADDS what the broker lacks and REMOVES what is not in this table, so the broker's ACLs
+# are always exactly this file. The pod reports Ready only after that, so no client reaches a broker that
+# would still refuse it. Change a line, `kubectl apply -k k8s/`, and restart the pod (`kubectl -n ecomdemo
+# rollout restart statefulset/kafka`) to apply it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-acls
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/part-of: ecomdemo
+data:
+  acls.txt: |
+    # principal   type   name (* = prefix)               operations       why (the code)
+    # app (ecomdemo-app), user `ecomdemo`
+    ecomdemo      topic  orders.created                  CREATE,WRITE     # KafkaTopicsConfig; outbox route OrderCreatedEvent; DeadLetterService replay
+    ecomdemo      topic  orders.placed                   CREATE,WRITE     # KafkaTopicsConfig; outbox route OrderPlacedEvent
+    ecomdemo      topic  orders.created-dlt              CREATE,READ      # KafkaTopicsConfig; DeadLetterService lists it
+    ecomdemo      topic  orders.placed-dlt               CREATE,DESCRIBE  # KafkaTopicsConfig (notification-service writes and reads it)
+    ecomdemo      topic  inventory.stock-rejected        READ,WRITE       # OrderSagaListeners; DeadLetterService replay
+    ecomdemo      topic  payments.completed              READ,WRITE       # OrderSagaListeners; DeadLetterService replay
+    ecomdemo      topic  payments.failed                 READ,WRITE       # OrderSagaListeners; DeadLetterService replay
+    ecomdemo      topic  inventory.stock-reserved        WRITE            # DeadLetterService replay (an ADMIN action)
+    ecomdemo      topic  inventory.stock-reserved-dlt    READ             # DeadLetterService lists it
+    ecomdemo      topic  inventory.stock-rejected-dlt    READ,WRITE       # DeadLetterService; SagaListenerErrors
+    ecomdemo      topic  payments.completed-dlt          READ,WRITE       # DeadLetterService; SagaListenerErrors
+    ecomdemo      topic  payments.failed-dlt             READ,WRITE       # DeadLetterService; SagaListenerErrors
+    ecomdemo      group  order-service                   READ             # OrderSagaListeners
+    # catalog-service, user `catalog`
+    catalog       topic  catalog.product-changed         CREATE,READ,WRITE  # SearchMessagingConfig; outbox route ProductChanged; ProductIndexer
+    catalog       topic  catalog.product-changed-dlt     CREATE,WRITE     # SearchMessagingConfig; SagaListenerErrors (the indexer)
+    catalog       topic  inventory.stock-changed         READ             # ProductCacheEvictor
+    catalog       group  catalog-search-indexer          READ             # ProductIndexer
+    catalog       group  ecomdemo-catalogue-cache        READ             # ProductCacheEvictor
+    # inventory-service, user `inventory`
+    inventory     topic  inventory.stock-reserved        CREATE,WRITE     # InventorySagaConfig; outbox route StockReservedEvent
+    inventory     topic  inventory.stock-rejected        CREATE,WRITE     # InventorySagaConfig; outbox route StockRejectedEvent
+    inventory     topic  inventory.stock-reserved-dlt    CREATE,DESCRIBE  # InventorySagaConfig (payment-service writes it)
+    inventory     topic  inventory.stock-rejected-dlt    CREATE,DESCRIBE  # InventorySagaConfig (app writes it)
+    inventory     topic  inventory.stock-changed         CREATE,WRITE     # KafkaTopicsConfig; StockChangePublisher
+    inventory     topic  orders.created                  READ             # InventorySagaListeners
+    inventory     topic  payments.failed                 READ             # InventorySagaListeners
+    inventory     topic  orders.created-dlt              WRITE            # SagaListenerErrors
+    inventory     topic  payments.failed-dlt             WRITE            # SagaListenerErrors
+    inventory     group  inventory-service               READ             # InventorySagaListeners
+    # payment-service, user `payment`
+    payment       topic  payments.completed              CREATE,WRITE     # PaymentSagaConfig; outbox route PaymentCompletedEvent
+    payment       topic  payments.failed                 CREATE,WRITE     # PaymentSagaConfig; outbox route PaymentFailedEvent
+    payment       topic  payments.completed-dlt          CREATE,DESCRIBE  # PaymentSagaConfig (app writes it)
+    payment       topic  payments.failed-dlt             CREATE,DESCRIBE  # PaymentSagaConfig (app and inventory write it)
+    payment       topic  inventory.stock-reserved        READ             # PaymentListener
+    payment       topic  inventory.stock-reserved-dlt    WRITE            # SagaListenerErrors
+    payment       group  payment-service                 READ             # PaymentListener
+    # notification-service, user `notification`
+    notification  topic  orders.placed                   READ             # OrderPlacedListener
+    notification  topic  orders.placed-retry-0           CREATE,READ,WRITE  # KafkaTopicsConfig; @RetryableTopic
+    notification  topic  orders.placed-retry-1           CREATE,READ,WRITE  # KafkaTopicsConfig; @RetryableTopic
+    notification  topic  orders.placed-dlt               READ,WRITE       # @RetryableTopic dead letters; @DltHandler
+    notification  group  ecomdemo-notification*          READ             # the listener; @RetryableTopic adds -retry-0, -retry-1, -dlt
+  sync.sh: |
+    # Makes the broker's ACLs exactly acls.txt (see the top of k8s/data/kafka-acls.yaml). Idempotent: on a
+    # restart it lists the ACLs once and changes nothing. Needs the broker's loopback listener (a super user).
+    set -eu
+    here="$(dirname "$0")"
+    bootstrap="${KAFKA_LOCAL:-127.0.0.1:9094}"
+    work="$(mktemp -d)"
+    acls() { /opt/kafka/bin/kafka-acls.sh --bootstrap-server "$bootstrap" "$@"; }
+
+    # Every binding as one line: PRINCIPAL TYPE PATTERN NAME OPERATION PERMISSION HOST.
+    awk '{ sub(/#.*/, "") } NF == 4 {
+        name = $3; pattern = "LITERAL"
+        if (name ~ /[*]$/) { pattern = "PREFIXED"; sub(/[*]$/, "", name) }
+        n = split($4, ops, ",")
+        for (i = 1; i <= n; i++) print "User:" $1, toupper($2), pattern, name, toupper(ops[i]), "ALLOW", "*"
+    }' "$here/acls.txt" | LC_ALL=C sort -u > "$work/wanted"
+
+    until acls --list > "$work/list" 2> "$work/error"; do echo "waiting for the broker"; sleep 5; done
+    awk 'function field(key,    value) {
+            if (!match($0, key "=[^,)]+")) return ""
+            value = substr($0, RSTART + length(key) + 1, RLENGTH - length(key) - 1); return value }
+        /^Current ACLs for resource/ { type = field("resourceType"); name = field("name"); pattern = field("patternType"); next }
+        /principal=/ { print field("principal"), type, pattern, name, field("operation"), field("permissionType"), field("host") }
+    ' "$work/list" | LC_ALL=C sort -u > "$work/have"
+
+    # Missing bindings, added in as few commands as possible: one per principal, resource type, pattern and
+    # set of operations, naming every resource that needs exactly that set.
+    LC_ALL=C comm -23 "$work/wanted" "$work/have" | awk '
+        { key = $1 " " $2 " " $3 " " $4; ops[key] = ops[key] ? ops[key] "," $5 : $5 }
+        END { for (key in ops) { split(key, k, " "); set = k[1] " " k[2] " " k[3] " " ops[key]
+                                 names[set] = names[set] " " k[4] }
+              for (set in names) print set names[set] }' > "$work/add"
+    while read -r principal type pattern operations names; do
+        set -- --add --allow-principal "$principal" --resource-pattern-type "$pattern"
+        for operation in $(echo "$operations" | tr ',' ' '); do set -- "$@" --operation "$operation"; done
+        for name in $names; do set -- "$@" "--$(echo "$type" | tr 'A-Z_' 'a-z-')" "$name"; done
+        acls "$@" > /dev/null
+        echo "added $operations on $type $names ($pattern) for $principal"
+    done < "$work/add"
+
+    # Bindings not in the table (a line removed, or added by hand), removed one by one.
+    LC_ALL=C comm -13 "$work/wanted" "$work/have" > "$work/remove"
+    while read -r principal type pattern name operation permission host; do
+        how="$(echo "$permission" | tr 'A-Z' 'a-z')"
+        resource="--$(echo "$type" | tr 'A-Z_' 'a-z-')"
+        if [ "$type" = "CLUSTER" ]; then set -- "$resource"; else set -- "$resource" "$name"; fi
+        acls --remove --force "--$how-principal" "$principal" "--$how-host" "$host" --operation "$operation" \
+            --resource-pattern-type "$pattern" "$@" > /dev/null
+        echo "removed $permission $operation on $type $name ($pattern) for $principal"
+    done < "$work/remove"
+    echo "ACLs in sync with acls.txt: $(wc -l < "$work/wanted") bindings"

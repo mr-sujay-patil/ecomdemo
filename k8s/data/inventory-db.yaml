@@ -48,7 +48,7 @@ spec:
             - |
               install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key
               install -o postgres -g postgres -m 0644 /etc/ecomdemo-tls/tls.crt /etc/postgres-tls/tls.crt
-              exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/etc/postgres-tls/tls.crt -c ssl_key_file=/etc/postgres-tls/tls.key -c hba_file=/etc/postgresql-hba/pg_hba.conf
+              exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/etc/postgres-tls/tls.crt -c ssl_key_file=/etc/postgres-tls/tls.key -c ssl_ca_file=/etc/ecomdemo-tls/ca.crt -c hba_file=/etc/postgresql-hba/pg_hba.conf
           env:
             - name: POSTGRES_DB
               value: inventory

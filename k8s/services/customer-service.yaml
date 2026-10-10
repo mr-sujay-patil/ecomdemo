@@ -19,6 +19,11 @@ data:
   # (mounted in every pod). Read by Spring Boot into the Hikari pool's driver properties (Flyway uses the same pool).
   SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE: "verify-full"
   SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLROOTCERT: "/etc/ecomdemo-tls/ca.crt"
+  # Phase 35: the database also checks WHO connects. The driver sends this pod's client certificate (its CN is
+  # the database user, "customer") with the password; the key is PKCS#8 RSA, the PEM form pgjdbc reads. pgjdbc
+  # reads both files for every new connection, so a renewal is used by the next connection the pool opens.
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLCERT: "/etc/ecomdemo-client-tls/tls.crt"
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLKEY: "/etc/ecomdemo-client-tls/tls.key"
   CUSTOMER_DB_PORT: "5432"
   CUSTOMER_DB_NAME: "customer"
   CUSTOMER_DB_USER: "customer"
@@ -51,6 +56,10 @@ spec:
         app.kubernetes.io/name: customer-service
         app.kubernetes.io/part-of: ecomdemo
     spec:
+      # Phase 35: the volumes' files belong to the image's group (gid 1001), so the client key below can be
+      # 0440 and still readable by the service, which runs as 1001.
+      securityContext:
+        fsGroup: 1001
       # Kubernetes has no `depends_on`. Without this, the service would start before its database,
       # fail Flyway, crash, and be restarted with a growing back-off until the database happened
       # to be up. An init container runs to completion BEFORE the application container starts:
@@ -94,6 +103,13 @@ spec:
         - name: tls
           secret:
             secretName: customer-service-tls
+        # Phase 35: this service's CLIENT certificate, for PostgreSQL and Kafka (k8s/service-certificates.yaml).
+        - name: client-tls
+          secret:
+            secretName: customer-service-client-tls
+            # The PostgreSQL driver refuses a key file that others may read (the rule libpq has: 0600 if the
+            # user owns it, at most 0640 if root does). A Secret's files are root's and 0644 by default.
+            defaultMode: 0440
         - name: trust
           emptyDir: {}
       containers:
@@ -122,6 +138,7 @@ spec:
           volumeMounts:
             - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
             - { name: trust, mountPath: /trust, readOnly: true }
+            - { name: client-tls, mountPath: /etc/ecomdemo-client-tls, readOnly: true }
           startupProbe:
             httpGet:
               path: /actuator/health/liveness

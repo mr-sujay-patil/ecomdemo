@@ -21,15 +21,27 @@ data:
   # (mounted in every pod). Read by Spring Boot into the Hikari pool's driver properties (Flyway uses the same pool).
   SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE: "verify-full"
   SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLROOTCERT: "/etc/ecomdemo-tls/ca.crt"
+  # Phase 35: the database also checks WHO connects. The driver sends this pod's client certificate (its CN is
+  # the database user, "inventory") with the password; the key is PKCS#8 RSA, the PEM form pgjdbc reads. pgjdbc
+  # reads both files for every new connection, so a renewal is used by the next connection the pool opens.
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLCERT: "/etc/ecomdemo-client-tls/tls.crt"
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLKEY: "/etc/ecomdemo-client-tls/tls.key"
   INVENTORY_DB_PORT: "5432"
   INVENTORY_DB_NAME: "inventory"
   INVENTORY_DB_USER: "inventory"
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   # KI-059: the broker's listener is SSL; the client checks its certificate and name ("kafka") against the
-  # cluster CA mounted in every pod. Kafka's own name check (ssl.endpoint.identification.algorithm=https) stays on.
+  # cluster CA. Kafka's own name check (ssl.endpoint.identification.algorithm=https) stays on.
   SPRING_KAFKA_SECURITY_PROTOCOL: "SSL"
-  SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_TYPE: "PEM"
-  SPRING_KAFKA_PROPERTIES_SSL_TRUSTSTORE_LOCATION: "/etc/ecomdemo-tls/ca.crt"
+  # Phase 35: and the broker checks WHO connects: the client presents its certificate, whose CN ("inventory") is
+  # its Kafka principal, allowed only what k8s/data/kafka-acls.yaml grants it. One Spring SSL bundle holds both
+  # sides (the client certificate and key, the CA it checks the broker against), and every Kafka client of the
+  # service gets it. reload-on-update: a renewed certificate is used by the next connection, no restart.
+  SPRING_KAFKA_SSL_BUNDLE: "kafka"
+  SPRING_SSL_BUNDLE_PEM_KAFKA_KEYSTORE_CERTIFICATE: "file:/etc/ecomdemo-client-tls/tls.crt"
+  SPRING_SSL_BUNDLE_PEM_KAFKA_KEYSTORE_PRIVATEKEY: "file:/etc/ecomdemo-client-tls/tls.key"
+  SPRING_SSL_BUNDLE_PEM_KAFKA_TRUSTSTORE_CERTIFICATE: "file:/etc/ecomdemo-client-tls/ca.crt"
+  SPRING_SSL_BUNDLE_PEM_KAFKA_RELOAD_ON_UPDATE: "true"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,6 +70,10 @@ spec:
         app.kubernetes.io/name: inventory-service
         app.kubernetes.io/part-of: ecomdemo
     spec:
+      # Phase 35: the volumes' files belong to the image's group (gid 1001), so the client key below can be
+      # 0440 and still readable by the service, which runs as 1001.
+      securityContext:
+        fsGroup: 1001
       # Kubernetes has no `depends_on`. Without this, the service would start before its database,
       # fail Flyway, crash, and be restarted with a growing back-off until the database happened
       # to be up. An init container runs to completion BEFORE the application container starts:
@@ -101,6 +117,13 @@ spec:
         - name: tls
           secret:
             secretName: inventory-service-tls
+        # Phase 35: this service's CLIENT certificate, for PostgreSQL and Kafka (k8s/service-certificates.yaml).
+        - name: client-tls
+          secret:
+            secretName: inventory-service-client-tls
+            # The PostgreSQL driver refuses a key file that others may read (the rule libpq has: 0600 if the
+            # user owns it, at most 0640 if root does). A Secret's files are root's and 0644 by default.
+            defaultMode: 0440
         - name: trust
           emptyDir: {}
       containers:
@@ -129,6 +152,7 @@ spec:
           volumeMounts:
             - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
             - { name: trust, mountPath: /trust, readOnly: true }
+            - { name: client-tls, mountPath: /etc/ecomdemo-client-tls, readOnly: true }
           startupProbe:
             httpGet:
               path: /actuator/health/liveness
