@@ -38,6 +38,10 @@ data:
   TRACING_SAMPLING_PROBABILITY: "1.0"
   SPRING_PROFILES_ACTIVE: "dev"
   POSTGRES_HOST: "db"
+  # KI-058: the database is TLS-only; the driver checks its certificate and name against the cluster CA
+  # (mounted in every pod). Read by Spring Boot into the Hikari pool's driver properties (Flyway uses the same pool).
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE: "verify-full"
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLROOTCERT: "/etc/ecomdemo-tls/ca.crt"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "ecomdemo"
   POSTGRES_USER: "ecomdemo"

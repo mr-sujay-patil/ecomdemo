@@ -252,3 +252,171 @@ spec:
   issuerRef:
     name: ecomdemo-ca
     kind: ClusterIssuer
+---
+# KI-058: db's server certificate (PostgreSQL TLS). The pod copies it for postgres (k8s/data/db.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: db-tls
+  labels:
+    app.kubernetes.io/name: db
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: db-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - db
+    - db.ecomdemo
+    - db.ecomdemo.svc
+    - db.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+# KI-058: catalog-db's server certificate (PostgreSQL TLS). The pod copies it for postgres (k8s/data/catalog-db.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: catalog-db-tls
+  labels:
+    app.kubernetes.io/name: catalog-db
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: catalog-db-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - catalog-db
+    - catalog-db.ecomdemo
+    - catalog-db.ecomdemo.svc
+    - catalog-db.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+# KI-058: customer-db's server certificate (PostgreSQL TLS). The pod copies it for postgres (k8s/data/customer-db.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: customer-db-tls
+  labels:
+    app.kubernetes.io/name: customer-db
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: customer-db-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - customer-db
+    - customer-db.ecomdemo
+    - customer-db.ecomdemo.svc
+    - customer-db.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+# KI-058: inventory-db's server certificate (PostgreSQL TLS). The pod copies it for postgres (k8s/data/inventory-db.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: inventory-db-tls
+  labels:
+    app.kubernetes.io/name: inventory-db
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: inventory-db-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - inventory-db
+    - inventory-db.ecomdemo
+    - inventory-db.ecomdemo.svc
+    - inventory-db.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+# KI-058: notification-db's server certificate (PostgreSQL TLS). The pod copies it for postgres (k8s/data/notification-db.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: notification-db-tls
+  labels:
+    app.kubernetes.io/name: notification-db
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: notification-db-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - notification-db
+    - notification-db.ecomdemo
+    - notification-db.ecomdemo.svc
+    - notification-db.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer
+---
+# KI-058: payment-db's server certificate (PostgreSQL TLS). The pod copies it for postgres (k8s/data/payment-db.yaml).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: payment-db-tls
+  labels:
+    app.kubernetes.io/name: payment-db
+    app.kubernetes.io/part-of: ecomdemo
+spec:
+  secretName: payment-db-tls
+  duration: 2160h
+  renewBefore: 720h
+  dnsNames:
+    - payment-db
+    - payment-db.ecomdemo
+    - payment-db.ecomdemo.svc
+    - payment-db.ecomdemo.svc.cluster.local
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: ecomdemo-ca
+    kind: ClusterIssuer

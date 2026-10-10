@@ -12,6 +12,7 @@ namespace: ecomdemo
 resources:
   - namespace.yaml
   # data: databases, Kafka, Redis
+  - data/postgres-hba.yaml
   - data/db.yaml
   - data/catalog-db.yaml
   - data/customer-db.yaml

@@ -1,0 +1,21 @@
+# Who may connect to the six PostgreSQL databases, and how (KI-058). Every database StatefulSet mounts
+# this file and starts with `-c hba_file=` pointing at it, so it replaces the image's own pg_hba.conf
+# (whose `host all all all scram-sha-256` accepts a password over plain TCP).
+#
+#   local    the Unix socket inside the pod: the probes (pg_isready) and the cert-reload sidecar.
+#            Only processes in the pod can reach it, as with the image's own default.
+#   hostssl  every TCP connection, and only over TLS: a client that does not start TLS matches no line
+#            and is refused ("no pg_hba.conf entry ... no encryption"). The password is still checked
+#            (SCRAM); the certificate is checked by the client (`sslmode=verify-full`).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-hba
+  labels:
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: ecomdemo
+data:
+  pg_hba.conf: |
+    # TYPE   DATABASE  USER  ADDRESS  METHOD
+    local    all       all            trust
+    hostssl  all       all   all      scram-sha-256

@@ -15,6 +15,10 @@ data:
   SPRING_SSL_BUNDLE_PEM_SERVER_RELOAD_ON_UPDATE: "true"
   TRACING_SAMPLING_PROBABILITY: "1.0"
   CUSTOMER_DB_HOST: "customer-db"
+  # KI-058: the database is TLS-only; the driver checks its certificate and name against the cluster CA
+  # (mounted in every pod). Read by Spring Boot into the Hikari pool's driver properties (Flyway uses the same pool).
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE: "verify-full"
+  SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLROOTCERT: "/etc/ecomdemo-tls/ca.crt"
   CUSTOMER_DB_PORT: "5432"
   CUSTOMER_DB_NAME: "customer"
   CUSTOMER_DB_USER: "customer"
