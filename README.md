@@ -3540,6 +3540,13 @@ sudo cp .local/ecomdemo-ca.crt /usr/local/share/ca-certificates/ecomdemo-local-c
 #   certutil.exe -addstore -user Root "$(wslpath -w .local/ecomdemo-ca.crt)"
 ```
 
+**The certificate's names (KI-060):** `localhost`, `127.0.0.1` and `shop.localhost`. The last one is the
+frontend team's shop, which they deploy into the same namespace behind the same Traefik; their Ingress uses
+the same `ecomdemo-tls` Secret, so `https://shop.localhost:18443` verifies against the same CA. A new host
+served over HTTPS needs its name in `k8s/tls-certificate.yaml` (`EdgeCertificateConfigTest` checks that
+every Ingress `tls` host is there). On an existing cluster, `scripts/k8s-up.sh` applies the change and
+cert-manager reissues the certificate on its own, with no restart.
+
 A cluster created before this needs `scripts/k8s-down.sh` and `scripts/k8s-up.sh`: kind cannot add the HTTPS
 port mapping to a running cluster, and the CA is new, so re-export and re-trust it.
 
