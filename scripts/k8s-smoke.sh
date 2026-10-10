@@ -54,8 +54,9 @@ for _ in $(seq 1 30); do
 done
 
 cp scripts/smoke-test.sh "$WORK/smoke-test.sh"
-# What the copy sources from its own directory (KI-055).
+# What the copy sources from its own directory (KI-055, KI-064).
 cp scripts/smoke-burst.sh "$WORK/smoke-burst.sh"
+cp scripts/smoke-clients.sh "$WORK/smoke-clients.sh"
 NOT_IN_CLUSTER="http://observability-stays-in-compose.invalid"
 SMOKE_PLATFORM=k8s \
 BASE_URL="${BASE_URL:-https://localhost:18443}" \
