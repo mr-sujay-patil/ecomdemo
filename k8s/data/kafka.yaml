@@ -68,6 +68,26 @@ spec:
             # Kafka reads a PEM keystore: the private key (PKCS#8) followed by the certificate chain, one file.
             - { name: KAFKA_SSL_KEYSTORE_TYPE, value: "PEM" }
             - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: "/etc/kafka-tls/keystore.pem" }
+            # Phase 35: the SSL listener also authenticates the CLIENT. A client must present a certificate
+            # signed by the cluster CA (the truststore, PEM, straight from the Secret); one without, or from
+            # another CA, fails the handshake ("certificate_required" / "bad_certificate").
+            - { name: KAFKA_SSL_CLIENT_AUTH, value: "required" }
+            - { name: KAFKA_SSL_TRUSTSTORE_TYPE, value: "PEM" }
+            - { name: KAFKA_SSL_TRUSTSTORE_LOCATION, value: "/etc/ecomdemo-tls/ca.crt" }
+            # The certificate's subject becomes the principal: `CN=catalog` is `User:catalog`. Only a plain
+            # lower-case name is shortened; any other subject keeps its full DN (`User:CN=...`), which no ACL
+            # names. So no certificate can become `ANONYMOUS` (the super user below) or another wildcard.
+            - { name: KAFKA_SSL_PRINCIPAL_MAPPING_RULES, value: "RULE:^CN=([a-z0-9-]+)$/$1/,DEFAULT" }
+            # Authorization (KRaft's built-in authorizer): a request is refused unless an ACL allows it. The ACLs
+            # are k8s/data/kafka-acls.yaml, applied by the `acls` container below.
+            - { name: KAFKA_AUTHORIZER_CLASS_NAME, value: "org.apache.kafka.metadata.authorizer.StandardAuthorizer" }
+            - { name: KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND, value: "false" }
+            # The plain listeners have no identity: whatever connects to them is `User:ANONYMOUS`. That is the
+            # broker itself (its controller and inter-broker traffic are authorized too) and the tools run inside
+            # this pod (the ACL sync, cert-reload, the smoke test), so ANONYMOUS must be a super user. Safe only
+            # because every plain listener is bound to 127.0.0.1: nothing outside this pod can reach one, and a
+            # client on the network always has a certificate identity (the rule above).
+            - { name: KAFKA_SUPER_USERS, value: "User:ANONYMOUS" }
             - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: "false" }
             - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: "1" }
             - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: "1" }
@@ -146,10 +166,40 @@ spec:
               memory: 16Mi
             limits:
               memory: 256Mi
+        # Phase 35: makes the broker's ACLs exactly k8s/data/kafka-acls.yaml, through the loopback listener, then
+        # idles. The pod is Ready only when this container is, i.e. after the sync: the Service sends no client
+        # to a broker that would still refuse it, and the services' init containers wait for that.
+        - name: acls
+          image: apache/kafka:4.2.1
+          command: ["sh", "-c"]
+          args:
+            - |
+              until sh /etc/kafka-acls/sync.sh; do echo "could not sync the ACLs; retrying"; sleep 10; done
+              touch /tmp/acls-synced
+              trap 'exit 0' TERM
+              while true; do sleep 3600 & wait $!; done
+          env:
+            # Only for the short-lived kafka-acls JVMs.
+            - { name: KAFKA_HEAP_OPTS, value: "-Xmx64m" }
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/acls-synced"]
+            periodSeconds: 5
+          volumeMounts:
+            - { name: acls, mountPath: /etc/kafka-acls, readOnly: true }
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 256Mi
       volumes:
         - name: tls
           secret:
             secretName: kafka-tls
+        - name: acls
+          configMap:
+            name: kafka-acls
         # The keystore (key and chain in one file); in memory, never on the data volume.
         - name: server-tls
           emptyDir:
