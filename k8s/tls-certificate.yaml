@@ -2,6 +2,10 @@
 # (platform/ca.yaml). cert-manager writes the key and certificate into the Secret `ecomdemo-tls`,
 # which the Ingress (ingress.yaml) names in its `tls` section.
 #
+# KI-060: it also names `shop.localhost`, the host of the frontend team's shop. Their Ingress (in this
+# namespace, served by the same Traefik) uses this Secret too, so a client that trusts the local CA
+# reaches https://shop.localhost:18443 as well. Add a name here for every host Traefik serves over HTTPS.
+#
 # 90 days, renewed 30 days before expiry: short-lived on purpose, because renewal that works every
 # time is the point of automating it. A client that trusts the CA keeps working across renewals.
 apiVersion: cert-manager.io/v1
@@ -16,6 +20,7 @@ spec:
   renewBefore: 720h
   dnsNames:
     - localhost
+    - shop.localhost
   ipAddresses:
     - 127.0.0.1
   privateKey:

@@ -36,6 +36,14 @@ if [ ! -s "$TLS_CA" ]; then
         | base64 -d > "$TLS_CA"
 fi
 export CURL_CA_BUNDLE="$TLS_CA" SSL_CERT_FILE="$TLS_CA"
+# KI-060: the certificate also names the frontend team's shop host. Only the TLS handshake is checked
+# (verified against the CA, as `shop.localhost`): any HTTP status will do, because the shop itself may
+# not be deployed, and then the request falls through to our Ingress.
+if ! curl -sS -o /dev/null --resolve shop.localhost:18443:127.0.0.1 https://shop.localhost:18443/; then
+    echo "FAIL: https://shop.localhost:18443 does not present a certificate for shop.localhost (KI-060)" >&2
+    exit 1
+fi
+echo "PASS: the edge certificate is valid for shop.localhost (KI-060)"
 # KI-056: the services serve HTTPS (their certificates name `localhost`, for exactly these port-forwards).
 kubectl --context "$CONTEXT" -n "$NS" port-forward svc/app 18084:8080 >/dev/null 2>&1 &
 kubectl --context "$CONTEXT" -n "$NS" port-forward svc/payment-service 18086:8086 >/dev/null 2>&1 &

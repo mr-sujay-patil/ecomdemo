@@ -2,22 +2,23 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-10-08
-- **Fix:** KI-057, Redis TLS-only in k8s
-- **Branch:** fix/ki-057-redis-tls (cut from `main` at `91821fa`)
-- **Step:** PR_OPEN
-- **Waiting for user:** YES (review of the KI-057 PR)
+- **Updated:** 2026-10-10
+- **Fix:** KI-060, the edge certificate does not name `shop.localhost` (unblocks web KI-034)
+- **Branch:** fix/ki-060-shop-host-certificate (cut from `main` at `69915f2`)
+- **Step:** PR_OPEN (PR #86)
+- **Waiting for user:** YES (local `scripts/k8s-smoke.sh`, then `approved, merge it` for PR #86)
 
-## Done
-- Chosen by the assistant as the smallest remaining TLS gap, after the user said "continue" (not an explicit pick; say if it was unwanted).
-- Redis `--port 0 --tls-port 6379` with `cache-tls`; 4 clients `SPRING_DATA_REDIS_SSL_ENABLED`; readiness probe over TLS; `cert-reload` sidecar.
-- Smoke: plain-text check + 10 certificates; `scripts/k8s-smoke.sh` 460 passed, 0 failed, 7 skipped. Forced renewal: sidecar reloaded, new serial in ~70 s, 0 restarts.
-- Docs: README TLS, security.md, KNOWN_ISSUES (KI-057 fixed), `decisions.md` [Fix KI-057].
+## Checklist (from the issue's scope)
+- [x] Regression test: the edge Certificate names `shop.localhost`, and every Ingress `tls` host is in it (fails first)
+- [x] `k8s/tls-certificate.yaml`: add `shop.localhost`; `k8s/ingress.yaml`: add it to `tls.hosts`
+- [x] `scripts/k8s-smoke.sh`: a TLS check for `https://shop.localhost:18443` against the local CA
+- [x] Docs: KNOWN_ISSUES (fixed), README TLS section, `decisions.md` [KI-060] where they name the certificate's hosts
+- [x] PR. **The k8s smoke test is run by the user locally** (the cloud session's network policy blocks the Helm chart hosts and quay.io; the user chose this on 2026-10-10)
 
 ## Next action
-STOP: wait for review. After `approved, merge it`: confirm CI green, merge --merge, verify in `main`, tag `ki-057-fixed`.
-An existing cluster: `scripts/k8s-up.sh`, then `kubectl -n ecomdemo rollout restart deploy` (the ConfigMap change does not restart the clients).
-Remaining TLS gaps: KI-058 (PostgreSQL), KI-059 (Kafka). Other: KI-016..024, 031..036, 048, 054, 055.
+STOP: wait for the owner's local `scripts/k8s-smoke.sh` (expect `PASS: the edge certificate is valid for shop.localhost (KI-060)`) and `approved, merge it`. Confirm CI green on PR #86 first.
+After the merge: merge verification, tag `ki-060-fixed`. Then the owner asked for web KI-034 next (in EcomDemo-Web, which needs its backend pin moved to the merge commit).
+Results: `EdgeCertificateConfigTest` failed first (89bc99d), passes; `./mvnw -B clean verify` 755 tests, 0 failures.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
