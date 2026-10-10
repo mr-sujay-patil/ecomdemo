@@ -11,8 +11,18 @@ burst_limited() {
     if [ "$(burst_count "$1" 429)" -gt 0 ]; then echo True; else echo False; fi
 }
 
-# burst_throttles <file> -> True when plenty were served before the limiter refused: it throttles, it does
-# not ban. More than 50 rather than an exact number: the bucket refills during the burst.
+# burst_admitted <file> -> how many requests the limiter let through: every HTTP answer except 429. curl's
+# 000 (no answer at all) is not counted: nothing showed that the limiter let it through.
+burst_admitted() {
+    grep -v -c -e '^429$' -e '^000$' "$1" 2>/dev/null || true
+}
+
+# burst_throttles <file> -> True when plenty were admitted before the limiter refused: it throttles, it
+# does not ban. More than 50 rather than an exact number: the bucket refills during the burst.
+#
+# ADMITTED, not "answered 200" (KI-055): behind the limiter, the catalog route has a 2 s timeout and a
+# circuit breaker, so on a cold stack some admitted requests end as the fallback's 503. Counting only 200s
+# made a slow catalog-service look like a limiter that bans; the 503s are reported on their own (KI-062).
 burst_throttles() {
-    if [ "$(burst_count "$1" 200)" -gt 50 ]; then echo True; else echo False; fi
+    if [ "$(burst_admitted "$1")" -gt 50 ]; then echo True; else echo False; fi
 }

@@ -2969,8 +2969,10 @@ printf '        burst of 300: %s\n' \
 rm -f "$BURST_RESULTS"
 
 check "a concurrent burst of 300 requests from one caller is rate limited" "True" "$BURST_LIMITED"
-# Not a ban: the bucket's capacity is served before anything is refused. "More than 50 served" rather
-# than "exactly 100" on purpose - the bucket refills DURING the burst, so the number served depends on
+# Not a ban: the bucket's capacity is let through before anything is refused. Counted as ADMITTED (any
+# answer but 429), not as 200s: on a cold stack the catalog route's breaker answers some admitted requests
+# with its 503 fallback, which says nothing about the limiter (KI-055; the 503s are KI-062). "More than 50
+# admitted" rather than "exactly 100" on purpose - the bucket refills DURING the burst, so the number served depends on
 # how long the burst took, and pinning it would be a performance assertion wearing a correctness name.
 check "but plenty were served first - it throttles, it does not ban" "True" "$BURST_THROTTLES"
 # above and be useless. 50 tokens a second replenish, so a short wait is enough - polled rather
