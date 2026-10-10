@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-10
 - **Phase:** 36, Redis Client Certificates (`docs/phases/phase-36-redis-client-certificates.md`), KI-063
 - **Branch:** feature/phase-36-redis-client-certificates (cut from `main` at `b2aa553`)
-- **Step:** TESTING
-- **Waiting for user:** NO. Approved by the user on 2026-10-10. Previous: Phase 35 merged (`bf0c109`, PR #89; its last commit `d21d639` is a parent of the merge), KI-055 merged (`b2aa553`, PR #90). Tags `phase-35-complete`, `ki-055-fixed`, `ki-059-fixed` are the owner's to push (403 here).
+- **Step:** PR_OPEN
+- **Waiting for user:** YES: review of the Phase 36 PR, CI, and the k8s smoke test on kind (`k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, `k8s-smoke.sh`). Approved by the user on 2026-10-10. Previous: Phase 35 merged (`bf0c109`, PR #89; its last commit `d21d639` is a parent of the merge), KI-055 merged (`b2aa553`, PR #90). Tags `phase-35-complete`, `ki-055-fixed`, `ki-059-fixed` are the owner's to push (403 here).
 
 ## Checklist
 - [x] Manifest test (fails first): Redis requires client certificates, every Redis client presents one through the `redis` SSL bundle, in-pod tools present one
@@ -16,15 +16,14 @@
 - [x] `RedisClientAuthIT`: cert+password OK; no cert, other CA, no password refused; renewal used by next connection; probe and sidecar work
 - [x] Smoke test (k8s): no-cert and foreign-CA refusals, each service certificate PONG, 25 certificates
 - [x] Per-service ACL users: candidate KI row (not built)
-- [ ] Docs: README, decisions, security, KI-063..065, RECENT rotation (done); test report, tracker 🔵 (after the full build)
-- [ ] `./mvnw -B clean verify` (baseline 846 tests); PR
+- [x] Docs: README, decisions, security, KI-063 (Fixed), KI-064, KI-065, RECENT rotation, test report, tracker 🔵
+- [x] `./mvnw -B clean verify`: 874 tests (654 unit, 220 IT), 0 failures; PR opened
+- [ ] CI green on the PR; the owner's k8s smoke run
 
 ## Next action
-Full `./mvnw -B clean verify` is running (log `~/.cache/ecomdemo-claude/p36-full.log`); if green, write
-`docs/test-reports/phase-36.md` (also: counter-check RedisClientAuthIT against main's `k8s/data/cache.yaml`), set
-the tracker to 🔵 and KI-063 to Fixed, push, open the PR `Phase 36: Redis Client Certificates`, then STOP.
-Smoke snippets were validated against a Redis container (scratchpad harness): new checks PASS, and the two
-refusals FAIL against KI-057's `--tls-auth-clients no`.
+STOP: the PR is open for the owner's review (this session does not wait for CI). Next session: check the PR's CI;
+if red, fix on this branch. After `approved, merge it` or a merge by the owner: merge verification
+(execution-protocol section 5); the owner pushes `phase-36-complete` (tag pushes are refused here).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

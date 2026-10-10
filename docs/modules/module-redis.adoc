@@ -1,0 +1,7 @@
+[%autowidth.stretch, cols="h,a"]
+|===
+|Base package
+|`com.ecomdemo.redis`
+|Spring components
+|* `c.e.r.RedisClientCertificateAutoConfiguration`
+|===
