@@ -5,18 +5,20 @@
 - **Updated:** 2026-10-10
 - **Fix:** KI-060, the edge certificate does not name `shop.localhost` (unblocks web KI-034)
 - **Branch:** fix/ki-060-shop-host-certificate (cut from `main` at `69915f2`)
-- **Step:** BRANCHED
-- **Waiting for user:** NO
+- **Step:** PR_OPEN (PR #86)
+- **Waiting for user:** YES (local `scripts/k8s-smoke.sh`, then `approved, merge it` for PR #86)
 
 ## Checklist (from the issue's scope)
-- [ ] Regression test: the edge Certificate names `shop.localhost`, and every Ingress `tls` host is in it (fails first)
-- [ ] `k8s/tls-certificate.yaml`: add `shop.localhost`; `k8s/ingress.yaml`: add it to `tls.hosts`
-- [ ] `scripts/k8s-smoke.sh`: a TLS check for `https://shop.localhost:18443` against the local CA
-- [ ] Docs: KNOWN_ISSUES (fixed), README TLS section, `decisions.md` [KI-060] where they name the certificate's hosts
-- [ ] PR. **The k8s smoke test is run by the user locally** (the cloud session's network policy blocks the Helm chart hosts and quay.io; the user chose this on 2026-10-10)
+- [x] Regression test: the edge Certificate names `shop.localhost`, and every Ingress `tls` host is in it (fails first)
+- [x] `k8s/tls-certificate.yaml`: add `shop.localhost`; `k8s/ingress.yaml`: add it to `tls.hosts`
+- [x] `scripts/k8s-smoke.sh`: a TLS check for `https://shop.localhost:18443` against the local CA
+- [x] Docs: KNOWN_ISSUES (fixed), README TLS section, `decisions.md` [KI-060] where they name the certificate's hosts
+- [x] PR. **The k8s smoke test is run by the user locally** (the cloud session's network policy blocks the Helm chart hosts and quay.io; the user chose this on 2026-10-10)
 
 ## Next action
-Write the regression test (`ecomdemo-app/src/test/java/com/ecomdemo/EdgeCertificateConfigTest.java`, like `KafkaStorageConfigTest`), see it fail, then change the two manifests.
+STOP: wait for the owner's local `scripts/k8s-smoke.sh` (expect `PASS: the edge certificate is valid for shop.localhost (KI-060)`) and `approved, merge it`. Confirm CI green on PR #86 first.
+After the merge: merge verification, tag `ki-060-fixed`. Then the owner asked for web KI-034 next (in EcomDemo-Web, which needs its backend pin moved to the merge commit).
+Results: `EdgeCertificateConfigTest` failed first (89bc99d), passes; `./mvnw -B clean verify` 755 tests, 0 failures.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
