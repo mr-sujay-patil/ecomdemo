@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-10
 - **Fix:** KI-059, Kafka TLS in k8s (the last TLS gap of KI-056)
 - **Branch:** fix/ki-059-kafka-tls (cut from `main` at `553a02d`)
-- **Step:** BRANCHED
-- **Waiting for user:** NO. The k8s smoke test is run by the user locally (as for KI-060/058). Tags `ki-060-fixed` and `ki-058-fixed` are for the user to push (the session's tag pushes get 403).
+- **Step:** PR_OPEN (PR #88)
+- **Waiting for user:** YES: CI on PR #88, the owner's local `scripts/k8s-smoke.sh` (after `k8s-up.sh` and `kubectl -n ecomdemo rollout restart deploy`), then `approved, merge it`. The k8s smoke test is run by the user locally (as for KI-060/058). Tags `ki-060-fixed` and `ki-058-fixed` are for the user to push (the session's tag pushes get 403).
 
 ## Plan (k8s only; compose unchanged)
 - Broker: certificate `kafka-tls` (PKCS#8, which Kafka's PEM keystore needs); `INTERNAL://:9092` becomes SSL; a `LOCAL` plaintext listener on 127.0.0.1:9094 (inter-broker traffic, the in-pod CLI, the reload) and `CONTROLLER` on 127.0.0.1:9093, so nothing plain is reachable from the network. The start command writes key+chain to `keystore.pem` in an emptyDir.
@@ -15,7 +15,7 @@
 - Smoke (k8s): in-pod CLI moves to localhost:9094; checks: plaintext to 9092 refused, TLS verified as `kafka`, 17 certificates.
 
 ## Next action
-Regression tests (manifest test, then a Testcontainers IT like `PostgresTlsIT`), see them fail, then the manifests.
+Wait for CI on PR #88 and fix it if red. Then STOP for the owner. After the merge: merge verification, tag `ki-059-fixed` (the owner pushes tags; the session gets 403). Results: `KafkaTlsConfigTest` 8 failing before; `KafkaTlsIT` 2 pass; `./mvnw -B clean verify` 789 tests. With this, KI-056's TLS work is complete (services, Redis, PostgreSQL, Kafka).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
