@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-10
 - **Fix:** KI-055, the smoke test's rate-limit burst check counts only 200 as "served"
 - **Branch:** fix/ki-055-burst-counts-admitted (cut from `main` at `bf0c109`)
-- **Step:** TESTING
-- **Waiting for user:** NO. Chosen by the assistant after the user said "continue" (offered earlier as the default). Tags `ki-059-fixed`, `phase-35-complete` and older ones are for the user to push (403 here).
+- **Step:** PR_OPEN (PR #90, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #90, then `approved, merge it`. Chosen by the assistant after the user said "continue" (offered earlier as the default). Tags `ki-059-fixed`, `phase-35-complete` and older ones are for the user to push (403 here).
 
 ## Root cause (evidence: burst lines of `smoke.yml` runs 2 to 7)
 Admitted requests (not 429) are 100 to 150 every run; the non-200 part of them is `503` from the catalog route's circuit-breaker fallback (2 s timeout) on a cold runner, 0 to 39 per run. Run 1 failed when too many admitted requests were 503s. The limiter never banned.
@@ -16,10 +16,11 @@ Admitted requests (not 429) are 100 to 150 every run; the non-200 part of them i
 - [x] `scripts/smoke-burst.sh`: the verdict, sourced by `smoke-test.sh`; the check counts admitted requests and names the 503s
 - [x] KI-062 recorded (the 503s themselves; Needs check), not fixed here
 - [x] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-055]
-- [ ] `./mvnw -B clean verify`; PR; CI green
+- [x] `./mvnw -B clean verify` (846 tests); PR #90
+- [ ] CI green on PR #90, including the `run-smoke` compose smoke test
 
 ## Next action
-Write `scripts/test-smoke-burst.sh` against the current logic, see it fail on a cold-burst distribution, then the helper.
+Wait for CI on PR #90 (with `run-smoke`, the compose smoke test runs the burst on this branch); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-055-fixed`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
