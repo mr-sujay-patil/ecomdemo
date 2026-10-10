@@ -3,22 +3,24 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-10
-- **Fix:** KI-060, the edge certificate does not name `shop.localhost` (unblocks web KI-034)
-- **Branch:** fix/ki-060-shop-host-certificate (cut from `main` at `69915f2`)
-- **Step:** PR_OPEN (PR #86)
-- **Waiting for user:** YES (local `scripts/k8s-smoke.sh`, then `approved, merge it` for PR #86)
+- **Fix:** KI-058, PostgreSQL TLS in k8s (the 6 databases)
+- **Branch:** fix/ki-058-postgres-tls (cut from `main` at `669a9ed`)
+- **Step:** BRANCHED
+- **Waiting for user:** NO. The k8s smoke test is run by the user locally (the cloud session's network policy blocks the Helm chart hosts and quay.io; same arrangement as KI-060). `ki-060-fixed` is for the user to push (the session's tag push got 403).
 
-## Checklist (from the issue's scope)
-- [x] Regression test: the edge Certificate names `shop.localhost`, and every Ingress `tls` host is in it (fails first)
-- [x] `k8s/tls-certificate.yaml`: add `shop.localhost`; `k8s/ingress.yaml`: add it to `tls.hosts`
-- [x] `scripts/k8s-smoke.sh`: a TLS check for `https://shop.localhost:18443` against the local CA
-- [x] Docs: KNOWN_ISSUES (fixed), README TLS section, `decisions.md` [KI-060] where they name the certificate's hosts
-- [x] PR. **The k8s smoke test is run by the user locally** (the cloud session's network policy blocks the Helm chart hosts and quay.io; the user chose this on 2026-10-10)
+## Plan (k8s only; compose unchanged, as KI-057 did for Redis)
+- Server: a cert-manager Certificate per database (`<db>-tls`, its Service names); Postgres started with `ssl=on`, the certificate files, and an `hba_file` that accepts only `hostssl` (scram) for TCP; a `cert-reload` sidecar that runs `pg_reload_conf()` when the certificate changes (Postgres re-reads its SSL files on reload).
+- Clients: `SPRING_DATASOURCE_HIKARI_DATASOURCEPROPERTIES_SSLMODE=verify-full` and `..._SSLROOTCERT=/etc/ecomdemo-tls/ca.crt` in the 6 ConfigMaps (each pod already mounts the CA there); Flyway uses the same DataSource.
+
+## Checklist
+- [ ] Regression tests: manifest test (fails first) and a real Postgres TLS check (plain refused, verify-full with the CA accepted, a wrong host name refused)
+- [ ] 6 Certificates, 6 StatefulSets (TLS, hba, sidecar), 6 ConfigMaps
+- [ ] `scripts/smoke-test.sh` (k8s only): a plain-text client is refused by each database; certificate count
+- [ ] Docs: KNOWN_ISSUES, README TLS, security.md, decisions [Fix KI-058]
+- [ ] `./mvnw -B clean verify`; PR; CI green
 
 ## Next action
-STOP: wait for the owner's local `scripts/k8s-smoke.sh` (expect `PASS: the edge certificate is valid for shop.localhost (KI-060)`) and `approved, merge it`. Confirm CI green on PR #86 first.
-After the merge: merge verification, tag `ki-060-fixed`. Then the owner asked for web KI-034 next (in EcomDemo-Web, which needs its backend pin moved to the merge commit).
-Results: `EdgeCertificateConfigTest` failed first (89bc99d), passes; `./mvnw -B clean verify` 755 tests, 0 failures.
+Write the manifest regression test, see it fail, then the server side.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
