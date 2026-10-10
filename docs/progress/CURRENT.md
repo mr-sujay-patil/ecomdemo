@@ -5,17 +5,18 @@
 - **Updated:** 2026-10-10
 - **Fix:** KI-055, the smoke test's rate-limit burst check counts only 200 as "served"
 - **Branch:** fix/ki-055-burst-counts-admitted (cut from `main` at `bf0c109`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** NO. Chosen by the assistant after the user said "continue" (offered earlier as the default). Tags `ki-059-fixed`, `phase-35-complete` and older ones are for the user to push (403 here).
 
 ## Root cause (evidence: burst lines of `smoke.yml` runs 2 to 7)
 Admitted requests (not 429) are 100 to 150 every run; the non-200 part of them is `503` from the catalog route's circuit-breaker fallback (2 s timeout) on a cold runner, 0 to 39 per run. Run 1 failed when too many admitted requests were 503s. The limiter never banned.
 
 ## Checklist
-- [ ] Regression test `scripts/test-smoke-burst.sh` (fails first): the 6 real distributions pass, a run-1-like cold burst passes, a real ban fails, no 429 fails
-- [ ] `scripts/smoke-burst.sh`: the verdict, sourced by `smoke-test.sh`; the check counts admitted requests and names the 503s
-- [ ] KI-062 recorded (the 503s themselves; Needs check), not fixed here
-- [ ] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-055]; PR
+- [x] Regression test `scripts/test-smoke-burst.sh` (fails first): the 6 real distributions pass, a run-1-like cold burst passes, a real ban fails, no 429 fails
+- [x] `scripts/smoke-burst.sh`: the verdict, sourced by `smoke-test.sh`; the check counts admitted requests and names the 503s
+- [x] KI-062 recorded (the 503s themselves; Needs check), not fixed here
+- [x] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-055]
+- [ ] `./mvnw -B clean verify`; PR; CI green
 
 ## Next action
 Write `scripts/test-smoke-burst.sh` against the current logic, see it fail on a cold-burst distribution, then the helper.
