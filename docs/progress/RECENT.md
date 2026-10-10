@@ -12,6 +12,31 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
+## Phase 36: Redis Client Certificates (tag: phase-36-complete, PR #91)
+**What exists now:** in k8s, Redis requires a client certificate from the cluster CA AND the password
+(`--tls-auth-clients yes`, `requirepass` kept). Clients: app (CN ecomdemo), catalog-service (catalog) reuse their
+Phase 35 `<service>-client-tls`; new `gateway-service-client-tls` (gateway), `assistant-service-client-tls`
+(assistant), same kind (RSA PKCS#8, client auth), mounted `/etc/ecomdemo-client-tls` (0440, `fsGroup: 1001`).
+`cache-tls` now lists `server auth` + `client auth`: the probe, `cert-reload` and smoke `redis-cli` present it.
+**Key code:** `common` `com.ecomdemo.redis.RedisClientCertificateAutoConfiguration` (auto-configuration in
+`META-INF/spring/...AutoConfiguration.imports`; active with `spring.data.redis.ssl.bundle` + Lettuce) and
+`CurrentBundleManagers` (key/trust manager factories that ask the registry per call). `common` has the Redis
+starter as `optional`.
+**Config & infrastructure:** clients: `SPRING_DATA_REDIS_SSL_BUNDLE=redis`, `SPRING_SSL_BUNDLE_PEM_REDIS_{KEYSTORE_CERTIFICATE,
+KEYSTORE_PRIVATEKEY,TRUSTSTORE_CERTIFICATE,RELOAD_ON_UPDATE}` (Redis trusts the CA through the bundle now, not the
+JVM truststore). 25 certificates. Existing cluster: `k8s-up.sh` then `kubectl -n ecomdemo rollout restart deploy`
+(app and catalog change only in ConfigMaps). Compose unchanged.
+**Tests:** `RedisClientAuthConfigTest` (15), `RedisClientAuthIT` (8: cert+password, no cert, other CA, no
+password, renewal, Boot alone keeps the old certificate, probe + `server auth`-only refused, sidecar reload),
+`RedisClientCertificateAutoConfigurationTest` (5, common). Smoke (k8s): no-cert and foreign-CA refusals (with
+Redis's log reason), each of the 4 client certificates PONG, 25 certificates.
+**Gotchas:** Boot 4.1 hands Lettuce the bundle's KeyManagerFactory once (no reload); Lettuce builds an SSL
+engine per connection, so per-call managers fix it; an open connection keeps its TLS session. Redis refuses
+a `server auth`-only client certificate. A new Redis client needs a client certificate, the `redis` bundle
+settings and the mount (`RedisClientAuthConfigTest` finds clients by `SPRING_DATA_REDIS_HOST`).
+**Follow-ups (not done):** per-service Redis ACL users (KI-065; Redis 8.10 has `tls-auth-clients-user`);
+the smoke test's host `redis-cli` path on k8s (KI-064).
+
 ## Phase 35: Client Authentication (tag: phase-35-complete, PR #89)
 **What exists now:** in k8s, PostgreSQL and Kafka authenticate clients by certificate; Kafka authorizes per service.
 Six client certs `<service>-client-tls` (cert-manager, `client auth`, RSA PKCS#8, CN = DB user: ecomdemo, catalog,
@@ -32,24 +57,3 @@ TopicAuthorization/GroupAuthorization in k8s only; compose has no ACLs). In Boot
 has NO SSL bundle: build Kafka clients from Boot's factories. pgjdbc: PEM keys only PKCS#8, RSA unless `pemKeyAlgorithm`
 (not settable via env), key file must not be world-readable. `map=` is not allowed with scram in pg_hba.
 **Follow-ups (not done):** Redis client certificates; KafkaAdmin keeps the start-up certificate; ACLs in compose.
-
-## Phase 34: Product Images (tag: phase-34-complete, PR #59)
-**What exists now:** `ProductResponse.imageUrl` (nullable, additive; also in search hits via `ProductSearchHit.product`)
-is the gateway-relative path `/api/products/{id}/image`. The endpoint is public through the gateway, with
-ETag/304, `Cache-Control: public, max-age=86400`, nosniff, CORP cross-origin, a CSP on SVG. Seed-only: 8 of
-the 10 seeded products have an SVG, products 9 and 10 have none; products created via the API have none.
-**Key code:** catalog-service `Product.imageFile` (V5 `image_file`, no setter), `dto.ProductResponse.imageUrl`,
-`ProductImageService` (plain-name + extension allow-list, classpath `product-images/`, SHA-256 ETag, cached),
-`ProductImage` record, `internal.ProductImageController` (`WebRequest.checkNotModified`).
-**Config & infrastructure:** none new. Images: `catalog-service/src/main/resources/product-images/`, written
-by `scripts/generate-product-images.py`. No gateway or security-rule change: `GET /api/products/**` was already public.
-**Tests:** 724 (542 unit, 182 IT). New: `ProductResponseTest`, `ProductImageServiceTest`, `ProductImageFilesTest`
-(type, 256 KiB cap, inert SVG, V5 names only shipped files), `ProductImageControllerTest`; image tests in
-`ProductApiIT` and `EdgeSecurityIT`. Smoke section "Product images" (12 checks): compose cold 480/0/0, kept volumes
-482/0/0, kind 436/0/7.
-**Gotchas:** catalog-service is internal: its image path needs a token, anonymous access is the gateway's
-(tests say so). A new image file needs a V-migration naming it AND the extension on the allow-list. `ProductResponse`
-is cached in Redis (product 10 min, list 2 min): after deploying onto a warm Redis, entries written before
-this phase read `imageUrl` as null until they expire. Self-heals; a cold stack (`down -v`) never sees it.
-**Follow-ups (not done):** admin upload of images (storage, size and content validation, cleanup); thumbnails or
-`srcset` variants if raster images arrive; a versioned URL so caching could be `immutable`.

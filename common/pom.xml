@@ -98,6 +98,18 @@
 		</dependency>
 
 		<!--
+			RedisClientCertificateAutoConfiguration (Phase 36) customizes Lettuce. OPTIONAL, which the note
+			above does not contradict: that class is an AUTO-CONFIGURATION whose @ConditionalOnClass is read
+			from the class file before the class is loaded, never a component-scanned one, so the services
+			without Redis neither get the starter nor load a Lettuce type. The four that use Redis declare
+			the starter themselves, as they did before.
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+			<optional>true</optional>
+		</dependency>
+		<!--
 			The Modulith annotations. These packages still carry @ApplicationModule declaring what
 			they may depend on - nothing, in all three cases - and an annotation on a package needs
 			the annotation on the compile classpath even when nothing reads it here.

@@ -17,9 +17,9 @@ top to bottom direction
 
 System_Boundary("EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
   Container_Boundary("EcomdemoApplication.EcomdemoApplication_boundary", "EcomdemoApplication", $tags="") {
+    Component(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "JWT and token handling", $techn="Module", $descr="", $tags="", $link="")
     Component(EcomdemoApplication.EcomdemoApplication.Serviceclients, "Service clients", $techn="Module", $descr="", $tags="", $link="")
     Component(EcomdemoApplication.EcomdemoApplication.Sharedkernel, "Shared kernel", $techn="Module", $descr="", $tags="", $link="")
-    Component(EcomdemoApplication.EcomdemoApplication.JWTandtokenhandling, "JWT and token handling", $techn="Module", $descr="", $tags="", $link="")
   }
 
 }

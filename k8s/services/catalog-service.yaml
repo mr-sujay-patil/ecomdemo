@@ -36,7 +36,16 @@ data:
   INVENTORY_BASE_URL: "https://inventory-service:8082"
   SPRING_DATA_REDIS_HOST: "cache"
   SPRING_DATA_REDIS_PORT: "6379"
-  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only; the JVM trusts the cluster CA (trust-ca)
+  SPRING_DATA_REDIS_SSL_ENABLED: "true"   # KI-057: Redis is TLS-only
+  # Phase 36: Redis also requires a client certificate (and still the password). The client presents the same client certificate as to PostgreSQL and Kafka
+  # through the SSL bundle `redis`, which also trusts the cluster CA. The bundle reloads when cert-manager
+  # renews the certificate, and com.ecomdemo.redis (in common) makes Lettuce use the current one on its next
+  # connection: Boot alone would keep the certificate of start-up.
+  SPRING_DATA_REDIS_SSL_BUNDLE: "redis"
+  SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_CERTIFICATE: "file:/etc/ecomdemo-client-tls/tls.crt"
+  SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_PRIVATEKEY: "file:/etc/ecomdemo-client-tls/tls.key"
+  SPRING_SSL_BUNDLE_PEM_REDIS_TRUSTSTORE_CERTIFICATE: "file:/etc/ecomdemo-client-tls/ca.crt"
+  SPRING_SSL_BUNDLE_PEM_REDIS_RELOAD_ON_UPDATE: "true"
   SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
   # KI-059: the broker's listener is SSL; the client checks its certificate and name ("kafka") against the
   # cluster CA. Kafka's own name check (ssl.endpoint.identification.algorithm=https) stays on.

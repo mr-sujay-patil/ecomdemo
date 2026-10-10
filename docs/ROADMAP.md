@@ -105,4 +105,5 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 32 | [Saga Timeouts and Reconciliation](phases/phase-32-saga-timeouts.md) | Scheduled reconciliation + Kafka dead-letter handling | `feature/phase-32-saga-timeouts` | ✅ |
 | 33 | [Authentication Hardening](phases/phase-33-auth-hardening.md) | Asymmetric JWT + JWKS + login throttling | `feature/phase-33-auth-hardening` | ✅ |
 | 34 | [Product Images](phases/phase-34-product-images.md) | Static assets over HTTP: content types, ETag, Cache-Control | `feature/phase-34-product-images` | ✅ |
-| 35 | [Client Authentication](phases/phase-35-client-authentication.md) | mTLS for Kafka and PostgreSQL + Kafka ACLs | `feature/phase-35-client-authentication` | 🔵 |
+| 35 | [Client Authentication](phases/phase-35-client-authentication.md) | mTLS for Kafka and PostgreSQL + Kafka ACLs | `feature/phase-35-client-authentication` | ✅ |
+| 36 | [Redis Client Certificates](phases/phase-36-redis-client-certificates.md) | mTLS for Redis (Lettuce + Spring SSL bundles) | `feature/phase-36-redis-client-certificates` | 🔵 |
