@@ -38,6 +38,17 @@ spec:
       containers:
         - name: postgres
           image: postgres:18-alpine
+          # KI-058: TLS only. Postgres refuses a private key it does not own (or one others can read), and a
+          # Secret's files belong to root, so the certificate is first copied, as postgres and 0600, into a
+          # pod-private volume; then the image's own entrypoint starts the server with TLS on, those files,
+          # and pg_hba.conf from the `postgres-hba` ConfigMap (TCP only as `hostssl`). `cert-reload` below
+          # repeats the copy when cert-manager renews the certificate.
+          command: ["sh", "-c"]
+          args:
+            - |
+              install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key
+              install -o postgres -g postgres -m 0644 /etc/ecomdemo-tls/tls.crt /etc/postgres-tls/tls.crt
+              exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/etc/postgres-tls/tls.crt -c ssl_key_file=/etc/postgres-tls/tls.key -c hba_file=/etc/postgresql-hba/pg_hba.conf
           env:
             - name: POSTGRES_DB
               value: notification
@@ -71,6 +82,60 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: server-tls, mountPath: /etc/postgres-tls }
+            - { name: hba, mountPath: /etc/postgresql-hba, readOnly: true }
+            - { name: socket, mountPath: /var/run/postgresql }
+        # KI-058: Postgres reads its certificate at start and on a configuration reload, so a renewal by
+        # cert-manager (day 60 of 90) would sit unused until the old certificate expired. This checks the
+        # mounted certificate every 30 s; when it changes, it copies it as above and asks the server to
+        # reload (`pg_reload_conf()`, through the pod's own socket): no restart, no dropped connection.
+        - name: cert-reload
+          image: postgres:18-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              cert=/etc/ecomdemo-tls/tls.crt
+              last="$(sha256sum "$cert" | cut -d' ' -f1)"
+              while true; do
+                sleep "${RELOAD_INTERVAL:-30}"
+                now="$(sha256sum "$cert" | cut -d' ' -f1)"
+                if [ "$now" != "$last" ]; then
+                  if install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key \
+                    && install -o postgres -g postgres -m 0644 "$cert" /etc/postgres-tls/tls.crt \
+                    && psql -h /var/run/postgresql -U notification -d notification -Atc 'select pg_reload_conf()' | grep -q t; then
+                    echo "reloaded the PostgreSQL certificate"; last="$now"
+                  else
+                    echo "could not reload the PostgreSQL certificate; retrying"
+                  fi
+                fi
+              done
+          volumeMounts:
+            - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: server-tls, mountPath: /etc/postgres-tls }
+            - { name: socket, mountPath: /var/run/postgresql }
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              memory: 32Mi
+      volumes:
+        - name: tls
+          secret:
+            secretName: notification-db-tls
+        # The copies postgres may own (see the start command); in memory, never on the volume.
+        - name: server-tls
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: hba
+          configMap:
+            name: postgres-hba
+        # The server's Unix socket, shared with cert-reload.
+        - name: socket
+          emptyDir:
+            sizeLimit: 1Mi
   volumeClaimTemplates:
     - metadata:
         name: data
