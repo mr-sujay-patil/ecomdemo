@@ -5,17 +5,18 @@
 - **Updated:** 2026-10-10
 - **Fix:** KI-064 and KI-066, the smoke test's `redis_cli`/`redis_cli_noauth`/`psql_query` use a host client on k8s (wrong Redis/database) and require `docker` for the in-pod path
 - **Branch:** fix/ki-064-066-in-pod-clients (cut from `main` at `a4dbee7`); grouped per workflow rule 11 (same cause, same code)
-- **Step:** TESTING
-- **Waiting for user:** NO. Chosen after the user said "continue" (next open backend defect). Tags (`phase-36-complete` and earlier) are the user's to push (403 here).
+- **Step:** PR_OPEN (PR #92, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #92, then `approved, merge it`. Chosen after the user said "continue" (next open backend defect). Tags (`phase-36-complete` and earlier) are the user's to push (403 here).
 
 ## Checklist
 - [x] Regression test `scripts/test-smoke-clients.sh` with fake `redis-cli`/`psql`/`kubectl` (fails first): on k8s the in-pod path is used even with host clients present; on compose a host client is still preferred
 - [x] `scripts/smoke-clients.sh` (sourced, like `smoke-burst.sh`): the three helpers; `k8s-smoke.sh` copies it
 - [x] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-064, KI-066]
-- [ ] `./mvnw -B clean verify`; PR (label `run-smoke`); CI green
+- [x] `./mvnw -B clean verify` (874 tests); PR #92
+- [ ] CI green on PR #92, including the compose smoke test
 
 ## Next action
-Extract the three helpers unchanged into `scripts/smoke-clients.sh`, write the fake-binary test, see it fail on k8s, then fix.
+Wait for CI on PR #92 (with `run-smoke`); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-064-fixed` and `ki-066-fixed`. Open from the review: KI-067 (other docker gates in smoke-test.sh), KI-068's CI wiring.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
