@@ -4256,11 +4256,20 @@ check "cert-manager has the certificate Ready" "True" \
 # CA, and trusts that CA when it calls another service. Server-side TLS only: a caller is still identified
 # by its JWT service token, not a client certificate. That the JVMs verify each other is proven by this whole
 # run working: the gateway, the saga and the token endpoint all cross these hops.
-check "cert-manager has all 10 certificates Ready (the Ingress, the 8 services and Redis)" "10" \
+check "cert-manager has all 16 certificates Ready (the Ingress, the 8 services, Redis and the 6 databases)" "16" \
     "$(kube get certificates -o json | python3 -c "
 import json, sys
 print(sum(1 for c in json.load(sys.stdin)['items']
           if any(x['type'] == 'Ready' and x['status'] == 'True' for x in c['status'].get('conditions', []))))")"
+# KI-058: every database is TLS-only. From inside its own pod (with the password): a plain-text TCP client
+# is refused by pg_hba.conf ("no encryption"), and a client that verifies the certificate and the Service
+# name against the cluster CA gets a TLS session. That the six services verify too is proven by this run.
+for database in db catalog-db customer-db inventory-db notification-db payment-db; do
+    check "$database refuses a plain-text client" "True" \
+        "$(kube exec "statefulset/$database" -c postgres -- sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql "host=127.0.0.1 sslmode=disable user=$POSTGRES_USER dbname=$POSTGRES_DB" -Atc "select 1" 2>&1' | grep -q 'no encryption' && echo True || echo False)"
+    check "$database: verify-full against the cluster CA, as its Service name, is TLS" "t" \
+        "$(kube exec "statefulset/$database" -c postgres -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql \"host=$database sslmode=verify-full sslrootcert=/etc/ecomdemo-tls/ca.crt user=\$POSTGRES_USER dbname=\$POSTGRES_DB\" -Atc 'select ssl from pg_stat_ssl where pid = pg_backend_pid()'" 2>&1 | tr -d '\r ')"
+done
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
     "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"
 check "payment-service too" "0" \
