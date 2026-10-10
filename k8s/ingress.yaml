@@ -15,6 +15,9 @@
 # local CA in platform/ca.yaml). Traffic from Traefik to the gateway and everything behind it stays
 # plain HTTP on the cluster network: this protects the leg that crosses the network a client uses,
 # not the pod-to-pod hops.
+#
+# KI-060: `shop.localhost` is listed too. That host's rule is the frontend team's Ingress, not this one;
+# the certificate names it (tls-certificate.yaml) so their shop is HTTPS on the same port.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -24,7 +27,7 @@ metadata:
 spec:
   ingressClassName: traefik
   tls:
-    - hosts: [localhost]
+    - hosts: [localhost, shop.localhost]
       secretName: ecomdemo-tls
   rules:
     - http:
