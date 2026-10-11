@@ -188,8 +188,8 @@
     {
       "id": 5,
       "type": "logs",
-      "title": "Infrastructure log (PostgreSQL, Redis, Prometheus, Grafana)",
-      "description": "The rest of the stack, shipped by the second pipeline in docker/alloy/config.alloy. Plain text, no parsing, no correlation - it is here because the explanation for an application error is sometimes a line PostgreSQL wrote a second earlier, and having to go and find it in `docker logs` is exactly the friction centralized logging removes.",
+      "title": "Infrastructure log (the databases, Redis, Prometheus, Grafana: every stream without a level)",
+      "description": "The rest of the stack, shipped by the second pipeline in docker/alloy/config.alloy: every PostgreSQL (the monolith's and each extracted service's), Redis, Prometheus and Grafana. Selected as the streams WITHOUT a level label - only the JSON pipeline sets one - rather than by a list of names, so a container Alloy starts shipping appears here with no edit to this file (KI-071: the list here still named only db after the database split). Plain text, no parsing, no correlation - it is here because the explanation for an application error is sometimes a line PostgreSQL wrote a second earlier, and having to go and find it in `docker logs` is exactly the friction centralized logging removes.",
       "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
       "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
       "options": {
@@ -206,7 +206,7 @@
         {
           "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
           "editorMode": "code",
-          "expr": "{service_name=~\"db|cache|prometheus|grafana\"}",
+          "expr": "{service_name=~\".+\", level=\"\"}",
           "queryType": "range",
           "refId": "A"
         }
