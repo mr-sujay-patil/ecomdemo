@@ -1417,9 +1417,13 @@ section "Caching"
 
 if redis_cli PING >/dev/null 2>&1; then
     # KI-050: the cache is not open to a client without the password. Before, anything that could
-    # reach the port could read the cached catalogue, flush it, or plant entries.
-    check "Redis refuses a client that has no password" "True" \
-        "$(case "$(redis_cli_noauth PING || true)" in *NOAUTH* | *"Authentication required"*) echo True ;; *) echo False ;; esac)"
+    # reach the port could read the cached catalogue, flush it, or plant entries. Compose only since Phase 37:
+    # on the cluster there is no password, the client certificate names the Redis user (the pod's own is the
+    # admin), and the refusal of a client with no Redis identity is checked in the Phase 37 block below.
+    if [ "$SMOKE_PLATFORM" != "k8s" ]; then
+        check "Redis refuses a client that has no password" "True" \
+            "$(case "$(redis_cli_noauth PING || true)" in *NOAUTH* | *"Authentication required"*) echo True ;; *) echo False ;; esac)"
+    fi
     check "and answers one that has it" "PONG" "$(redis_cli PING | tr -d '\r ')"
     # KI-057: on the cluster Redis serves TLS only; the plain port is closed. A plain-text client (here with the
     # password, from inside the pod) must not get PONG: before, it did, and so did anything on the network.
@@ -4317,8 +4321,8 @@ for database in db catalog-db customer-db inventory-db notification-db payment-d
     check "$database: its service's connections present the client certificate /CN=$database_user" "/CN=$database_user" \
         "$(kube exec "statefulset/$database" -c postgres -- sh -c 'psql -h /var/run/postgresql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select distinct client_dn from pg_stat_ssl where client_dn is not null"' 2>&1 | tr -d '\r ')"
 done
-# Phase 36: Redis authenticates the CLIENT too, by certificate, and still asks for the password (the pod's
-# REDISCLI_AUTH supplies it to every redis-cli here, so only the certificate differs). From inside the Redis pod:
+# Phase 36: Redis authenticates the CLIENT too, by certificate (since Phase 37 the certificate alone: it names the
+# ACL user, and there is no password). From inside the Redis pod:
 # a TLS client that verifies the server but has no certificate is refused in the handshake, and so is one with a
 # certificate from another CA (made here with openssl, deleted after); Redis's log names the reason each time.
 # Then each of the four Redis clients' own certificates (copied from its Secret into the pod, never printed,
@@ -4343,15 +4347,43 @@ check "Redis refuses a client certificate from another CA" "True" \
 rm -f "$REDIS_FOREIGN/ca.key" "$REDIS_FOREIGN/ca.crt" "$REDIS_FOREIGN/client.key" "$REDIS_FOREIGN/client.csr" \
     "$REDIS_FOREIGN/client.ext" "$REDIS_FOREIGN/client.crt"
 rmdir "$REDIS_FOREIGN"
-for redis_client in app catalog-service gateway-service assistant-service; do
-    check "$redis_client's client certificate, with the password, gets PONG from Redis" "PONG" \
-        "$(kube get secret "$redis_client-client-tls" -o json | python3 -c '
+# Phase 37: the client certificate NAMES the Redis user, and the user decides what the connection may do
+# (k8s/data/cache-acl.yaml). Each Redis client's own certificate (copied from its Secret into the pod, never
+# printed, deleted after) gets PONG with no password, may read a key of its own service, and is refused another
+# service's key (NOPERM); catalog's is refused FLUSHALL. A real cluster certificate whose CN is not a Redis user
+# (customer-service's) passes TLS and is then refused every command: `default` is off.
+redis_as() { # redis_as <secret> <redis-cli args...> -> stdout and stderr of redis-cli with that client certificate
+    local secret="$1"; shift
+    kube get secret "$secret" -o json | python3 -c '
 import base64, json, sys
 data = json.load(sys.stdin)["data"]
 sys.stdout.write(base64.b64decode(data["tls.key"]).decode() + base64.b64decode(data["tls.crt"]).decode())' \
-            | ctr_exec -i "$REDIS_CONTAINER" sh -c 'umask 077 && cat > /tmp/smoke-client.pem && redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /tmp/smoke-client.pem --key /tmp/smoke-client.pem ping 2>&1; rm -f /tmp/smoke-client.pem' \
-            | tr -d '\r ')"
+        | ctr_exec -i "$REDIS_CONTAINER" sh -c 'umask 077 && cat > /tmp/smoke-client.pem && redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /tmp/smoke-client.pem --key /tmp/smoke-client.pem "$@" 2>&1; rm -f /tmp/smoke-client.pem' sh "$@" \
+        | tr -d '\r'
+}
+for redis_client in app catalog-service gateway-service assistant-service; do
+    # A read command the user has, on a key of its own service and on one of another service's: the refusal must
+    # be about the KEY ("No permissions to access a key"), not the command. app has no key and no read command.
+    case "$redis_client" in
+        app) read_cmd="GET"; own_key=""; foreign_key="product::1"; refusal="NOPERM" ;;
+        catalog-service) read_cmd="GET"; own_key="product::1"; foreign_key="assistant:memory:smoke"; refusal="access a key" ;;
+        gateway-service) read_cmd="GET"; own_key="request_rate_limiter.{smoke}.tokens"; foreign_key="product::1"; refusal="access a key" ;;
+        assistant-service) read_cmd="LRANGE"; own_key="assistant:memory:smoke"; foreign_key="product::1"; refusal="access a key" ;;
+    esac
+    read_args=""; [ "$read_cmd" = "LRANGE" ] && read_args="0 0"
+    check "$redis_client's client certificate, with no password, gets PONG from Redis" "PONG" \
+        "$(redis_as "$redis_client-client-tls" PING | tr -d ' ')"
+    if [ -n "$own_key" ]; then
+        check "$redis_client's Redis user may read its own key ($own_key)" "True" \
+            "$(redis_as "$redis_client-client-tls" $read_cmd "$own_key" $read_args | grep -qE "NOPERM|NOAUTH|ERR|rror" && echo False || echo True)"
+    fi
+    check "$redis_client's Redis user is refused another service's key (NOPERM)" "True" \
+        "$(redis_as "$redis_client-client-tls" $read_cmd "$foreign_key" $read_args | grep -q "$refusal" && echo True || echo False)"
 done
+check "catalog-service's Redis user is refused FLUSHALL" "True" \
+    "$(redis_as catalog-service-client-tls FLUSHALL | grep -q "NOPERM User catalog" && echo True || echo False)"
+check "a cluster certificate whose CN is not a Redis user gets NOAUTH (customer-service's)" "True" \
+    "$(redis_as customer-service-client-tls PING | grep -q NOAUTH && echo True || echo False)"
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
     "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"
 check "payment-service too" "0" \

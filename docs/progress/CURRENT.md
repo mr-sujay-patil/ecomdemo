@@ -13,13 +13,13 @@
 - [x] Design: every Redis use per service from the code; the ACL per user; `default` off; identity from the CN (`tls-auth-clients-user CN`); the password decision; ops user; where the ACL lives. `[Phase 37]` decisions
 - [x] Tests first (red, `55cf65a`): `RedisAclConfigTest` (manifests), `RedisAclIT` (real image, TLS, the manifest's ACL), gateway `RateLimitAclIT` (real limiter under its ACL user)
 - [x] Implement: `k8s/data/cache-acl.yaml` (ConfigMap), `cache.yaml` (`--aclfile`, `--tls-auth-clients-user CN`, no `requirepass`, ACL reload in the sidecar), `cache-tls` CN, `k8s-up.sh` (no Redis password; removes the old key), Phase 36 tests updated to the new identity model
-- [ ] Smoke test (k8s): per-client own key OK / other key NOPERM / FLUSHALL refused / unknown CN NOAUTH; validated against a container with a `kube` shim
+- [x] Smoke test (k8s): per-client own key OK / other key NOPERM / FLUSHALL refused / unknown CN NOAUTH; validated against a container with a `kube` shim
 - [ ] `./mvnw -B clean verify` (full, background); `scripts/test-smoke-*.sh`
 - [ ] Docs: decisions, KNOWN_ISSUES (KI-065 fixed; new defects as rows), security.md, README, test report `docs/test-reports/phase-37.md`, RECENT (Phase 37 summary; Phase 35 to archive), tracker 🔵
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
 ## Next action
-Smoke test (k8s): replace the Phase 36 "certificate with the password gets PONG" loop with per-client user checks (own key OK, other service's key NOPERM, FLUSHALL refused, customer's CN NOAUTH); gate the Caching section's no-password check to compose. Then `RedisAclConfigTest.smokeTestChecksTheUsers` goes green. Then decisions/docs, full verify.
+Docs: `[Phase 37]` decisions, KNOWN_ISSUES (KI-065 fixed; new KIs: app keeps an unused Redis connection, catalog clears with KEYS), security.md, README, test report, RECENT; then full `./mvnw -B clean verify` in the background.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
