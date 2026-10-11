@@ -1851,6 +1851,12 @@ string is where an API key ends up when a client takes a shortcut. Logs are repl
 after the data they describe is deleted, and readable by people who have no business reading
 customer data.
 
+The gateway writes the same line under the same rule, `RequestLogWebFilter` (KI-035), with the
+correlation id in its JSON. That matters most for a response the gateway answers itself (a 401, a
+429, the catalogue fallback's 503 when catalog-service is down): no service saw the request, so the
+gateway's line is the only one, and its server span carries the id as `correlation_id`
+(Tempo: `{ span.correlation_id = "my-investigation-001" }`).
+
 This is asserted rather than asserted-about: unit tests send a token, a password and an `api_key`
 and require them absent, and the smoke test searches the **live Loki** for the very credentials it
 has been using during the run.
@@ -1918,6 +1924,8 @@ The phase's acceptance criterion, three ways:
 curl -sG http://localhost:3100/loki/api/v1/query_range \
   --data-urlencode 'query={service_name="app"} | correlation_id = `my-investigation-001`' \
   --data-urlencode 'since=15m'
+#    The application's lines only; `{service_name=~".+"}` is every service, the gateway included
+#    (KI-035), which is what Explore's "All logs for this request" link asks for.
 
 # 2. Grafana -> the "EcomDemo Logs" dashboard (http://localhost:3000, admin/admin)
 #    Paste the ID into the "Correlation ID" textbox at the top.

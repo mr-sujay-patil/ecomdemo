@@ -29,12 +29,19 @@ datasources:
       # rather than a hand-typed LogQL expression. `datasourceUid` points the generated query back
       # at Loki itself; pointing it at a tracing datasource instead is how the same mechanism
       # becomes logs-to-traces - the second field below (Phase 23).
+      #
+      # EVERY service, not only the application (KI-035). The query used to be
+      # {service_name="app"}, from Phase 16 when the application was the only one; since the split
+      # a request's lines are in the gateway and in whichever services it reached. `=~".+"` is
+      # "any stream" (Loki wants at least one non-empty matcher), and the correlation_id filter is
+      # what narrows it to this request. It matters most for a response the gateway answered
+      # itself (a 401, a 429, the catalogue fallback): the gateway's line is the only one there is.
       derivedFields:
         - name: correlation_id
           matcherType: regex
           matcherRegex: '"correlation_id"\s*:\s*"([A-Za-z0-9_-]{8,64})"'
           datasourceUid: ecomdemo-loki
-          url: '{service_name="app"} | correlation_id = `${__value.raw}`'
+          url: '{service_name=~".+"} | correlation_id = `${__value.raw}`'
           urlDisplayLabel: 'All logs for this request'
         # LOGS TO TRACES (Phase 23). Micrometer Tracing puts the trace ID into the MDC and the
         # ECS JSON writes it as `traceId`: always 32 lower-case hex characters, the W3C format.

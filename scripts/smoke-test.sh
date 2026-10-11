@@ -2153,6 +2153,20 @@ print('app' in json.load(sys.stdin).get('data', []))" 2>/dev/null)"
         "$([ "$(loki_count "{service_name=\"app\"} |= \`@timestamp\`")" -gt 0 ] \
             && echo True || echo False)"
 
+    # KI-035: the gateway writes a line per request too, under the same correlation id, so the two
+    # requests above are found at the edge as well as in the application. Before KI-035 the
+    # gateway logged nothing per request, and an id shown on a response the gateway answered
+    # itself (a 401, a 429, the catalogue fallback) led nowhere. Its own wait loop: the gateway's
+    # lines travel through Alloy in their own stream and can arrive in a later batch.
+    GATEWAY_LINES_FOR_ID=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        GATEWAY_LINES_FOR_ID="$(loki_count "{service_name=\"gateway-service\"} | correlation_id = \`$SMOKE_CORRELATION_ID\`")"
+        [ "$GATEWAY_LINES_FOR_ID" -ge 2 ] && break
+        sleep 1
+    done
+    check "the gateway logs both requests under the same correlation ID (KI-035)" "True" \
+        "$([ "$GATEWAY_LINES_FOR_ID" -ge 2 ] && echo True || echo False)"
+
     # OVER AN EXPLICIT 24-HOUR WINDOW, and that is the whole subtlety. Loki's label endpoints
     # answer for a default window of the recent past, and PostgreSQL and Redis say almost nothing
     # once they are up - so a stack that has been running quietly for a few hours has no db or
@@ -2207,6 +2221,17 @@ print(1 if d.get('data', {}).get('result') else 0)" 2>/dev/null || echo 0)"
 
     check "and no Authorization header is logged either" 0 \
         "$(loki_count "{service_name=\"app\"} |= \`Bearer \`")"
+
+    # KI-035: the same four searches in the gateway's log. The login request (and its password)
+    # passes through the gateway, and every token arrives there first. Its request log describes a
+    # request and never quotes it, which these checks hold it to.
+    check "the gateway logs neither password (KI-035)" 0 \
+        "$(( $(loki_count "{service_name=\"gateway-service\"} |= \`$CUSTOMER_PASSWORD\`") \
+            + $(loki_count "{service_name=\"gateway-service\"} |= \`$ADMIN_PASSWORD\`") ))"
+
+    check "nor a bearer token, nor an Authorization header (KI-035)" 0 \
+        "$(( $(loki_count "{service_name=\"gateway-service\"} |= \`$TOKEN_SIGNATURE\`") \
+            + $(loki_count "{service_name=\"gateway-service\"} |= \`Bearer \`") ))"
 
     # --- Alloy ---------------------------------------------------------------------------------
     if curl -fsS "$ALLOY_URL/-/ready" >/dev/null 2>&1; then
@@ -3053,6 +3078,29 @@ check "and it fails FAST - two attempts and their backoff, under 2 s (took ${DOW
     "True" "$([ "$DOWN_ELAPSED_MS" -lt 2000 ] && echo True || echo False)"
 check "the body says what is wrong, in words a shopper can use" "True" \
     "$(jget "'catalogue' in d['message'] and d['status'] == 503")"
+
+# KI-035: the 503 the GATEWAY answers itself. A shopper browsing the catalogue now gets the route's
+# fallback (/fallback/catalog) without any service seeing the request, and is shown its
+# X-Correlation-Id. Support must find that id in Loki: before KI-035 only a service could log it,
+# and none had. One request is far below the gateway breaker's minimum of 5 calls, so the gateway's
+# own breaker stays closed for the sections after this one.
+as_anonymous
+EDGE_CORRELATION_ID="smoke-edge-$(date +%s)-$$"
+check "with catalog-service DOWN, the catalogue read is the gateway's own 503" "503" \
+    "$(curl -sS -o /dev/null -w '%{http_code}' -H "X-Correlation-Id: $EDGE_CORRELATION_ID" \
+        "$BASE_URL/api/products")"
+if [ "${LOKI_READY:-false}" = true ]; then
+    EDGE_LINES=0
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        EDGE_LINES="$(loki_count "{service_name=\"gateway-service\"} | correlation_id = \`$EDGE_CORRELATION_ID\` |= \`-> 503\`")"
+        [ "$EDGE_LINES" -ge 1 ] && break
+        sleep 1
+    done
+    check "and the gateway's line for it is in Loki, found by that ID alone (KI-035)" "1" "$EDGE_LINES"
+else
+    skip "the gateway's line for its own 503 in Loki" "no Loki at ${LOKI_URL:-?}"
+fi
+as_customer
 
 # Five failed calls with a 50% threshold open the breaker. Each add-to-cart above is two attempts,
 # so three more requests are enough whatever the count stood at.

@@ -93,9 +93,10 @@ class RequestLogFilterTest {
      * vivid example. It is still the most vivid example, so the body below is left as it was.
      *
      * <p><strong>What this test can no longer cover:</strong> the login request itself. It is handled by
-     * the gateway, which has no {@code RequestLogFilter} — that class is servlet code. Spring Cloud
-     * Gateway logs no request bodies by default, so nothing leaks today, but the protection at the edge
-     * is an absence rather than a decision. Recorded as a follow-up.
+     * the gateway, which cannot use this class (servlet code). Until KI-035 the gateway wrote no request
+     * log at all, so its "no bodies" was an absence rather than a decision. It now has its own,
+     * {@code RequestLogWebFilter}, under the same rule, and {@code GatewayRequestLogIT} asserts the
+     * login password, the bearer token and the query string stay out of it.
      */
     @Test
     @DisplayName("never logs the Authorization header or the request body")
