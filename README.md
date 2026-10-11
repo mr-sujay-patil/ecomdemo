@@ -1938,7 +1938,7 @@ curl -sG http://localhost:3100/loki/api/v1/query_range \
 ```
 
 The logs dashboard also carries lines per second by level and an error count (both for the
-services the "Service" selector picks), and a second panel for PostgreSQL and Redis — because the explanation for an application error is sometimes a line the
+services the "Service" selector picks), and a second panel for the rest of the stack (every service's PostgreSQL, Redis, Prometheus and Grafana: every stream without a `level` label, so a container Alloy starts shipping appears there with no dashboard edit, KI-071) — because the explanation for an application error is sometimes a line the
 database wrote a second earlier, and having to go and find that in `docker logs` is exactly the
 friction centralized logging removes.
 
