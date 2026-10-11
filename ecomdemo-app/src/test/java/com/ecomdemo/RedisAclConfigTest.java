@@ -153,7 +153,7 @@ class RedisAclConfigTest {
         assertThat(rules).contains("on", "+hello", "+ping", "+client|setinfo", "+info")
                 .doesNotContain("allkeys", "allchannels", "allcommands", "~*", "&*", "+flushall", "+flushdb",
                         "+config", "+acl", "+debug", "+shutdown", "+monitor", "+client", "+function", "+script",
-                        "+swapdb", "+move", "+copy", "+rename", "+unlink")
+                        "+swapdb", "+move", "+copy", "+rename")
                 .noneMatch(rule -> rule.startsWith("+@") || rule.startsWith("&"));
         // Only the gateway uses another database (1, application.yml); the others stay in database 0.
         assertThat(rules.contains("+select")).isEqualTo("gateway".equals(user));

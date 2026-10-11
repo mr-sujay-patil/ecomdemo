@@ -8,9 +8,9 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.ServerSocket;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,7 +22,9 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import org.springframework.web.reactive.function.client.WebClient;
 import org.testcontainers.containers.GenericContainer;
+import reactor.core.publisher.Flux;
 
 /**
  * The rate limiter still limits when the gateway is the Redis user {@code gateway} (Phase 37), not {@code default}.
@@ -66,6 +68,12 @@ class RateLimitAclIT {
         }
     }
 
+    /** What Redis refused, in the test output: the first thing to read when a test here fails. */
+    @AfterEach
+    void showRefusals() throws Exception {
+        System.out.println("Redis ACL LOG after the test:\n" + RedisAcl.refusals(redis));
+    }
+
     @AfterAll
     static void stop() {
         if (redis != null) {
@@ -84,16 +92,20 @@ class RateLimitAclIT {
     void theLimiterWorksUnderItsUser() throws Exception {
         RedisAcl.forgetRefusals(redis);
         String token = TestJwt.user("acl-burst-tester", 4243, "CUSTOMER");
-        List<Integer> statuses = new ArrayList<>();
-        for (int i = 0; i < BURST; i++) {
-            statuses.add(web.get().uri("/api/products").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
-                    .exchange().expectBody().returnResult().getStatus().value());
-        }
+        web.get().uri("/api/products").header(HttpHeaders.AUTHORIZATION, "Bearer " + token).exchange();
+        // Concurrently, after one warm-up request: the bucket refills at 50 a second, so a slow serial burst on a
+        // cold context can be served in full without ever touching the limit, and prove nothing.
+        WebClient client = WebClient.create("http://localhost:" + port);
+        List<Integer> statuses = Flux.range(0, BURST)
+                .flatMap(i -> client.get().uri("/api/products").header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                        .exchangeToMono(response -> response.releaseBody().thenReturn(response.statusCode().value())), 50)
+                .collectList().block(Duration.ofSeconds(60));
 
         assertThat(statuses).as("statuses seen: %s", statuses.stream().distinct().sorted().toList())
                 .contains(HttpStatus.TOO_MANY_REQUESTS.value());
-        assertThat(RedisAcl.cli(redis, RedisAcl.ADMIN, "-n", "1", "EXISTS",
-                "request_rate_limiter.{user:acl-burst-tester}.tokens")).isEqualTo("1");
+        // RedisRateLimiter's keys: `request_rate_limiter.{<route id>.<resolved key>}.tokens` and `.timestamp`.
+        assertThat(RedisAcl.cli(redis, RedisAcl.ADMIN, "-n", "1", "--scan", "--pattern",
+                "request_rate_limiter.{*user:acl-burst-tester}.tokens")).isNotBlank();
         assertThat(RedisAcl.refusals(redis)).as("Redis's ACL LOG").isEmpty();
     }
 

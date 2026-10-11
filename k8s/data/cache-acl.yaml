@@ -43,16 +43,16 @@ data:
     # cache moved to catalog-service in Phase 20c.
     user ecomdemo reset on +hello +ping +client|setinfo +info
     # catalog-service: the catalogue cache (CacheConfig, CacheNames). RedisCacheManager keys are `<cache>::<key>`:
-    # GET (@Cacheable), SET with a TTL (@Cacheable, @CachePut), DEL (@CacheEvict), and for a whole-cache clear
-    # (@CacheEvict(allEntries), ProductCacheEvictor) KEYS `productList::*` then DEL: RedisCacheWriter's default
-    # batch strategy is KEYS. Database 0 (no SELECT).
-    user catalog reset on ~product::* ~productList::* +hello +ping +client|setinfo +info +get +set +del +keys
+    # GET (@Cacheable), SET with a TTL (@Cacheable, @CachePut), UNLINK (@CacheEvict; Spring Data Redis 4 deletes
+    # with UNLINK, not DEL), and for a whole-cache clear (@CacheEvict(allEntries), ProductCacheEvictor) KEYS
+    # `productList::*` then UNLINK: RedisCacheWriter's default batch strategy is KEYS. Database 0 (no SELECT).
+    user catalog reset on ~product::* ~productList::* +hello +ping +client|setinfo +info +get +set +unlink +keys
     # gateway-service: the rate limiter (RequestRateLimiter, RedisRateLimiter) in DATABASE 1 (application.yml), so
     # SELECT. Its token bucket is a Lua script: EVALSHA, and EVAL when Redis does not have the script yet; inside
-    # it GET, SETEX and TIME, on `request_rate_limiter.{<key>}.tokens` and `.timestamp`. The limiter FAILS OPEN
+    # it GET, SETEX and TIME, on `request_rate_limiter.{<route>.<key>}.tokens` and `.timestamp`. The limiter FAILS OPEN
     # on an error, so a missing permission here would switch it off without a sound (RateLimitAclIT).
     user gateway reset on ~request_rate_limiter.* +hello +ping +client|setinfo +info +select +evalsha +eval +get +setex +time
-    # assistant-service: conversations (RedisChatMemoryRepository: SCAN, LRANGE, DEL, and MULTI/DEL/RPUSH/EXPIRE/
-    # EXEC to replace one; DISCARD if that fails half-way) and proposed cart additions (PendingActions: SET with
-    # a TTL, GETDEL).
-    user assistant reset on ~assistant:memory:* ~assistant:action:* +hello +ping +client|setinfo +info +scan +lrange +rpush +del +expire +multi +exec +discard +set +getdel
+    # assistant-service: conversations (RedisChatMemoryRepository: SCAN, LRANGE, DEL, and MULTI/DEL/RPUSH/PEXPIRE/
+    # EXEC to replace one, `expire(key, Duration)` being PEXPIRE; DISCARD for a transaction that fails half-way)
+    # and proposed cart additions (PendingActions: SET with a TTL, GETDEL).
+    user assistant reset on ~assistant:memory:* ~assistant:action:* +hello +ping +client|setinfo +info +scan +lrange +rpush +del +pexpire +multi +exec +discard +set +getdel

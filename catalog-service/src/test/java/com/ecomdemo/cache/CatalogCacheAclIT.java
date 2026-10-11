@@ -1,13 +1,16 @@
 package com.ecomdemo.cache;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
 import com.ecomdemo.support.RedisAcl;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -37,6 +40,12 @@ class CatalogCacheAclIT {
     @BeforeAll
     static void start() throws Exception {
         redis = RedisAcl.start();
+    }
+
+    /** What Redis refused, in the test output: the first thing to read when a test here fails. */
+    @AfterEach
+    void showRefusals() throws Exception {
+        System.out.println("Redis ACL LOG after the test:\n" + RedisAcl.refusals(redis));
     }
 
     @AfterAll
@@ -76,17 +85,25 @@ class CatalogCacheAclIT {
 
             products.evict(7L);
             listing.clear();
-            assertThat(RedisAcl.cli(redis, RedisAcl.ADMIN, "EXISTS", "product::7", "productList::p0:20",
-                    "productList::p1:20")).isEqualTo("0");
+            // Spring Data Redis 4 writes evictions and clears ASYNCHRONOUSLY (RedisCacheWriter#writeAsynchronously),
+            // so the keys go a moment later, and a refused DEL would never reach this thread as an exception.
+            gone("product::7", "productList::p0:20", "productList::p1:20");
 
             // The stock-changed path: the real evictor, one key and the whole listing.
             products.put(8L, product);
             listing.put("p0:20", new ProductPage(List.of(product), 1));
             new ProductCacheEvictor(caches).onStockChanged(new ProductCacheEvictor.ProductStockChanged(8L));
-            assertThat(RedisAcl.cli(redis, RedisAcl.ADMIN, "EXISTS", "product::8", "productList::p0:20")).isEqualTo("0");
+            gone("product::8", "productList::p0:20");
 
             assertThat(RedisAcl.refusals(redis)).as("Redis's ACL LOG").isEmpty();
         });
+    }
+
+    private static void gone(String... keys) {
+        List<String> command = new java.util.ArrayList<>(List.of("EXISTS"));
+        command.addAll(List.of(keys));
+        await().atMost(Duration.ofSeconds(10)).pollInterval(Duration.ofMillis(200)).untilAsserted(() ->
+                assertThat(RedisAcl.cli(redis, RedisAcl.ADMIN, command.toArray(String[]::new))).isEqualTo("0"));
     }
 
     @Test

@@ -9,6 +9,7 @@ import com.ecomdemo.support.RedisAcl;
 import java.math.BigDecimal;
 import java.util.List;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -38,6 +39,12 @@ class AssistantRedisAclIT {
     @BeforeAll
     static void start() throws Exception {
         redis = RedisAcl.start();
+    }
+
+    /** What Redis refused, in the test output: the first thing to read when a test here fails. */
+    @AfterEach
+    void showRefusals() throws Exception {
+        System.out.println("Redis ACL LOG after the test:\n" + RedisAcl.refusals(redis));
     }
 
     @AfterAll
