@@ -5,20 +5,20 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-067 and KI-068 (remaining half): `scripts/smoke-test.sh` gates container sections on `command -v docker` before `ctr_exec` (kubectl on k8s), so they SKIP on a cluster with no docker CLI; and no workflow runs `scripts/test-smoke-*.sh`
 - **Branch:** fix/ki-067-068-smoke-docker-gates (cut from `main` at `abed84a`); grouped per workflow rule 11 (both are review findings on the smoke test's helpers; the user said "proceed")
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** PR #92 (KI-064, KI-066 and KI-068's weak test) merged at `abed84a`; the owner pushes `ki-064-fixed` and `ki-066-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
-- [ ] Regression test (fails first): a platform-aware gate helper in `scripts/smoke-clients.sh`, tested with fakes on a controlled PATH (k8s, no docker: the pod is probed through `ctr_exec`), plus a guard that no `command -v docker` gate sits in front of `ctr_exec` in `smoke-test.sh`; mutation check
-- [ ] Fix: those sections (and the container discovery) gate on the helper; compose behaviour unchanged; what the checks assert unchanged
-- [ ] CI: `ci.yml` runs every `scripts/test-smoke-*.sh` (cheap, bash and coreutils only)
-- [ ] `bash -n`, all `scripts/test-smoke-*.sh`, `./mvnw -B clean verify`
-- [ ] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-067, KI-068]
+- [x] Regression test (fails first): `scripts/test-smoke-gates.sh` runs each gate read out of `smoke-test.sh` with its real `ctr_exec` and fake kubectl/docker (8 failed before; both mutations caught)
+- [x] Fix: `ctr_available` in `smoke-clients.sh`; those sections (and the container discovery) gate on the helper; compose behaviour unchanged; what the checks assert unchanged
+- [x] CI: `ci.yml` job `smoke-script-tests` runs every `scripts/test-smoke-*.sh` (cheap, bash and coreutils only)
+- [ ] `bash -n` and all `scripts/test-smoke-*.sh` (done, green); `./mvnw -B clean verify` (running)
+- [x] Docs: KNOWN_ISSUES (fixed on branch; new KI-069), decisions [Fix KI-067, KI-068]
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
 ## Next action
-Write the regression test first and show it red on this tree (see the checklist), then implement.
+Check `./mvnw -B clean verify` (log `~/.cache/ecomdemo-claude/verify-ki067.log`; rerun it if lost). Green: push, open the PR `Fix KI-067, KI-068: ...` with label `run-smoke`, put the PR number in KNOWN_ISSUES, CURRENT to PR_OPEN.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
