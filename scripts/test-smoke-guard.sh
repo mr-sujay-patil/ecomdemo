@@ -51,7 +51,6 @@ check "foreign stack: says why" "$(printf '%s' "$OUT" | command grep -q "another
 check "foreign stack: no HTTP request sent" "$(! command grep -q '^curl' "$CALLS"; echo $?)"
 check "foreign stack: no container exec/stop/start" "$(! command grep -Eq '^docker (exec|stop|start)' "$CALLS"; echo $?)"
 command grep -E '^docker (exec|stop|start)' "$CALLS" | head -3 | sed 's/^/        saw: /'
-command grep -E '^docker (exec|stop|start)' "$CALLS" | head -3 | sed 's/^/        saw: /'
 
 run_smoke "/home/someone/projects/ecomdemo-backend-readonly" SMOKE_ALLOW_FOREIGN_STACK=1
 check "override: the guard lets the run continue" "$(! printf '%s' "$OUT" | command grep -q "another checkout"; echo $?)"
