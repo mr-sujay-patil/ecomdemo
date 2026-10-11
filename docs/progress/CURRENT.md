@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-035: the gateway writes no request log (its "logs no bodies" is an absence, not a decision), and no span carries the correlation id, so an id shown on a 503 the gateway answered itself (`/fallback/catalog`) leads to nothing in Loki or Tempo (it blocks the web team's KI-032)
 - **Branch:** fix/ki-035-gateway-request-log (cut from `main` at `f575442`); the owner approved it on 2026-10-11 ("go with backend KI-035")
-- **Step:** TESTING
-- **Waiting for user:** NO
+- **Step:** PR_OPEN (PR #94, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #94 (including the compose smoke test), then `approved, merge it`
 - **History:** PR #92 (KI-064, KI-066, KI-068's weak test) merged at `abed84a`; PR #93 (KI-067, KI-068) merged at `f575442`. The owner pushes `ki-064-fixed`, `ki-066-fixed`, `ki-067-fixed`, `ki-068-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
@@ -15,10 +15,11 @@
 - [x] "Logs for this request" paths include the gateway (Grafana's derived field, the smoke test's correlation checks) where in scope
 - [x] Targeted gateway runs, then `./mvnw -B clean verify` (886 tests, 0 failures; 874 before + 12 new)
 - [x] Docs: KNOWN_ISSUES (fixed; new KI-070), decisions `[Fix KI-035]`, a note on the Phase 23 decision, `CorrelationIdWebFilter`'s javadoc
-- [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
+- [x] Push, PR #94 (label `run-smoke`), CURRENT to PR_OPEN
+- [ ] CI green on PR #94, including the compose smoke test's new KI-035 checks; the owner runs the k8s smoke test
 
 ## Next action
-Run `./mvnw -pl gateway-service -am verify`, then the full `./mvnw -B clean verify` in the background; then push and open the PR (label `run-smoke`).
+Wait for CI on PR #94 (`run-smoke`: the new Loki checks run against compose for the first time); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-035-fixed`. Open from this fix: KI-070 (the logs dashboard queries only `app`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
