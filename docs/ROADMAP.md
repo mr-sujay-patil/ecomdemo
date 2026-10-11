@@ -106,4 +106,5 @@ Status: ⬜ Not started · 🟡 In progress · 🔵 PR open · ✅ Done (verifie
 | 33 | [Authentication Hardening](phases/phase-33-auth-hardening.md) | Asymmetric JWT + JWKS + login throttling | `feature/phase-33-auth-hardening` | ✅ |
 | 34 | [Product Images](phases/phase-34-product-images.md) | Static assets over HTTP: content types, ETag, Cache-Control | `feature/phase-34-product-images` | ✅ |
 | 35 | [Client Authentication](phases/phase-35-client-authentication.md) | mTLS for Kafka and PostgreSQL + Kafka ACLs | `feature/phase-35-client-authentication` | ✅ |
-| 36 | [Redis Client Certificates](phases/phase-36-redis-client-certificates.md) | mTLS for Redis (Lettuce + Spring SSL bundles) | `feature/phase-36-redis-client-certificates` | 🔵 |
+| 36 | [Redis Client Certificates](phases/phase-36-redis-client-certificates.md) | mTLS for Redis (Lettuce + Spring SSL bundles) | `feature/phase-36-redis-client-certificates` | ✅ |
+| 37 | [Redis ACL Users](phases/phase-37-redis-acl-users.md) | Redis ACL users per service, from the client certificate | `feature/phase-37-redis-acl-users` | 🟡 |
