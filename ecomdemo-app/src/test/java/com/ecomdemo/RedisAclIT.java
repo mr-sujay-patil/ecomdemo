@@ -100,7 +100,8 @@ class RedisAclIT {
     void catalogStaysInItsKeys() throws Exception {
         assertThat(cliAs("catalog", "SET", "product::acl", "x", "EX", "60")).isEqualTo("OK");
         assertThat(cliAs("catalog", "GET", "product::acl")).isEqualTo("x");
-        assertThat(cliAs("catalog", "DEL", "product::acl")).isEqualTo("1");
+        assertThat(cliAs("catalog", "UNLINK", "product::acl")).isEqualTo("1");
+        assertThat(cliAs("catalog", "DEL", "product::acl")).as("DEL: the code uses UNLINK").startsWith("NOPERM");
         assertThat(cliAs("catalog", "GET", "assistant:memory:42:any")).startsWith("NOPERM");
         assertThat(cliAs("catalog", "GET", "request_rate_limiter.{user:x}.tokens")).startsWith("NOPERM");
         assertThat(cliAs("catalog", "SELECT", "1")).startsWith("NOPERM");
@@ -157,8 +158,8 @@ class RedisAclIT {
             reloading.execInContainer("sh", "-c", "nohup sh -c \"$1\" >/tmp/cert-reload.log 2>&1 &", "cert-reload", script);
             assertThat(cliAs(reloading, "ecomdemo", "GET", "product::1")).startsWith("NOPERM");
 
-            // Kubernetes updates the mounted ConfigMap: here the ecomdemo user gains the catalogue's keys.
-            String changed = RedisAcl.file().replace("user ecomdemo reset on", "user ecomdemo reset on ~product::*");
+            // Kubernetes updates the mounted ConfigMap: here the ecomdemo user gains GET on the catalogue's keys.
+            String changed = RedisAcl.file().replace("user ecomdemo reset on", "user ecomdemo reset on ~product::* +get");
             assertThat(changed).isNotEqualTo(RedisAcl.file());
             reloading.copyFileToContainer(Transferable.of(changed.getBytes(StandardCharsets.UTF_8), 0644),
                     RedisAclConfigTest.ACL_PATH);

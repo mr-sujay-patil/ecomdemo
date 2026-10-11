@@ -150,16 +150,22 @@ ensure_key customer-service-secrets CUSTOMER_DB_PASSWORD "$(openssl rand -hex 16
 ensure_key inventory-service-secrets INVENTORY_DB_PASSWORD "$(openssl rand -hex 16)"
 ensure_key notification-service-secrets NOTIFICATION_DB_PASSWORD "$(openssl rand -hex 16)"
 ensure_key payment-service-secrets PAYMENT_DB_PASSWORD "$(openssl rand -hex 16)"
-# KI-050: one Redis password, shared by the cache and the four services that use it (app, catalog,
-# gateway, assistant). Spring Boot reads SPRING_DATA_REDIS_PASSWORD from the environment, so the
-# services need no code or config change; it reaches them through their own Secret like every other
-# value. REDIS_PASSWORD in .env wins, else the cluster's, else a new one is generated and kept. A
-# cluster created before this upgrades in place, but its running service pods only pick the new
-# Secret key up when restarted: `kubectl -n ecomdemo rollout restart deploy`.
-REDIS_PASSWORD="$(pick REDIS_PASSWORD cache-secrets REDIS_PASSWORD 'openssl rand -hex 16')"
-ensure_key cache-secrets REDIS_PASSWORD "$REDIS_PASSWORD"
+# Phase 37: NO Redis password in the cluster. KI-050 gave Redis one password shared by the four
+# services that use it; since Phase 37 each service's client certificate names its own Redis ACL user
+# (k8s/data/cache-acl.yaml), and a client that still sends the old password is REFUSED: the AUTH asks
+# for the user `default`, which is off. So a cluster created before Phase 37 has the old key taken out
+# of the four services' Secrets here. Running pods keep it in their environment until they restart:
+# `kubectl -n ecomdemo rollout restart deploy`. (The old cache-secrets Secret is no longer used by
+# anything; it is left alone. REDIS_PASSWORD in .env is compose's, which keeps its password.)
+# remove_key <secret> <key>: removes the key if the secret has it; nothing else changes.
+remove_key() {
+    if [ -n "$(secret_value "$1" "$2")" ]; then
+        k -n "$NS" patch secret "$1" --type json -p "[{\"op\":\"remove\",\"path\":\"/data/$2\"}]" >/dev/null
+        echo "secret/$1 lost $2"
+    fi
+}
 for svc_secret in app-secrets catalog-service-secrets gateway-service-secrets assistant-service-secrets; do
-    ensure_key "$svc_secret" SPRING_DATA_REDIS_PASSWORD "$REDIS_PASSWORD"
+    remove_key "$svc_secret" SPRING_DATA_REDIS_PASSWORD
 done
 # Services with nothing secret of their own still get their (empty-able) Secret: the manifests
 # reference it. A placeholder key keeps `kubectl create secret` happy.

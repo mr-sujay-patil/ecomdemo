@@ -35,16 +35,13 @@ spec:
       containers:
         - name: redis
           image: redis:8-alpine
-          # KI-050: clients must authenticate. The password lives in the cache-secrets Secret
-          # (scripts/k8s-up.sh creates it); Kubernetes expands $(REDIS_PASSWORD) in args from the env
-          # below. REDISCLI_AUTH lets the probe and `kubectl exec ... redis-cli` authenticate without
-          # the password on a command line. Phase 36: every redis-cli in this pod (the probe, the
-          # cert-reload sidecar, the smoke test) also presents a client certificate: this pod's own,
-          # cache-tls, which carries the `client auth` usage for that reason. The tools already run
-          # beside its key, so a second certificate here would prove nothing more.
+          # Phase 36: every redis-cli in this pod (the probe, the cert-reload sidecar, the smoke test) presents a
+          # client certificate: this pod's own, cache-tls, which carries the `client auth` usage for that reason.
+          # The tools already run beside its key, so a second certificate here would prove nothing more.
+          # Phase 37: NO shared password any more (KI-050's `--requirepass` is gone, and with it the cache-secrets
+          # Secret and REDISCLI_AUTH). Who a client is comes from its certificate, what it may do from the ACL.
           args: ["redis-server", "--save", "", "--appendonly", "no",
                  "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru",
-                 "--requirepass", "$(REDIS_PASSWORD)",
                  # KI-057: TLS ONLY. `--port 0` closes the plain port; the TLS port keeps the number
                  # 6379, so the Service and every client's port are unchanged. The certificate is
                  # cert-manager's (k8s/service-certificates.yaml: cache-tls).
@@ -56,23 +53,18 @@ spec:
                  # password gets no further than TLS. The password above is still asked for after it:
                  # a client needs both, the key it holds and the secret it knows.
                  "--tls-ca-cert-file", "/etc/ecomdemo-tls/ca.crt",
-                 "--tls-auth-clients", "yes"]
-          env:
-            - name: REDIS_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: cache-secrets
-                  key: REDIS_PASSWORD
-            - name: REDISCLI_AUTH
-              valueFrom:
-                secretKeyRef:
-                  name: cache-secrets
-                  key: REDIS_PASSWORD
+                 "--tls-auth-clients", "yes",
+                 # Phase 37 (KI-065): the certificate's CN NAMES THE USER. A connection with CN=catalog is logged
+                 # in as the ACL user `catalog` the moment the handshake ends, with no AUTH; a CN that is no user
+                 # stays `default`, which is off. What each user may do is the ACL file (k8s/data/cache-acl.yaml).
+                 "--tls-auth-clients-user", "CN",
+                 "--aclfile", "/etc/ecomdemo-acl/users.acl"]
           ports:
             - name: redis
               containerPort: 6379
           volumeMounts:
             - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: acl, mountPath: /etc/ecomdemo-acl, readOnly: true }
           readinessProbe:
             exec:
               command: ["redis-cli", "--tls", "--cacert", "/etc/ecomdemo-tls/ca.crt",
@@ -92,16 +84,31 @@ spec:
         # would sit unused in the volume and Redis would keep serving the old one until it expired at day 90.
         # This sidecar notices the file change and tells Redis to load the new one (`CONFIG SET tls-*`,
         # supported at runtime), so a renewal needs no restart and no outage. Phase 36: it presents the
-        # renewed certificate as its client certificate (same CA, so Redis still accepts it).
+        # renewed certificate as its client certificate (same CA, so Redis still accepts it). Phase 37: it is the
+        # ACL user cache-admin (the certificate's CN), and it also watches the ACL file: when Kubernetes updates the
+        # mounted cache-acl ConfigMap, it runs ACL LOAD, so an ACL change needs no restart either. If the new file
+        # has an error, Redis refuses it and keeps the ACL it has; the sidecar says so and tries again.
         - name: cert-reload
           image: redis:8-alpine
           command: ["sh", "-c"]
           args:
             - |
               cert=/etc/ecomdemo-tls/tls.crt
+              acl=/etc/ecomdemo-acl/users.acl
               last="$(sha256sum "$cert" | cut -d' ' -f1)"
+              last_acl="$(sha256sum "$acl" | cut -d' ' -f1)"
               while true; do
                 sleep 30
+                now_acl="$(sha256sum "$acl" | cut -d' ' -f1)"
+                if [ "$now_acl" != "$last_acl" ]; then
+                  if redis-cli -h 127.0.0.1 --tls --cacert /etc/ecomdemo-tls/ca.crt \
+                       --cert /etc/ecomdemo-tls/tls.crt --key /etc/ecomdemo-tls/tls.key \
+                       ACL LOAD | grep -q OK; then
+                    echo "reloaded the Redis ACL"; last_acl="$now_acl"
+                  else
+                    echo "could not reload the Redis ACL (Redis keeps the one it has); retrying"
+                  fi
+                fi
                 now="$(sha256sum "$cert" | cut -d' ' -f1)"
                 if [ "$now" != "$last" ]; then
                   if redis-cli -h 127.0.0.1 --tls --cacert /etc/ecomdemo-tls/ca.crt \
@@ -114,14 +121,9 @@ spec:
                   fi
                 fi
               done
-          env:
-            - name: REDISCLI_AUTH
-              valueFrom:
-                secretKeyRef:
-                  name: cache-secrets
-                  key: REDIS_PASSWORD
           volumeMounts:
             - { name: tls, mountPath: /etc/ecomdemo-tls, readOnly: true }
+            - { name: acl, mountPath: /etc/ecomdemo-acl, readOnly: true }
           resources:
             requests:
               cpu: 5m
@@ -132,3 +134,7 @@ spec:
         - name: tls
           secret:
             secretName: cache-tls
+        # Phase 37: the ACL file, from Git (k8s/data/cache-acl.yaml).
+        - name: acl
+          configMap:
+            name: cache-acl
