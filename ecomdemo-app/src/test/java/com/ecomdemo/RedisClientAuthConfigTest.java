@@ -24,7 +24,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 /**
- * Redis authenticates its clients by certificate AND password in Kubernetes (Phase 36, KI-063).
+ * Redis authenticates its clients by certificate in Kubernetes (Phase 36, KI-063; Phase 37 replaced the password
+ * that Phase 36 kept with an ACL user named by the certificate: {@code RedisAclConfigTest}).
  *
  * <p>Before, TLS proved only the SERVER to the client (KI-057): any pod with the password could use the cache,
  * the rate-limit counters and the assistant's conversations. Now Redis asks every client for a certificate from
@@ -48,12 +49,12 @@ class RedisClientAuthConfigTest {
     static final String POD_CLIENT_CERTIFICATE = "--cert /etc/ecomdemo-tls/tls.crt --key /etc/ecomdemo-tls/tls.key";
 
     @Test
-    @DisplayName("Redis requires a client certificate from the cluster CA, and still the password")
-    void redisRequiresACertificateAndThePassword() throws IOException {
+    @DisplayName("Redis requires a client certificate from the cluster CA (since Phase 37 instead of the password: RedisAclConfigTest)")
+    void redisRequiresACertificate() throws IOException {
         String args = String.join(" ", strings(redis().get("args")));
 
         assertThat(args).contains("--tls-auth-clients yes", "--tls-ca-cert-file /etc/ecomdemo-tls/ca.crt",
-                "--requirepass $(REDIS_PASSWORD)", "--port 0", "--tls-port 6379")
+                "--port 0", "--tls-port 6379")
                 .doesNotContain("--tls-auth-clients no", "--tls-auth-clients optional");
     }
 

@@ -21,6 +21,7 @@ resources:
   - data/payment-db.yaml
   - data/kafka-acls.yaml
   - data/kafka.yaml
+  - data/cache-acl.yaml
   - data/cache.yaml
   # our services
   - services/app.yaml

@@ -228,7 +228,7 @@ spec:
 ---
 # Redis (KI-057). The name every client connects to is `cache`; `localhost` is for `redis-cli` inside the pod.
 # Phase 36: Redis requires a client certificate, and the tools in its pod (the readiness probe, the cert-reload
-# sidecar, the smoke test's redis-cli) present this one. Without a usage list cert-manager's documented default
+# sidecar, the smoke test's redis-cli) present this one; since Phase 37 its CN makes them the ACL user cache-admin. Without a usage list cert-manager's documented default
 # is `digital signature, key encipherment` and no extended key usage, which OpenSSL accepts for any purpose;
 # naming both makes the client role a decision rather than a default: Redis refuses a client certificate that
 # says `server auth` only ("certificate verify failed", RedisClientAuthIT).
@@ -241,6 +241,9 @@ metadata:
     app.kubernetes.io/part-of: ecomdemo
 spec:
   secretName: cache-tls
+  # Phase 37: the CN names the Redis ACL user of the tools in the Redis pod (cache-admin, k8s/data/cache-acl.yaml).
+  # Clients verify Redis by its DNS names below, never by the CN, so the name only matters to Redis itself.
+  commonName: cache-admin
   duration: 2160h
   renewBefore: 720h
   usages:
