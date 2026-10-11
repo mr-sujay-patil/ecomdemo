@@ -5,20 +5,21 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-067 and KI-068 (remaining half): `scripts/smoke-test.sh` gates container sections on `command -v docker` before `ctr_exec` (kubectl on k8s), so they SKIP on a cluster with no docker CLI; and no workflow runs `scripts/test-smoke-*.sh`
 - **Branch:** fix/ki-067-068-smoke-docker-gates (cut from `main` at `abed84a`); grouped per workflow rule 11 (both are review findings on the smoke test's helpers; the user said "proceed")
-- **Step:** TESTING
-- **Waiting for user:** no
+- **Step:** PR_OPEN (PR #93, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #93, then `approved, merge it`
 - **History:** PR #92 (KI-064, KI-066 and KI-068's weak test) merged at `abed84a`; the owner pushes `ki-064-fixed` and `ki-066-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
 - [x] Regression test (fails first): `scripts/test-smoke-gates.sh` runs each gate read out of `smoke-test.sh` with its real `ctr_exec` and fake kubectl/docker (8 failed before; both mutations caught)
 - [x] Fix: `ctr_available` in `smoke-clients.sh`; those sections (and the container discovery) gate on the helper; compose behaviour unchanged; what the checks assert unchanged
 - [x] CI: `ci.yml` job `smoke-script-tests` runs every `scripts/test-smoke-*.sh` (cheap, bash and coreutils only)
-- [ ] `bash -n` and all `scripts/test-smoke-*.sh` (done, green); `./mvnw -B clean verify` (running)
-- [x] Docs: KNOWN_ISSUES (fixed on branch; new KI-069), decisions [Fix KI-067, KI-068]
-- [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
+- [x] `bash -n`, all `scripts/test-smoke-*.sh` green; `./mvnw -B clean verify` (874 tests, 0 failures)
+- [x] Docs: KNOWN_ISSUES (fixed, PR #93; new KI-069), decisions [Fix KI-067, KI-068]
+- [x] Push, PR #93 (label `run-smoke`), CURRENT to PR_OPEN
+- [ ] CI green on PR #93, including the compose smoke test and the new `smoke-script-tests` job
 
 ## Next action
-Check `./mvnw -B clean verify` (log `~/.cache/ecomdemo-claude/verify-ki067.log`; rerun it if lost). Green: push, open the PR `Fix KI-067, KI-068: ...` with label `run-smoke`, put the PR number in KNOWN_ISSUES, CURRENT to PR_OPEN.
+Wait for CI on PR #93 (with `run-smoke`; the new `smoke-script-tests` job runs for the first time); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-067-fixed` and `ki-068-fixed`. Open from this fix: KI-069 (duplicated diagnostic line in `test-smoke-guard.sh`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
