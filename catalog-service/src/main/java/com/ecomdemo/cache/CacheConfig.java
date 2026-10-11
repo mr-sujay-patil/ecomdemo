@@ -15,6 +15,7 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.BatchStrategies;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.cache.RedisCacheWriter;
@@ -63,6 +64,19 @@ public class CacheConfig implements CachingConfigurer {
      * it — the entry is both the most expensive to hold and the most likely to be wrong.
      */
     private static final Duration PRODUCT_LIST_TTL = Duration.ofMinutes(2);
+
+    /**
+     * How many keys one SCAN step of a whole-cache clear looks at (KI-074).
+     *
+     * <p>A clear ({@code @CacheEvict(allEntries = true)}, and {@link ProductCacheEvictor} on every stock change)
+     * has to find the cache's keys. Spring Data Redis's default is one {@code KEYS productList::*}, which walks the
+     * WHOLE keyspace in a single call; Redis runs one command at a time, so for that walk nobody else is served:
+     * not the gateway's rate limiter, not the assistant. SCAN walks it in steps of about this many slots and
+     * answers everyone else between steps. 1000 keeps a step well under a millisecond while a clear of a keyspace
+     * of a few thousand keys stays a handful of round trips; the matching keys are deleted in batches of the same
+     * size.
+     */
+    static final int CLEAR_SCAN_BATCH = 1000;
 
     private final JsonMapper jsonMapper;
 
@@ -196,7 +210,9 @@ public class CacheConfig implements CachingConfigurer {
                 RedisCacheConfiguration defaultConfiguration,
                 Map<String, RedisCacheConfiguration> perCacheConfiguration) {
             super(
-                    RedisCacheWriter.nonLockingRedisCacheWriter(connectionFactory),
+                    RedisCacheWriter.create(connectionFactory, writer -> writer
+                            // SCAN, not the default KEYS, to find a cache's keys on a clear (KI-074).
+                            .batchStrategy(BatchStrategies.scan(CLEAR_SCAN_BATCH))),
                     defaultConfiguration,
                     perCacheConfiguration);
         }
