@@ -5,20 +5,21 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-071: the "EcomDemo Logs" dashboard's infrastructure panel selects `db|cache|prometheus|grafana` (the Phase 16 list), so the per-service databases Alloy ships since the split are in Loki but on no panel
 - **Branch:** fix/ki-071-logs-dashboard-databases (cut from `main` at `1316474`); the owner said "continue working on both repos" (the next backend defect)
-- **Step:** VERIFYING (full `./mvnw -B clean verify` running)
-- **Waiting for user:** NO
+- **Step:** PR_OPEN (PR #96, no `run-smoke`: a dashboard file only)
+- **Waiting for user:** YES: CI on PR #96, then `approved, merge it`
 - **History:** PR #95 (KI-070) merged at `1316474`; the owner pushes `ki-070-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
 - [x] Regression test first (`LoggingStackConfigTest.InfrastructurePanel`): the panel's selector must select every compose service health-checked by `pg_isready` and every service in Alloy's plain-text keep rule, not a JSON stream with a level; title not the Phase 16 list; red on main (3 of 4 failed: `b11c4c2`)
 - [x] Fix: panel 5 selects `{service_name=~".+", level=""}` (the complement of the `service` variable), title and description updated (`d5c9796`); targeted run green (18 + `DashboardMetricsTest` 8); JSON parses
 - [x] Throwaway Grafana 12.3.1 + Loki 3.7.8 (own network, read-only mounts, removed): the panel query returns all six databases, cache, grafana; not app/gateway
-- [x] Docs: KNOWN_ISSUES (KI-071 fixed, PR number pending), decisions `[Fix KI-071]`, README's logs-dashboard paragraph
-- [ ] `./mvnw -B clean verify` green
-- [ ] Push, PR, CURRENT to PR_OPEN (fill the PR number into KNOWN_ISSUES)
+- [x] Docs: KNOWN_ISSUES (KI-071 fixed, PR #96), decisions `[Fix KI-071]`, README's logs-dashboard paragraph
+- [x] `./mvnw -B clean verify` green (894 tests, 0 failures; 890 + 4 new)
+- [x] Push, PR #96, CURRENT to PR_OPEN
+- [ ] CI green on PR #96; the owner reviews
 
 ## Next action
-Check `~/.cache/ecomdemo-claude/ki071-verify.log` (ends with `exit=0`); if green, push the branch, open the PR (no `run-smoke`: one dashboard file, workflow rule 5), replace `PR #NN` in KNOWN_ISSUES with the number, set CURRENT to PR_OPEN, commit, push, STOP for the owner.
+Wait for CI on PR #96; fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-071-fixed` (tag pushes are refused here, 403).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
