@@ -13,7 +13,7 @@
 - [x] Regression tests (fail first; 7 of 7 red on main: no line written, span attribute null): `GatewayRequestLogIT` (one line per exchange, its correlation id in the MDC, nothing quoted: no token, no query string, no body; 401 logged; generated id; actuator skipped; the fallback writes ONE line) and a span test (the gateway's SERVER span for the fallback request carries `correlation_id`)
 - [x] Fix: `RequestLogWebFilter` (WebFilter, HIGHEST_PRECEDENCE + 10, mirrors common's `RequestLogFilter`); `CorrelationIdWebFilter` keeps the id as an exchange attribute; an `ObservationFilter` in the gateway's `TracingConfig` puts it on the server span
 - [x] "Logs for this request" paths include the gateway (Grafana's derived field, the smoke test's correlation checks) where in scope
-- [ ] `./mvnw -pl gateway-service -am verify`, then `./mvnw -B clean verify`
+- [x] Targeted gateway runs, then `./mvnw -B clean verify` (886 tests, 0 failures; 874 before + 12 new)
 - [x] Docs: KNOWN_ISSUES (fixed; new KI-070), decisions `[Fix KI-035]`, a note on the Phase 23 decision, `CorrelationIdWebFilter`'s javadoc
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
