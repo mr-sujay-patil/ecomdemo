@@ -31,9 +31,13 @@ import reactor.core.publisher.Mono;
  * equivalent, and wiring it into logging is a real piece of work — deferred honestly rather than
  * faked with an MDC call that would be empty half the time and misattributed the other half.
  *
- * <p>What the gateway needs for its own logs, it gets from the access log's request headers. What
- * the <em>services</em> need, they get from the request header set below — and their MDC works,
- * because they are servlet applications with a thread per request.
+ * <p>What the gateway needs for its own logs and spans, it reads from the exchange attribute
+ * {@link #ATTRIBUTE} set below: {@code RequestLogWebFilter} puts it in the MDC around its one log
+ * call, and {@code TracingConfig} puts it on the server span (KI-035). An earlier version of this
+ * comment said "from the access log's request headers"; there was no access log, so the gateway
+ * logged nothing per request until KI-035. What the <em>services</em> need, they get from the
+ * request header set below — and their MDC works, because they are servlet applications with a
+ * thread per request.
  *
  * <p><strong>Why the response header is set through {@code beforeCommit}.</strong> A reactive
  * response's headers are mutable only until it commits, and the body may start streaming long
@@ -43,6 +47,17 @@ import reactor.core.publisher.Mono;
  */
 @Component
 class CorrelationIdWebFilter implements WebFilter, Ordered {
+
+    /**
+     * The exchange attribute holding the sanitized id (KI-035).
+     *
+     * <p>An attribute rather than re-reading the request header. The server's observation (the span)
+     * is created before any filter runs, with the ORIGINAL request: for a caller who sent no id, or a
+     * malformed one, that request does not carry the id this filter settles on. The attribute map,
+     * though, is one map shared by every view of the exchange, including the observation's context.
+     * That is what lets the span's {@code ObservationFilter} in {@code TracingConfig} find the id.
+     */
+    static final String ATTRIBUTE = CorrelationIdWebFilter.class.getName() + ".correlationId";
 
     /**
      * Ahead of Spring Security, which registers its chain at {@code -100}.
@@ -66,6 +81,8 @@ class CorrelationIdWebFilter implements WebFilter, Ordered {
         ServerWebExchange stamped = exchange.mutate()
                 .request(request -> request.headers(headers -> headers.set(CorrelationId.HEADER, correlationId)))
                 .build();
+
+        stamped.getAttributes().put(ATTRIBUTE, correlationId);
 
         stamped.getResponse().beforeCommit(() -> {
             stamped.getResponse().getHeaders().set(CorrelationId.HEADER, correlationId);
