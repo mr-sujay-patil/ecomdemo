@@ -3,23 +3,21 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-11
-- **Fix:** KI-035: the gateway writes no request log (its "logs no bodies" is an absence, not a decision), and no span carries the correlation id, so an id shown on a 503 the gateway answered itself (`/fallback/catalog`) leads to nothing in Loki or Tempo (it blocks the web team's KI-032)
-- **Branch:** fix/ki-035-gateway-request-log (cut from `main` at `f575442`); the owner approved it on 2026-10-11 ("go with backend KI-035")
-- **Step:** PR_OPEN (PR #94, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #94 (including the compose smoke test), then `approved, merge it`
-- **History:** PR #92 (KI-064, KI-066, KI-068's weak test) merged at `abed84a`; PR #93 (KI-067, KI-068) merged at `f575442`. The owner pushes `ki-064-fixed`, `ki-066-fixed`, `ki-067-fixed`, `ki-068-fixed` (tag pushes are refused here, 403)
+- **Fix:** KI-070: the "EcomDemo Logs" dashboard queries only `{service_name="app"}` in its level, error and correlation panels, so "one request's whole story" leaves out the gateway's request line (KI-035) and every other service's
+- **Branch:** fix/ki-070-logs-dashboard-all-services (cut from `main` at `a85202f`); the owner said "continue" (the next backend defect)
+- **Step:** IN_PROGRESS (regression test)
+- **Waiting for user:** NO
+- **History:** PR #94 (KI-035) merged at `a85202f`; the owner pushes `ki-035-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
-- [x] Regression tests (fail first; 7 of 7 red on main: no line written, span attribute null): `GatewayRequestLogIT` (one line per exchange, its correlation id in the MDC, nothing quoted: no token, no query string, no body; 401 logged; generated id; actuator skipped; the fallback writes ONE line) and a span test (the gateway's SERVER span for the fallback request carries `correlation_id`)
-- [x] Fix: `RequestLogWebFilter` (WebFilter, HIGHEST_PRECEDENCE + 10, mirrors common's `RequestLogFilter`); `CorrelationIdWebFilter` keeps the id as an exchange attribute; an `ObservationFilter` in the gateway's `TracingConfig` puts it on the server span
-- [x] "Logs for this request" paths include the gateway (Grafana's derived field, the smoke test's correlation checks) where in scope
-- [x] Targeted gateway runs, then `./mvnw -B clean verify` (886 tests, 0 failures; 874 before + 12 new)
-- [x] Docs: KNOWN_ISSUES (fixed; new KI-070), decisions `[Fix KI-035]`, a note on the Phase 23 decision, `CorrelationIdWebFilter`'s javadoc
-- [x] Push, PR #94 (label `run-smoke`), CURRENT to PR_OPEN
-- [ ] CI green on PR #94, including the compose smoke test's new KI-035 checks; the owner runs the k8s smoke test
+- [ ] Regression test first (`LoggingStackConfigTest`): no panel query hard-codes `app`; panels 1-4 select `service_name=~"$service"`; a multi-select `service` variable (default All) over the JSON-writing services; red on main
+- [ ] Fix: `docker/grafana/dashboards/ecomdemo-logs.json` (a `service` variable, the four panels, a service column on the log panel)
+- [ ] `./mvnw -pl ecomdemo-app -am verify`, then `./mvnw -B clean verify`; the JSON parses; Grafana + Loki provision it (optional)
+- [ ] Docs: KNOWN_ISSUES (KI-070 fixed), decisions `[Fix KI-070]`, README's logs-dashboard paragraph
+- [ ] Push, PR, CURRENT to PR_OPEN
 
 ## Next action
-Wait for CI on PR #94 (`run-smoke`: the new Loki checks run against compose for the first time); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-035-fixed`. Open from this fix: KI-070 (the logs dashboard queries only `app`).
+Write the failing assertions in `ecomdemo-app/src/test/java/com/ecomdemo/logging/LoggingStackConfigTest.java`, run them on the unchanged dashboard (expect red), commit.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
