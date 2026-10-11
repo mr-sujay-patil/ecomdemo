@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.DisplayName;
@@ -267,6 +268,143 @@ class LoggingStackConfigTest {
                 }
             }
             throw new AssertionError("no service log panel on the dashboard");
+        }
+    }
+
+    /**
+     * KI-071. The infrastructure panel was written in Phase 16 against the stack of the day, one
+     * PostgreSQL called {@code db}, and selected {@code service_name=~"db|cache|prometheus|grafana"}.
+     * The database split gave each extracted service its own PostgreSQL; Alloy was taught to ship
+     * them, the panel was not, so their lines reached Loki and appeared on no panel. A list in the
+     * panel is a second copy of Alloy's list, and a second copy goes stale - so these tests check
+     * the panel against what is actually shipped rather than against another list.
+     */
+    @Nested
+    @DisplayName("the logs dashboard's infrastructure panel shows every stream Alloy ships as plain text (KI-071)")
+    class InfrastructurePanel {
+
+        private static final String INFRASTRUCTURE_PANEL = "Infrastructure log";
+
+        private JsonNode panel() throws Exception {
+            for (JsonNode panel : new ObjectMapper().readTree(Files.readString(DASHBOARD)).path("panels")) {
+                if (panel.path("title").asText().startsWith(INFRASTRUCTURE_PANEL)) {
+                    return panel;
+                }
+            }
+            throw new AssertionError("no '" + INFRASTRUCTURE_PANEL + "' panel on the dashboard");
+        }
+
+        private String selector() throws Exception {
+            JsonNode targets = panel().path("targets");
+            assertThat(targets).as("the infrastructure panel's queries").hasSize(1);
+            return targets.get(0).path("expr").asText();
+        }
+
+        /** The compose services whose health check runs {@code pg_isready}: the PostgreSQL servers. */
+        private List<String> databasesInCompose() throws Exception {
+            List<String> databases = new ArrayList<>();
+            String current = null;
+            for (String line : Files.readString(COMPOSE).split("\n")) {
+                Matcher service = Pattern.compile("^  ([a-z0-9][a-z0-9-]*):\\s*$").matcher(line);
+                if (service.matches()) {
+                    current = service.group(1);
+                } else if (line.contains("pg_isready") && current != null && !databases.contains(current)) {
+                    databases.add(current);
+                }
+            }
+            return databases;
+        }
+
+        /** The services Alloy's plain-text source keeps: the regex of the keep rule that names `cache`. */
+        private List<String> infrastructureAlloyShips() throws Exception {
+            Matcher keep = Pattern.compile("regex\\s*=\\s*\"([^\"]*cache[^\"]*)\"").matcher(Files.readString(ALLOY));
+            assertThat(keep.find()).as("Alloy should have a keep rule naming the cache").isTrue();
+            return List.of(keep.group(1).split("\\|"));
+        }
+
+        /**
+         * Does a LogQL stream selector select a stream with these labels? Enough of Loki's rules for
+         * the matchers a dashboard uses: {@code =}, {@code !=}, {@code =~}, {@code !~}; regexes are
+         * anchored at both ends, as Loki's are; a label the stream lacks reads as the empty string,
+         * which is how {@code level=""} selects the streams without a level.
+         */
+        private boolean selects(String expr, Map<String, String> labels) {
+            Matcher braces = Pattern.compile("\\{([^}]*)}").matcher(expr);
+            assertThat(braces.find()).as("a stream selector in '%s'", expr).isTrue();
+            Matcher matcher = Pattern.compile("(\\w+)\\s*(=~|!~|!=|=)\\s*\"((?:[^\"\\\\]|\\\\.)*)\"").matcher(braces.group(1));
+            int matchers = 0;
+            while (matcher.find()) {
+                matchers++;
+                String value = labels.getOrDefault(matcher.group(1), "");
+                String operand = matcher.group(3).replace("\\\\", "\\");
+                boolean ok = switch (matcher.group(2)) {
+                    case "=" -> value.equals(operand);
+                    case "!=" -> !value.equals(operand);
+                    case "=~" -> value.matches(operand);
+                    default -> !value.matches(operand);
+                };
+                if (!ok) {
+                    return false;
+                }
+            }
+            assertThat(matchers).as("matchers parsed from '%s'", expr).isPositive();
+            return true;
+        }
+
+        private Map<String, String> plainTextStream(String service) {
+            // What Alloy's infrastructure pipeline attaches: service_name and container, no level.
+            return Map.of("service_name", service, "container", "ecomdemo-" + service + "-1");
+        }
+
+        @Test
+        @DisplayName("selects every PostgreSQL in compose.yaml, so a new database cannot be silently missed")
+        void selectsEveryDatabaseInCompose() throws Exception {
+            List<String> databases = databasesInCompose();
+            assertThat(databases)
+                    .as("compose should still declare the PostgreSQL servers; fewer means this test's "
+                            + "parsing broke rather than the config")
+                    .contains("db", "inventory-db", "catalog-db")
+                    .hasSizeGreaterThanOrEqualTo(6);
+
+            String expr = selector();
+            assertThat(databases)
+                    .as("databases the infrastructure panel's query `%s` selects", expr)
+                    .allSatisfy(db -> assertThat(selects(expr, plainTextStream(db)))
+                            .as("'%s' selected by `%s`", db, expr)
+                            .isTrue());
+            // ...and shipping comes first: a database Alloy drops is on no panel whatever it says.
+            assertThat(infrastructureAlloyShips()).containsAll(databases);
+        }
+
+        @Test
+        @DisplayName("selects every service Alloy's plain-text pipeline ships")
+        void selectsEveryStreamAlloyShipsAsPlainText() throws Exception {
+            String expr = selector();
+            assertThat(infrastructureAlloyShips())
+                    .allSatisfy(service -> assertThat(selects(expr, plainTextStream(service)))
+                            .as("'%s' selected by `%s`", service, expr)
+                            .isTrue());
+        }
+
+        @Test
+        @DisplayName("does not select the services' JSON lines, which have their own panel")
+        void leavesTheServicesJsonStreamsToTheirOwnPanel() throws Exception {
+            String expr = selector();
+            // The JSON pipeline sets `level`; those streams are the service log panel's.
+            for (String service : List.of("app", "gateway-service", "catalog-service")) {
+                assertThat(selects(expr, Map.of(
+                                "service_name", service, "container", "ecomdemo-" + service + "-1", "level", "INFO")))
+                        .as("'%s' (a JSON stream with a level) selected by `%s`", service, expr)
+                        .isFalse();
+            }
+        }
+
+        @Test
+        @DisplayName("the title is not the Phase 16 list")
+        void theTitleIsNotTheStaleList() throws Exception {
+            assertThat(panel().path("title").asText())
+                    .doesNotContain("PostgreSQL, Redis, Prometheus, Grafana)")
+                    .containsIgnoringCase("databases");
         }
     }
 
