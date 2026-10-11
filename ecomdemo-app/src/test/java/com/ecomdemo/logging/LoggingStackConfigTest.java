@@ -109,8 +109,9 @@ class LoggingStackConfigTest {
             String dashboard = Files.readString(DASHBOARD);
 
             assertThat(alloy).contains("target_label  = \"service_name\"");
-            // Which is the selector every panel on the logs dashboard is written against.
-            assertThat(dashboard).contains("service_name=\\\"app\\\"");
+            // Which is the label the logs dashboard's `service` variable lists its values from
+            // (KI-070: it used to be a hard-coded `service_name="app"` in every panel).
+            assertThat(dashboard).contains("\"label\": \"service_name\"");
         }
 
         @Test
@@ -153,6 +154,119 @@ class LoggingStackConfigTest {
                     .as("every service compose builds must appear in Alloy's keep rule, or its logs "
                             + "are silently dropped")
                     .containsAll(built);
+        }
+    }
+
+    /**
+     * KI-070. The dashboard was written in Phase 16, when the application was the only service,
+     * and every panel said {@code service_name="app"}. Since the split a request's lines are in the
+     * gateway (KI-035 made it write one per request) and in whichever services it reached, so the
+     * correlation panels told half the story - and for a response the gateway answered itself (a
+     * 401, a 429, the catalogue fallback) none of it.
+     */
+    @Nested
+    @DisplayName("the logs dashboard covers every service, not only `app` (KI-070)")
+    class EveryService {
+
+        private static final String SERVICE_SELECTOR = "service_name=~\"$service\"";
+        private static final String INFRASTRUCTURE_PANEL = "Infrastructure log";
+
+        private JsonNode dashboard() throws Exception {
+            return new ObjectMapper().readTree(Files.readString(DASHBOARD));
+        }
+
+        private JsonNode serviceVariable() throws Exception {
+            for (JsonNode variable : dashboard().path("templating").path("list")) {
+                if ("service".equals(variable.path("name").asText())) {
+                    return variable;
+                }
+            }
+            return null;
+        }
+
+        @Test
+        @DisplayName("no panel query hard-codes one service; every service-log panel selects `$service`")
+        void everyServicePanelSelectsTheVariable() throws Exception {
+            List<String> checked = new ArrayList<>();
+            for (JsonNode panel : dashboard().path("panels")) {
+                String title = panel.path("title").asText();
+                if (title.startsWith(INFRASTRUCTURE_PANEL)) {
+                    // PostgreSQL, Redis and friends: plain text, no level, no correlation id. A
+                    // different question with its own selector, deliberately not the variable.
+                    continue;
+                }
+                for (JsonNode target : panel.path("targets")) {
+                    String expr = target.path("expr").asText();
+                    assertThat(expr)
+                            .as("query of panel '%s'", title)
+                            .doesNotContain("service_name=\"app\"")
+                            .contains(SERVICE_SELECTOR);
+                    checked.add(title);
+                }
+            }
+            // The level graph, the error count, the correlation count and the log itself.
+            assertThat(checked)
+                    .as("the panels this test checked; fewer means the parsing broke, not the config")
+                    .hasSize(4);
+        }
+
+        @Test
+        @DisplayName("the correlation panels find one request's lines in every service")
+        void theCorrelationPanelsQueryEveryService() throws Exception {
+            List<String> correlationQueries = new ArrayList<>();
+            dashboard()
+                    .path("panels")
+                    .forEach(panel -> panel.path("targets").forEach(target -> {
+                        String expr = target.path("expr").asText();
+                        if (expr.contains("correlation_id")) {
+                            correlationQueries.add(expr);
+                        }
+                    }));
+
+            assertThat(correlationQueries).as("the count and the log panel").hasSize(2);
+            assertThat(correlationQueries).allSatisfy(expr -> assertThat(expr).contains(SERVICE_SELECTOR));
+            // And the variable's default is All, so pasting an id shows the gateway's line too.
+            assertThat(serviceVariable()).as("a `service` template variable").isNotNull();
+            assertThat(serviceVariable().path("current").path("value").toString()).isEqualTo("[\"$__all\"]");
+        }
+
+        @Test
+        @DisplayName("the `service` variable: multi-select, All by default, listed from Loki's JSON-writing streams")
+        void theServiceVariableListsTheApplicationServices() throws Exception {
+            JsonNode variable = serviceVariable();
+            assertThat(variable).as("a `service` template variable").isNotNull();
+
+            assertThat(variable.path("type").asText()).isEqualTo("query");
+            assertThat(variable.path("datasource").path("uid").asText()).isEqualTo(LOKI_DATASOURCE_UID);
+            assertThat(variable.path("multi").asBoolean()).isTrue();
+            assertThat(variable.path("includeAll").asBoolean()).isTrue();
+            // Listed from Loki, so a service added later appears without editing this file.
+            assertThat(variable.path("query").path("label").asText()).isEqualTo("service_name");
+            // Only streams that carry a `level` label: Alloy sets it only in the JSON pipeline, so
+            // this is exactly the services this repository builds and never PostgreSQL or Redis.
+            assertThat(variable.path("query").path("stream").asText()).isEqualTo("{level=~\".+\"}");
+            assertThat(Files.readString(ALLOY)).contains("stage.labels").contains("level = \"\"");
+            // No customAllValue: "All" expands to that list. `.+` would also match the
+            // infrastructure streams and count their lines under "lines for this correlation ID"
+            // whenever the textbox is empty.
+            assertThat(variable.path("customAllValue").asText("")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("the log panel shows which service wrote each line")
+        void theLogPanelShowsTheService() throws Exception {
+            for (JsonNode panel : dashboard().path("panels")) {
+                if ("logs".equals(panel.path("type").asText())
+                        && !panel.path("title").asText().startsWith(INFRASTRUCTURE_PANEL)) {
+                    // Grafana's "unique labels": the labels that differ between lines, which with
+                    // more than one service selected is `service_name` (and its `container`).
+                    assertThat(panel.path("options").path("showLabels").asBoolean())
+                            .as("showLabels on '%s'", panel.path("title").asText())
+                            .isTrue();
+                    return;
+                }
+            }
+            throw new AssertionError("no service log panel on the dashboard");
         }
     }
 

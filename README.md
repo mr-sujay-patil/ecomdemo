@@ -1928,15 +1928,17 @@ curl -sG http://localhost:3100/loki/api/v1/query_range \
 #    (KI-035), which is what Explore's "All logs for this request" link asks for.
 
 # 2. Grafana -> the "EcomDemo Logs" dashboard (http://localhost:3000, admin/admin)
-#    Paste the ID into the "Correlation ID" textbox at the top.
+#    Paste the ID into the "Correlation ID" textbox at the top. The "Service"
+#    selector next to it defaults to All, so you see the gateway's request line
+#    and every service the request reached (KI-070); pick one to narrow it.
 
 # 3. Grafana -> Explore -> Loki. Expand any log line and click
 #    "All logs for this request" — a DERIVED FIELD in the datasource turns the ID
 #    inside the JSON into a link to every other line that shares it.
 ```
 
-The logs dashboard also carries lines per second by level, an error count, and a second panel for
-PostgreSQL and Redis — because the explanation for an application error is sometimes a line the
+The logs dashboard also carries lines per second by level and an error count (both for the
+services the "Service" selector picks), and a second panel for PostgreSQL and Redis — because the explanation for an application error is sometimes a line the
 database wrote a second earlier, and having to go and find that in `docker logs` is exactly the
 friction centralized logging removes.
 
