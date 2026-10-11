@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 import com.ecomdemo.redis.RedisClientCertificateAutoConfiguration;
+import com.ecomdemo.support.RedisAcl;
 import java.io.IOException;
 import java.math.BigInteger;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.cert.X509Certificate;
@@ -40,27 +42,29 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
 
 /**
- * Redis authenticates its clients by certificate AND password, on the real image (Phase 36).
+ * Redis authenticates its clients by certificate, on the real image (Phase 36; since Phase 37 the certificate also
+ * names the ACL user, and there is no shared password: {@code RedisAclIT}).
  *
- * <p>Redis is started as its Deployment starts it: the manifest's image and arguments, the password where
- * Kubernetes expands {@code $(REDIS_PASSWORD)}, a certificate where cert-manager's {@code cache-tls} is mounted.
+ * <p>Redis is started as its Deployment starts it: the manifest's image and arguments, a certificate where
+ * cert-manager's {@code cache-tls} is mounted, the ACL file where its ConfigMap is mounted.
  * The clients are a service's own: {@code app}'s Redis and {@code redis} SSL-bundle settings from its ConfigMap,
  * given to Spring Boot as its pod gives them, with the certificate under test where the pod mounts its client
  * certificate. Then:
  * <ul>
- *   <li>the service's certificate and the password: PONG;</li>
- *   <li>no certificate, or one from another CA, fails the handshake; the certificate without the password gets
- *       NOAUTH;</li>
+ *   <li>the service's certificate: PONG, with no password (Phase 37: it logs in as the user its CN names);</li>
+ *   <li>no certificate, or one from another CA, fails the handshake; a client that still sends the old shared
+ *       password is refused (Phase 37: {@code default} is off);</li>
  *   <li>a renewed client certificate is used by the next connection, with no restart, and Spring Boot alone
  *       would NOT use it (the reason for {@code com.ecomdemo.redis});</li>
  *   <li>the pod's readiness probe and {@code cert-reload} sidecar work with Redis's own certificate as their
  *       client certificate, and would not with a `server auth`-only one.</li>
  * </ul>
  */
-@DisplayName("Redis client certificates on the real image (Phase 36)")
+@DisplayName("Redis client certificates on the real image (Phase 36, Phase 37)")
 class RedisClientAuthIT {
 
-    private static final String PASSWORD = "it-redis-password";
+    /** What a client configured before Phase 37 would still send. */
+    private static final String OLD_SHARED_PASSWORD = "it-redis-password";
     private static final String SERVER_EXTENSIONS =
             "subjectAltName=DNS:localhost,DNS:cache,IP:127.0.0.1\\nextendedKeyUsage=serverAuth,clientAuth";
 
@@ -75,14 +79,15 @@ class RedisClientAuthIT {
         issuer = KafkaTestBroker.startIssuer();
         KafkaTestBroker.issueCa(issuer, files, "ca");
         KafkaTestBroker.issueCa(issuer, files, "other-ca");
-        // cache-tls as cert-manager issues it from k8s/service-certificates.yaml: both usages.
-        KafkaTestBroker.issueLeaf(issuer, files, "cache", "ca", "cache", SERVER_EXTENSIONS);
-        KafkaTestBroker.issueLeaf(issuer, files, "cache-renewed", "ca", "cache", SERVER_EXTENSIONS);
-        KafkaTestBroker.issueLeaf(issuer, files, "cache-server-only", "ca", "cache",
+        // cache-tls as cert-manager issues it from k8s/service-certificates.yaml: both usages, and (Phase 37) the CN
+        // that makes the pod's own tools the ACL user cache-admin.
+        KafkaTestBroker.issueLeaf(issuer, files, "cache", "ca", RedisAcl.ADMIN, SERVER_EXTENSIONS);
+        KafkaTestBroker.issueLeaf(issuer, files, "cache-renewed", "ca", RedisAcl.ADMIN, SERVER_EXTENSIONS);
+        KafkaTestBroker.issueLeaf(issuer, files, "cache-server-only", "ca", RedisAcl.ADMIN,
                 "subjectAltName=DNS:localhost,IP:127.0.0.1\\nextendedKeyUsage=serverAuth");
         KafkaTestBroker.issueClient(issuer, files, "ecomdemo", "ca", "ecomdemo");
         KafkaTestBroker.issueClient(issuer, files, "other-ca-ecomdemo", "other-ca", "ecomdemo");
-        redis = startRedis("cache");
+        redis = startRedis(files, "cache");
     }
 
     @AfterAll
@@ -95,8 +100,8 @@ class RedisClientAuthIT {
     }
 
     @Test
-    @DisplayName("app's certificate and the password: PONG")
-    void certificateAndPassword() throws Exception {
+    @DisplayName("app's certificate, and no password: PONG")
+    void certificateAlone() throws Exception {
         Path mount = KafkaTestBroker.clientMount(files, files.resolve("app"), "ecomdemo", "ca");
         appRedisClients(redis, mount, true).run(context -> {
             try (RedisConnection connection = context.getBean(LettuceConnectionFactory.class).getConnection()) {
@@ -135,12 +140,12 @@ class RedisClientAuthIT {
     }
 
     @Test
-    @DisplayName("the certificate without the password: the TLS session is set up, then NOAUTH")
-    void certificateWithoutPassword() throws Exception {
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("no-password"), "ecomdemo", "ca");
-        appRedisClients(redis, mount, true, "SPRING_DATA_REDIS_PASSWORD").run(context ->
-                assertThatThrownBy(() -> ping(context.getBean(LettuceConnectionFactory.class)))
-                        .hasStackTraceContaining("NOAUTH"));
+    @DisplayName("the certificate with the old shared password: refused (Phase 37: the AUTH asks for `default`, which is off)")
+    void certificateWithTheOldPassword() throws Exception {
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("old-password"), "ecomdemo", "ca");
+        appRedisClients(redis, mount, true).withPropertyValues("spring.data.redis.password=" + OLD_SHARED_PASSWORD)
+                .run(context -> assertThatThrownBy(() -> ping(context.getBean(LettuceConnectionFactory.class)))
+                        .hasStackTraceContaining("WRONGPASS"));
     }
 
     @Test
@@ -204,7 +209,7 @@ class RedisClientAuthIT {
     @Test
     @DisplayName("the cert-reload sidecar, presenting the renewed certificate, makes Redis serve it")
     void certReloadSidecar() throws Exception {
-        try (GenericContainer<?> reloading = startRedis("cache")) {
+        try (GenericContainer<?> reloading = startRedis(files, "cache")) {
             BigInteger before = servedSerial(reloading);
             // The sidecar's own script, checking every second instead of every 30, in the same image (in the pod
             // it is a second container beside Redis, with the same volume and network).
@@ -224,18 +229,19 @@ class RedisClientAuthIT {
         }
     }
 
-    /** Redis, started as its Deployment starts it, with {@code leaf} as its certificate and the CA {@code ca}. */
-    private static GenericContainer<?> startRedis(String leaf) throws IOException {
+    /**
+     * Redis, started as its Deployment starts it, with {@code leaf} as its certificate, the CA {@code ca}, and the
+     * ACL file of the {@code cache-acl} ConfigMap where the pod mounts it (Phase 37).
+     */
+    static GenericContainer<?> startRedis(Path files, String leaf) throws IOException {
         Map<String, Object> container = redisContainer();
-        List<String> args = PostgresTlsConfigTest.strings(container.get("args")).stream()
-                .map(argument -> argument.replace("$(REDIS_PASSWORD)", PASSWORD)).toList();
-        assertThat(args).doesNotContain("$(REDIS_PASSWORD)");
+        List<String> args = PostgresTlsConfigTest.strings(container.get("args"));
 
         GenericContainer<?> started = new GenericContainer<>((String) container.get("image"))
                 .withCommand(args.toArray(String[]::new))
-                // The pod's REDISCLI_AUTH, from the same Secret as the password.
-                .withEnv("REDISCLI_AUTH", PASSWORD)
                 .withExposedPorts(6379)
+                .withCopyToContainer(Transferable.of(RedisAcl.file().getBytes(StandardCharsets.UTF_8), 0644),
+                        RedisAclConfigTest.ACL_PATH)
                 .withCopyToContainer(Transferable.of(Files.readAllBytes(files.resolve(leaf + ".crt")), 0644),
                         "/etc/ecomdemo-tls/tls.crt")
                 .withCopyToContainer(Transferable.of(Files.readAllBytes(files.resolve(leaf + ".key")), 0644),
@@ -249,14 +255,20 @@ class RedisClientAuthIT {
 
     /**
      * {@code app}'s Redis clients, as the service builds them: its ConfigMap's {@code SPRING_DATA_REDIS_*} and
-     * {@code redis} bundle settings as environment variables, the host and port replaced, the password from its
-     * Secret, the client-certificate paths pointing at {@code mount}; {@code without} names settings to leave out.
+     * {@code redis} bundle settings as environment variables, the host and port replaced, the client-certificate
+     * paths pointing at {@code mount}, and no password (Phase 37); {@code without} names settings to leave out.
      * {@code currentCertificate} adds the service's own {@code com.ecomdemo.redis} auto-configuration.
      */
     private static ApplicationContextRunner appRedisClients(GenericContainer<?> server, Path mount,
             boolean currentCertificate, String... without) throws IOException {
+        return redisClients("app", server, mount, currentCertificate, without);
+    }
+
+    /** {@code service}'s Redis clients, as {@link #appRedisClients} builds app's. */
+    static ApplicationContextRunner redisClients(String service, GenericContainer<?> server, Path mount,
+            boolean currentCertificate, String... without) throws IOException {
         Map<String, Object> environment = new HashMap<>();
-        PostgresTlsConfigTest.clientSettings("app").forEach((name, value) -> {
+        PostgresTlsConfigTest.clientSettings(service).forEach((name, value) -> {
             if (name.startsWith("SPRING_DATA_REDIS_") || name.startsWith("SPRING_SSL_BUNDLE_PEM_REDIS_")) {
                 environment.put(name, String.valueOf(value).replace(KafkaTestBroker.CLIENT_MOUNT, mount.toString()));
             }
@@ -264,7 +276,6 @@ class RedisClientAuthIT {
         assertThat(environment).containsEntry("SPRING_DATA_REDIS_SSL_BUNDLE", "redis");
         environment.put("SPRING_DATA_REDIS_HOST", server.getHost());
         environment.put("SPRING_DATA_REDIS_PORT", String.valueOf(server.getMappedPort(6379)));
-        environment.put("SPRING_DATA_REDIS_PASSWORD", PASSWORD);
         for (String name : without) {
             assertThat(environment.remove(name)).as(name).isNotNull();
         }

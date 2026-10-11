@@ -1,0 +1,58 @@
+# Who may do what on Redis (Phase 37, KI-065). Redis requires a client certificate from the cluster CA (Phase 36)
+# and logs each connection in as the ACL user NAMED BY THE CERTIFICATE'S CN (`--tls-auth-clients-user CN`,
+# k8s/data/cache.yaml): `CN=catalog` is the user `catalog`, the same name the service has on PostgreSQL and Kafka.
+# Each user may then run only the commands its code sends, on only the keys its code uses. Derived from the code;
+# each line below says which code needs it.
+#
+# How to read a line: `reset` starts from nothing (no password, no keys, no commands, no channels), `on` enables
+# the user, `~pattern` is a key the user may touch, `+command` a command it may run, `+cmd|sub` one subcommand.
+# Explicit commands rather than whole categories: `+@write` would also grant FUNCTION LOAD and FUNCTION FLUSH,
+# `+@connection` CLIENT KILL; a category is easy to write and hard to see the end of.
+#
+# Every service user gets what each Lettuce connection and the health check send: HELLO (RESP3), PING,
+# CLIENT SETINFO (the library's name and version) and INFO (Boot's Redis health indicator runs INFO; it is
+# in @dangerous because it reveals server details, which a service that holds the data anyway may know).
+#
+# NO PASSWORDS: a service user has none, and none is `nopass`. The ONLY way to become `catalog` is a certificate
+# with CN=catalog: `AUTH catalog <anything>` is refused, so one service's certificate cannot switch to another
+# service's user. The clients send no password (an AUTH would log the connection out of its certificate's user).
+#
+# `default` is OFF: a connection whose certificate names no user here (customer-service's, say) gets NOAUTH for
+# every command. `cache-admin` is the Redis pod's own certificate (cache-tls, CN cache-admin), used only by the
+# tools that run inside that pod: the readiness probe (PING), the cert-reload sidecar (CONFIG SET, ACL LOAD) and
+# the smoke test's redis-cli (reads and deletes any key). It may do everything: it runs beside the server's key
+# and its data already, so a narrower user would protect nothing from it.
+#
+# Applied by Redis at start (`--aclfile`). A change made here and applied (`kubectl apply -k k8s/`) reaches the
+# pod's volume within about a minute, and the cert-reload sidecar then runs ACL LOAD: no restart. If the new file
+# has an error, Redis keeps the old ACL and the sidecar logs it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cache-acl
+  labels:
+    app.kubernetes.io/name: cache
+    app.kubernetes.io/part-of: ecomdemo
+data:
+  users.acl: |
+    # Nobody: a certificate whose CN is not a user below logs in as `default`, which can do nothing.
+    user default reset off
+    # The tools in the Redis pod (cache-tls): readiness probe, cert-reload sidecar, smoke test.
+    user cache-admin reset on ~* &* +@all
+    # app (ecomdemo-app): no keys. It keeps a Redis connection for its health indicator only; the catalogue
+    # cache moved to catalog-service in Phase 20c.
+    user ecomdemo reset on +hello +ping +client|setinfo +info
+    # catalog-service: the catalogue cache (CacheConfig, CacheNames). RedisCacheManager keys are `<cache>::<key>`:
+    # GET (@Cacheable), SET with a TTL (@Cacheable, @CachePut), DEL (@CacheEvict), and for a whole-cache clear
+    # (@CacheEvict(allEntries), ProductCacheEvictor) KEYS `productList::*` then DEL: RedisCacheWriter's default
+    # batch strategy is KEYS. Database 0 (no SELECT).
+    user catalog reset on ~product::* ~productList::* +hello +ping +client|setinfo +info +get +set +del +keys
+    # gateway-service: the rate limiter (RequestRateLimiter, RedisRateLimiter) in DATABASE 1 (application.yml), so
+    # SELECT. Its token bucket is a Lua script: EVALSHA, and EVAL when Redis does not have the script yet; inside
+    # it GET, SETEX and TIME, on `request_rate_limiter.{<key>}.tokens` and `.timestamp`. The limiter FAILS OPEN
+    # on an error, so a missing permission here would switch it off without a sound (RateLimitAclIT).
+    user gateway reset on ~request_rate_limiter.* +hello +ping +client|setinfo +info +select +evalsha +eval +get +setex +time
+    # assistant-service: conversations (RedisChatMemoryRepository: SCAN, LRANGE, DEL, and MULTI/DEL/RPUSH/EXPIRE/
+    # EXEC to replace one; DISCARD if that fails half-way) and proposed cart additions (PendingActions: SET with
+    # a TTL, GETDEL).
+    user assistant reset on ~assistant:memory:* ~assistant:action:* +hello +ping +client|setinfo +info +scan +lrange +rpush +del +expire +multi +exec +discard +set +getdel
