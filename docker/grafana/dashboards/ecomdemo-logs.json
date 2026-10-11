@@ -1,5 +1,5 @@
 {
-  "description": "Every log line the application wrote, searchable by correlation ID. Provisioned from docker/grafana/dashboards/ecomdemo-logs.json - edits made in this UI are overwritten on reload.",
+  "description": "Every log line the services wrote (the gateway, the application and each extracted service), searchable by correlation ID. Provisioned from docker/grafana/dashboards/ecomdemo-logs.json - edits made in this UI are overwritten on reload.",
   "editable": false,
   "graphTooltip": 1,
   "links": [],
@@ -18,6 +18,23 @@
         "query": "",
         "skipUrlSync": false,
         "type": "textbox"
+      },
+      {
+        "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
+        "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
+        "definition": "label_values({level=~\".+\"}, service_name)",
+        "description": "Which services' lines the panels below show. All by default, so a pasted correlation ID shows the whole request: the gateway's line, the application's and every service it reached (KI-070). Listed from the streams that carry a level label - only the JSON pipeline in docker/alloy/config.alloy sets one - so these are the services this repository builds, never PostgreSQL or Redis, and a new service appears here once it has logged.",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Service",
+        "multi": true,
+        "name": "service",
+        "options": [],
+        "query": { "label": "service_name", "refId": "LokiVariableQueryEditor-VariableQuery", "stream": "{level=~\".+\"}", "type": 1 },
+        "refresh": 2,
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
       },
       {
         "current": { "selected": true, "text": ["All"], "value": ["$__all"] },
@@ -50,7 +67,7 @@
       "id": 1,
       "type": "timeseries",
       "title": "Log lines per second, by level",
-      "description": "The shape of the log, not its content. A step change here is the fastest way to notice that something started going wrong, and an ERROR line appearing at all is worth a look - which is why `level` is a Loki LABEL and therefore cheap to group by.",
+      "description": "The shape of the log, not its content. Every selected service, stacked by level. A step change here is the fastest way to notice that something started going wrong, and an ERROR line appearing at all is worth a look - which is why `level` is a Loki LABEL and therefore cheap to group by.",
       "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "fieldConfig": {
@@ -76,7 +93,7 @@
         {
           "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
           "editorMode": "code",
-          "expr": "sum by (level) (rate({service_name=\"app\", level=~\"$level\"} [$__auto]))",
+          "expr": "sum by (level) (rate({service_name=~\"$service\", level=~\"$level\"} [$__auto]))",
           "legendFormat": "{{level}}",
           "queryType": "range",
           "refId": "A"
@@ -108,7 +125,7 @@
         {
           "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
           "editorMode": "code",
-          "expr": "sum(count_over_time({service_name=\"app\", level=\"ERROR\"} [$__range]))",
+          "expr": "sum(count_over_time({service_name=~\"$service\", level=\"ERROR\"} [$__range]))",
           "instant": true,
           "queryType": "instant",
           "refId": "A"
@@ -134,7 +151,7 @@
         {
           "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
           "editorMode": "code",
-          "expr": "sum(count_over_time({service_name=\"app\"} | correlation_id = `$correlation_id` [$__range]))",
+          "expr": "sum(count_over_time({service_name=~\"$service\"} | correlation_id = `$correlation_id` [$__range]))",
           "instant": true,
           "queryType": "instant",
           "refId": "A"
@@ -144,8 +161,8 @@
     {
       "id": 4,
       "type": "logs",
-      "title": "Application log",
-      "description": "The lines themselves. With a correlation ID in the textbox at the top this is one request's whole story, in order, including the lines Spring and Hibernate wrote during it - which is the thing that was impossible before this phase. The filter is `| correlation_id = \"...\"`, a STRUCTURED METADATA match rather than a label selector: see docker/alloy/config.alloy for why an ID must never become a label.",
+      "title": "Service log",
+      "description": "The lines themselves. With a correlation ID in the textbox at the top this is one request's whole story, in order, across every selected service (the gateway's request line first, then the application and each service it reached), including the lines Spring and Hibernate wrote during it - which is the thing that was impossible before this phase. The labels shown on each line say which service wrote it. The filter is `| correlation_id = \"...\"`, a STRUCTURED METADATA match rather than a label selector: see docker/alloy/config.alloy for why an ID must never become a label.",
       "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
       "gridPos": { "h": 16, "w": 24, "x": 0, "y": 8 },
       "options": {
@@ -153,7 +170,7 @@
         "enableLogDetails": true,
         "prettifyLogMessage": true,
         "showCommonLabels": false,
-        "showLabels": false,
+        "showLabels": true,
         "showTime": true,
         "sortOrder": "Descending",
         "wrapLogMessage": true
@@ -162,7 +179,7 @@
         {
           "datasource": { "type": "loki", "uid": "ecomdemo-loki" },
           "editorMode": "code",
-          "expr": "{service_name=\"app\", level=~\"$level\"} | correlation_id =~ `$correlation_id.*`",
+          "expr": "{service_name=~\"$service\", level=~\"$level\"} | correlation_id =~ `$correlation_id.*`",
           "queryType": "range",
           "refId": "A"
         }
