@@ -51,12 +51,16 @@ check "foreign stack: says why" "$(printf '%s' "$OUT" | command grep -q "another
 check "foreign stack: no HTTP request sent" "$(! command grep -q '^curl' "$CALLS"; echo $?)"
 check "foreign stack: no container exec/stop/start" "$(! command grep -Eq '^docker (exec|stop|start)' "$CALLS"; echo $?)"
 command grep -E '^docker (exec|stop|start)' "$CALLS" | head -3 | sed 's/^/        saw: /'
-command grep -E '^docker (exec|stop|start)' "$CALLS" | head -3 | sed 's/^/        saw: /'
 
 run_smoke "/home/someone/projects/ecomdemo-backend-readonly" SMOKE_ALLOW_FOREIGN_STACK=1
 check "override: the guard lets the run continue" "$(! printf '%s' "$OUT" | command grep -q "another checkout"; echo $?)"
 
 run_smoke "$ROOT"
 check "own stack: the guard lets the run continue" "$(! printf '%s' "$OUT" | command grep -q "another checkout"; echo $?)"
+
+# KI-069: a refused run's "saw:" diagnostic was printed twice (the line was duplicated). Anchored on
+# `^command grep` so this check's own line never counts itself.
+check "the saw: diagnostic is printed once (KI-069)" \
+    "$([ "$(command grep -c '^command grep .*sed .s/\^/ *saw: /' "$ROOT/scripts/test-smoke-guard.sh")" -eq 1 ]; echo $?)"
 
 [ "$FAILURES" -eq 0 ] && echo "all passed" || { echo "$FAILURES failed"; exit 1; }
