@@ -12,7 +12,7 @@
 **Follow-ups (not done, out of scope):** <suggestions deferred to later phases>
 -->
 
-## Phase 37: Redis ACL Users (tag: phase-37-complete, PR #TBD)
+## Phase 37: Redis ACL Users (tag: phase-37-complete, PR #98)
 **What exists now:** in k8s, Redis logs each connection in as the ACL user named by its client certificate's CN
 (`--tls-auth-clients-user CN`) and authorizes it by `--aclfile /etc/ecomdemo-acl/users.acl` (ConfigMap `cache-acl`,
 `k8s/data/cache-acl.yaml`). Users: `default` off; `cache-admin` (all; CN of `cache-tls`, the Redis pod's own tools);
