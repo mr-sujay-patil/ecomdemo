@@ -15,7 +15,7 @@
 - [x] Implement: `k8s/data/cache-acl.yaml` (ConfigMap), `cache.yaml` (`--aclfile`, `--tls-auth-clients-user CN`, no `requirepass`, ACL reload in the sidecar), `cache-tls` CN, `k8s-up.sh` (no Redis password; removes the old key), Phase 36 tests updated to the new identity model
 - [x] Smoke test (k8s): per-client own key OK / other key NOPERM / FLUSHALL refused / unknown CN NOAUTH; validated against a container with a `kube` shim
 - [ ] `./mvnw -B clean verify` (full, background); `scripts/test-smoke-*.sh`
-- [ ] Docs: decisions, KNOWN_ISSUES (KI-065 fixed; new defects as rows), security.md, README, test report `docs/test-reports/phase-37.md`, RECENT (Phase 37 summary; Phase 35 to archive), tracker 🔵
+- [~] Docs: decisions, KNOWN_ISSUES (KI-065 fixed; new defects as rows), security.md, README, test report `docs/test-reports/phase-37.md`, RECENT (Phase 37 summary; Phase 35 to archive), tracker 🔵
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
 ## Next action

@@ -8,6 +8,19 @@ new technology, on its own feature branch, merged into `main` through a reviewed
 
 ## Current status
 
+**Phase 37: Redis ACL Users — in Kubernetes, each service may touch only its own Redis keys.** Since
+Phase 36 every Redis client showed its own certificate and then logged in as the same `default` user with
+one shared password, so the gateway could flush the catalogue cache and catalog-service could read the
+assistant's conversations. Now:
+- Redis **logs a connection in as the ACL user named by its certificate's CN**
+  (`--tls-auth-clients-user CN`): `catalog`, `gateway`, `assistant`, `ecomdemo`.
+- Each user may run only the commands its code sends, on only its keys (`k8s/data/cache-acl.yaml`, one
+  file in Git, mounted with `--aclfile`): catalog `product::*`/`productList::*`, the gateway its rate-limit
+  buckets in database 1, the assistant `assistant:*`, app no key at all. `default` is off.
+- **No password any more** in the cluster: a service user has none, so the only way to become `catalog` is
+  catalog's private key, and `AUTH` cannot switch to another user. Compose keeps its password. See
+  [Redis ACL users](#redis-acl-users-phase-37) and [`docs/test-reports/phase-37.md`](docs/test-reports/phase-37.md).
+
 **Phase 36: Redis Client Certificates — in Kubernetes, Redis now knows WHO connects too.** Redis was
 the last store a pod could use with the password alone. Now:
 - Redis asks every client for a **certificate from the cluster CA** in the TLS handshake, and still for
@@ -3657,6 +3670,37 @@ Redis was the last data store that took the password alone. Now it checks the cl
 **What is not covered.** Compose stays HTTP on `127.0.0.1` (KI-003): the same images run there, and the TLS settings live only
 in the k8s ConfigMaps. If the CA ever has to be replaced, every service must restart to rebuild its
 truststore (a renewed *service* certificate does not: it is reloaded).
+
+### Redis ACL users (Phase 37)
+
+Phase 36 made Redis ask WHO connects; Phase 37 makes the answer matter. Authentication (the certificate)
+now decides authorization (the ACL user).
+
+- **The mapping.** `--tls-auth-clients-user CN` logs a connection in as the user whose name is the client
+  certificate's common name, as soon as the TLS handshake ends, with no `AUTH`. A certificate from the
+  cluster CA whose CN is no user (customer-service's, say) is `default`, which is **off**: `NOAUTH` for
+  every command.
+- **The ACL** (`k8s/data/cache-acl.yaml`, the `cache-acl` ConfigMap, mounted at `/etc/ecomdemo-acl`) has
+  one line per user, derived from the code, with the reason above each line. Commands are named one by one
+  (`+get +set +unlink +keys`), not as categories: `+@write` would also allow `FUNCTION FLUSH`, and
+  `+@connection` `CLIENT KILL`. The tests read the key prefixes from the code (`CacheNames`, the assistant's
+  `PREFIX` constants), so a renamed cache fails a test before it fails on the cluster.
+- **What running the real code found.** Spring Data Redis 4 deletes cache entries with `UNLINK`, not `DEL`,
+  and does it asynchronously, so a refused delete never reaches the caller; the assistant's
+  `expire(Duration)` is `PEXPIRE`; the rate limiter's keys are `request_rate_limiter.{<route>.<key>}.*`.
+  Each service's IT runs its own Redis code under its user and then asks Redis's `ACL LOG` what it refused:
+  the cache's error handler and the rate limiter (which fails OPEN) would otherwise hide a refusal.
+- **No password.** Redis no longer has `requirepass`; the four services send none (an `AUTH` would ask for
+  `default`, which is off, and the connection would fail). The tools in the Redis pod are `cache-admin`,
+  the CN of the pod's own certificate `cache-tls`:
+  `kubectl -n ecomdemo exec deploy/cache -c redis -- redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /etc/ecomdemo-tls/tls.crt --key /etc/ecomdemo-tls/tls.key ACL WHOAMI`
+- **Changing the ACL**: edit the file, `kubectl apply -k k8s/`; within about a minute the pod's volume has
+  it and the `cert-reload` sidecar runs `ACL LOAD` (no restart; a broken file is refused and the old ACL
+  kept). Try a user's rights with `ACL DRYRUN catalog GET assistant:memory:x`.
+- **On an existing cluster**, run `scripts/k8s-up.sh` (it removes `SPRING_DATA_REDIS_PASSWORD` from the
+  four services' Secrets) and then `kubectl -n ecomdemo rollout restart deploy`: until a service restarts it
+  still sends the old password and is refused.
+- **Not done:** compose keeps one password and the `default` user (no TLS there, so no CN to map; KI-072).
 
 ### The smoke test in CI (KI-049)
 
