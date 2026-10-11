@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-11
 - **Phase:** 37: Redis ACL Users per Service (`docs/phases/phase-37-redis-acl-users.md`), closes KI-065; approved 2026-10-11 ("KI-065 phase")
 - **Branch:** feature/phase-37-redis-acl-users (cut from `main` at `a71a161`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
 - **Waiting for user:** NO
 - **History:** Phase 36 (PR #91) merged and merge-verified earlier; the owner pushes `phase-36-complete` (tag pushes are refused here, 403). Fixes KI-064/066/067/068/069/071 merged since (PRs #92-#97)
 
@@ -14,8 +14,8 @@
 - [x] Tests first (red, `55cf65a`): `RedisAclConfigTest` (manifests), `RedisAclIT` (real image, TLS, the manifest's ACL), gateway `RateLimitAclIT` (real limiter under its ACL user)
 - [x] Implement: `k8s/data/cache-acl.yaml` (ConfigMap), `cache.yaml` (`--aclfile`, `--tls-auth-clients-user CN`, no `requirepass`, ACL reload in the sidecar), `cache-tls` CN, `k8s-up.sh` (no Redis password; removes the old key), Phase 36 tests updated to the new identity model
 - [x] Smoke test (k8s): per-client own key OK / other key NOPERM / FLUSHALL refused / unknown CN NOAUTH; validated against a container with a `kube` shim
-- [ ] `./mvnw -B clean verify` (full, background); `scripts/test-smoke-*.sh`
-- [~] Docs: decisions, KNOWN_ISSUES (KI-065 fixed; new defects as rows), security.md, README, test report `docs/test-reports/phase-37.md`, RECENT (Phase 37 summary; Phase 35 to archive), tracker 🔵
+- [x] `./mvnw -B clean verify`: 929 tests (686 unit, 243 IT), green on the 2nd run (1st: PostgresTlsIT renewal flake, KI-076); `scripts/test-smoke-*.sh` 4/4
+- [x] Docs: decisions, KNOWN_ISSUES (KI-065 fixed; new defects as rows), security.md, README, test report `docs/test-reports/phase-37.md`, RECENT (Phase 37 summary; Phase 35 to archive), tracker 🔵
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
 ## Next action
