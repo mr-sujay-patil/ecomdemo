@@ -3,23 +3,23 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-11
-- **Fix:** KI-067 and KI-068 (remaining half): `scripts/smoke-test.sh` gates container sections on `command -v docker` before `ctr_exec` (kubectl on k8s), so they SKIP on a cluster with no docker CLI; and no workflow runs `scripts/test-smoke-*.sh`
-- **Branch:** fix/ki-067-068-smoke-docker-gates (cut from `main` at `abed84a`); grouped per workflow rule 11 (both are review findings on the smoke test's helpers; the user said "proceed")
-- **Step:** PR_OPEN (PR #93, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #93, then `approved, merge it`
-- **History:** PR #92 (KI-064, KI-066 and KI-068's weak test) merged at `abed84a`; the owner pushes `ki-064-fixed` and `ki-066-fixed` (tag pushes are refused here, 403)
+- **Fix:** KI-035: the gateway writes no request log (its "logs no bodies" is an absence, not a decision), and no span carries the correlation id, so an id shown on a 503 the gateway answered itself (`/fallback/catalog`) leads to nothing in Loki or Tempo (it blocks the web team's KI-032)
+- **Branch:** fix/ki-035-gateway-request-log (cut from `main` at `f575442`); the owner approved it on 2026-10-11 ("go with backend KI-035")
+- **Step:** PR_OPEN (PR #94, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #94 (including the compose smoke test), then `approved, merge it`
+- **History:** PR #92 (KI-064, KI-066, KI-068's weak test) merged at `abed84a`; PR #93 (KI-067, KI-068) merged at `f575442`. The owner pushes `ki-064-fixed`, `ki-066-fixed`, `ki-067-fixed`, `ki-068-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
-- [x] Regression test (fails first): `scripts/test-smoke-gates.sh` runs each gate read out of `smoke-test.sh` with its real `ctr_exec` and fake kubectl/docker (8 failed before; both mutations caught)
-- [x] Fix: `ctr_available` in `smoke-clients.sh`; those sections (and the container discovery) gate on the helper; compose behaviour unchanged; what the checks assert unchanged
-- [x] CI: `ci.yml` job `smoke-script-tests` runs every `scripts/test-smoke-*.sh` (cheap, bash and coreutils only)
-- [x] `bash -n`, all `scripts/test-smoke-*.sh` green; `./mvnw -B clean verify` (874 tests, 0 failures)
-- [x] Docs: KNOWN_ISSUES (fixed, PR #93; new KI-069), decisions [Fix KI-067, KI-068]
-- [x] Push, PR #93 (label `run-smoke`), CURRENT to PR_OPEN
-- [ ] CI green on PR #93, including the compose smoke test and the new `smoke-script-tests` job
+- [x] Regression tests (fail first; 7 of 7 red on main: no line written, span attribute null): `GatewayRequestLogIT` (one line per exchange, its correlation id in the MDC, nothing quoted: no token, no query string, no body; 401 logged; generated id; actuator skipped; the fallback writes ONE line) and a span test (the gateway's SERVER span for the fallback request carries `correlation_id`)
+- [x] Fix: `RequestLogWebFilter` (WebFilter, HIGHEST_PRECEDENCE + 10, mirrors common's `RequestLogFilter`); `CorrelationIdWebFilter` keeps the id as an exchange attribute; an `ObservationFilter` in the gateway's `TracingConfig` puts it on the server span
+- [x] "Logs for this request" paths include the gateway (Grafana's derived field, the smoke test's correlation checks) where in scope
+- [x] Targeted gateway runs, then `./mvnw -B clean verify` (886 tests, 0 failures; 874 before + 12 new)
+- [x] Docs: KNOWN_ISSUES (fixed; new KI-070), decisions `[Fix KI-035]`, a note on the Phase 23 decision, `CorrelationIdWebFilter`'s javadoc
+- [x] Push, PR #94 (label `run-smoke`), CURRENT to PR_OPEN
+- [ ] CI green on PR #94, including the compose smoke test's new KI-035 checks; the owner runs the k8s smoke test
 
 ## Next action
-Wait for CI on PR #93 (with `run-smoke`; the new `smoke-script-tests` job runs for the first time); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-067-fixed` and `ki-068-fixed`. Open from this fix: KI-069 (duplicated diagnostic line in `test-smoke-guard.sh`).
+Wait for CI on PR #94 (`run-smoke`: the new Loki checks run against compose for the first time); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-035-fixed`. Open from this fix: KI-070 (the logs dashboard queries only `app`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
