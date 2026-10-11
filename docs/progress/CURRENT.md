@@ -2,21 +2,24 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-10-10
-- **Fix:** KI-064 and KI-066, the smoke test's `redis_cli`/`redis_cli_noauth`/`psql_query` use a host client on k8s (wrong Redis/database) and require `docker` for the in-pod path
-- **Branch:** fix/ki-064-066-in-pod-clients (cut from `main` at `a4dbee7`); grouped per workflow rule 11 (same cause, same code)
-- **Step:** PR_OPEN (PR #92, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #92, then `approved, merge it`. Chosen after the user said "continue" (next open backend defect). Tags (`phase-36-complete` and earlier) are the user's to push (403 here).
+- **Updated:** 2026-10-11
+- **Fix:** KI-067 and KI-068 (remaining half): `scripts/smoke-test.sh` gates container sections on `command -v docker` before `ctr_exec` (kubectl on k8s), so they SKIP on a cluster with no docker CLI; and no workflow runs `scripts/test-smoke-*.sh`
+- **Branch:** fix/ki-067-068-smoke-docker-gates (cut from `main` at `abed84a`); grouped per workflow rule 11 (both are review findings on the smoke test's helpers; the user said "proceed")
+- **Step:** PR_OPEN (PR #93, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #93, then `approved, merge it`
+- **History:** PR #92 (KI-064, KI-066 and KI-068's weak test) merged at `abed84a`; the owner pushes `ki-064-fixed` and `ki-066-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
-- [x] Regression test `scripts/test-smoke-clients.sh` with fake `redis-cli`/`psql`/`kubectl` (fails first): on k8s the in-pod path is used even with host clients present; on compose a host client is still preferred
-- [x] `scripts/smoke-clients.sh` (sourced, like `smoke-burst.sh`): the three helpers; `k8s-smoke.sh` copies it
-- [x] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-064, KI-066]
-- [x] `./mvnw -B clean verify` (874 tests); PR #92
-- [ ] CI green on PR #92, including the compose smoke test
+- [x] Regression test (fails first): `scripts/test-smoke-gates.sh` runs each gate read out of `smoke-test.sh` with its real `ctr_exec` and fake kubectl/docker (8 failed before; both mutations caught)
+- [x] Fix: `ctr_available` in `smoke-clients.sh`; those sections (and the container discovery) gate on the helper; compose behaviour unchanged; what the checks assert unchanged
+- [x] CI: `ci.yml` job `smoke-script-tests` runs every `scripts/test-smoke-*.sh` (cheap, bash and coreutils only)
+- [x] `bash -n`, all `scripts/test-smoke-*.sh` green; `./mvnw -B clean verify` (874 tests, 0 failures)
+- [x] Docs: KNOWN_ISSUES (fixed, PR #93; new KI-069), decisions [Fix KI-067, KI-068]
+- [x] Push, PR #93 (label `run-smoke`), CURRENT to PR_OPEN
+- [ ] CI green on PR #93, including the compose smoke test and the new `smoke-script-tests` job
 
 ## Next action
-Wait for CI on PR #92 (with `run-smoke`); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-064-fixed` and `ki-066-fixed`. Open from the review: KI-067 (other docker gates in smoke-test.sh), KI-068's CI wiring.
+Wait for CI on PR #93 (with `run-smoke`; the new `smoke-script-tests` job runs for the first time); fix it if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-067-fixed` and `ki-068-fixed`. Open from this fix: KI-069 (duplicated diagnostic line in `test-smoke-guard.sh`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

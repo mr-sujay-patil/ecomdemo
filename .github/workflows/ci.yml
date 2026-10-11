@@ -138,6 +138,34 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # -------------------------------------------------------------------------------------------
+  # The smoke test's own tests (KI-068)
+  # -------------------------------------------------------------------------------------------
+  # scripts/test-smoke-*.sh test the smoke test's helpers and gates (the burst verdict, which Redis and
+  # PostgreSQL client is reached, the container gates, the foreign-stack guard) with fakes: no stack, no
+  # Docker, no Java, nothing a stock runner lacks (bash, coreutils, awk). smoke.yml runs the smoke test itself only on a `run-smoke`
+  # PR, so without this job a change that broke them went unnoticed. A job of its own, beside `build`,
+  # so it reports in about a minute; the glob picks up a new test-smoke-*.sh without editing this file.
+  smoke-script-tests:
+    name: Smoke test script tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v7
+
+      - name: Run every scripts/test-smoke-*.sh
+        # Every test runs even after one fails, so one run shows every failure; the step fails if any did.
+        run: |
+          status=0
+          for test in scripts/test-smoke-*.sh; do
+            echo "::group::$test"
+            bash "$test" || status=1
+            echo "::endgroup::"
+          done
+          exit "$status"
+
+  # -------------------------------------------------------------------------------------------
   # Dependency scan (Phase 31): OWASP Dependency-Check against the NVD
   # -------------------------------------------------------------------------------------------
   # Every jar the services depend on, matched against the National Vulnerability Database.

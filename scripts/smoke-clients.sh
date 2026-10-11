@@ -1,7 +1,15 @@
-# Sourced by scripts/smoke-test.sh (and scripts/test-smoke-clients.sh): the smoke test's Redis and
-# PostgreSQL clients. They use the caller's ctr_exec, REDIS_CONTAINER, POSTGRES_CONTAINER, REDIS_TLS,
-# PGUSER_ and PGDB.
-#
+# Sourced by scripts/smoke-test.sh (and scripts/test-smoke-clients.sh, scripts/test-smoke-gates.sh): the
+# smoke test's container gate and its Redis and PostgreSQL clients. They use the caller's ctr_exec,
+# REDIS_CONTAINER, POSTGRES_CONTAINER, REDIS_TLS, PGUSER_ and PGDB.
+
+# ctr_available <container> -> succeeds when the container (compose) or its pod (k8s) answers an exec.
+# The ONE test for "can this section reach the container": ctr_exec already picks docker or kubectl from
+# SMOKE_PLATFORM, so a section must not also ask for a docker CLI, which a cluster run may not have
+# (KI-067: the outbox, Kafka and saga sections skipped on kubectl-only machines).
+ctr_available() {
+    ctr_exec "$1" true >/dev/null 2>&1
+}
+
 # A client on the HOST is used only on compose, where the stack publishes Redis and PostgreSQL on
 # 127.0.0.1. On the kind cluster nothing forwards those ports, and since KI-058/Phase 35/Phase 36 the
 # cluster's Redis and databases accept only TLS with a client certificate, which only the pod has: there
@@ -19,7 +27,7 @@ redis_cli() {
         # from the environment, else .env. (The container path below already has it set.)
         REDISCLI_AUTH="${REDIS_PASSWORD:-$(sed -n 's/^REDIS_PASSWORD=//p' .env 2>/dev/null | tail -1)}" \
             redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>/dev/null
-    elif ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
+    elif ctr_available "$REDIS_CONTAINER"; then
         ctr_exec "$REDIS_CONTAINER" redis-cli $REDIS_TLS "$@" 2>/dev/null
     else
         return 1
@@ -31,7 +39,7 @@ redis_cli() {
 redis_cli_noauth() {
     if use_host_client redis-cli; then
         REDISCLI_AUTH= redis-cli -h "${REDIS_HOST:-localhost}" -p "${REDIS_PORT:-6379}" "$@" 2>&1
-    elif ctr_exec "$REDIS_CONTAINER" true >/dev/null 2>&1; then
+    elif ctr_available "$REDIS_CONTAINER"; then
         ctr_exec "$REDIS_CONTAINER" sh -c 'unset REDISCLI_AUTH; redis-cli "$@"' sh $REDIS_TLS "$@" 2>&1
     else
         return 1
@@ -44,7 +52,7 @@ psql_query() {
         PGPASSWORD="${POSTGRES_PASSWORD:-ecomdemo}" psql -qtAX \
             -h "${POSTGRES_HOST:-localhost}" -p "${POSTGRES_PORT:-5432}" \
             -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
-    elif ctr_exec "$POSTGRES_CONTAINER" true >/dev/null 2>&1; then
+    elif ctr_available "$POSTGRES_CONTAINER"; then
         ctr_exec "$POSTGRES_CONTAINER" psql -qtAX -U "$PGUSER_" -d "$PGDB" -c "$1" 2>/dev/null
     else
         return 1

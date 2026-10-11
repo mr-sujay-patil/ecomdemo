@@ -148,6 +148,13 @@ ctr_start() {
     fi
 }
 
+# ctr_available (the container gate), redis_cli, redis_cli_noauth and psql_query live in
+# scripts/smoke-clients.sh, where scripts/test-smoke-clients.sh tests which client they reach (KI-064,
+# KI-066) and scripts/test-smoke-gates.sh that every section's gate works without a docker CLI on k8s
+# (KI-067). Sourced here, before the container discovery below uses the gate; it only defines functions.
+# shellcheck source=scripts/smoke-clients.sh
+. "$(dirname "${BASH_SOURCE[0]}")/smoke-clients.sh"
+
 # The Phase 18 section stops the Kafka container on purpose. If anything between the stop and the
 # start fails - a failed check under `set -e`, or a Ctrl-C - the broker would be left down and
 # every later run of this script would report a broken stack rather than a failed check. This
@@ -441,8 +448,7 @@ delta() {
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-}"
 if [ -z "$POSTGRES_CONTAINER" ]; then
     for candidate in ecomdemo-db ecomdemo-postgres; do
-        if command -v docker >/dev/null 2>&1 \
-            && ctr_exec "$candidate" true >/dev/null 2>&1; then
+        if ctr_available "$candidate"; then
             POSTGRES_CONTAINER="$candidate"
             break
         fi
@@ -456,8 +462,7 @@ PGUSER_="${POSTGRES_USER:-ecomdemo}"
 REDIS_CONTAINER="${REDIS_CONTAINER:-}"
 if [ -z "$REDIS_CONTAINER" ]; then
     for candidate in ecomdemo-cache ecomdemo-redis; do
-        if command -v docker >/dev/null 2>&1 \
-            && ctr_exec "$candidate" true >/dev/null 2>&1; then
+        if ctr_available "$candidate"; then
             REDIS_CONTAINER="$candidate"
             break
         fi
@@ -465,10 +470,6 @@ if [ -z "$REDIS_CONTAINER" ]; then
     REDIS_CONTAINER="${REDIS_CONTAINER:-ecomdemo-cache}"
 fi
 
-# redis_cli, redis_cli_noauth and psql_query live in scripts/smoke-clients.sh, where
-# scripts/test-smoke-clients.sh tests which client they reach (KI-064, KI-066).
-# shellcheck source=scripts/smoke-clients.sh
-. "$(dirname "${BASH_SOURCE[0]}")/smoke-clients.sh"
 
 # --------------------------------------------------------------------------------------------
 # 0. The application must be up
@@ -1671,7 +1672,7 @@ check "an imported product is in the cached listing" "True" \
 # is read through the container when there is one.
 if [ -n "${IMPORT_ERROR_FILE:-}" ] && [ "$IMPORT_ERROR_FILE" != "None" ]; then
     pass "the response names an error file"
-    if command -v docker >/dev/null 2>&1 && ctr_exec ecomdemo-app true >/dev/null 2>&1; then
+    if ctr_available ecomdemo-app; then
         # `sh -c` so the redirection runs INSIDE the container: `ctr_exec ... wc -l < file`
         # would have the host's shell try to open a path that only exists in the container.
         ERROR_LINES="$(ctr_exec ecomdemo-app sh -c "wc -l < '$IMPORT_ERROR_FILE'" 2>/dev/null \
@@ -2291,7 +2292,7 @@ topic_message_count() {
         | awk -F: '{total += $3} END {print (total == "" ? 0 : total)}'
 }
 
-if command -v docker >/dev/null 2>&1 && ctr_exec "$KAFKA_CONTAINER" true >/dev/null 2>&1; then
+if ctr_available "$KAFKA_CONTAINER"; then
     TOPICS="$(kafka kafka-topics.sh --list)"
 
     # KI-039: the broker writes to the volume it mounts. compose mounted kafka-data and left the
@@ -2509,8 +2510,7 @@ as_customer
 # notification, permanently. The number to beat is zero.
 section "Reliable event publishing"
 
-if command -v docker >/dev/null 2>&1 \
-    && ctr_exec "$KAFKA_CONTAINER" true >/dev/null 2>&1 \
+if ctr_available "$KAFKA_CONTAINER" \
     && psql_query "SELECT 1;" >/dev/null 2>&1; then
 
     # --- The outbox exists and is being drained ------------------------------------------------
@@ -3327,7 +3327,7 @@ as_anonymous
 check "and has no business API: a payment cannot be asked for, only caused by an event" "403" \
     "$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PAYMENT_URL/api/payments")"
 
-if command -v docker >/dev/null 2>&1 && ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1; then
+if ctr_available "${KAFKA_CONTAINER:-ecomdemo-kafka}"; then
     SAGA_TOPICS="$(ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" /opt/kafka/bin/kafka-topics.sh \
         --bootstrap-server "$KAFKA_IN_POD" --list 2>/dev/null)"
     MISSING_TOPICS=""
@@ -3370,7 +3370,7 @@ request GET "/api/orders/$SAGA_OK_ORDER/status" >/dev/null
 check "the status endpoint gives no reason for a confirmed order" "None" "$(jget "d['reason']")"
 check "and says when it was decided" "True" "$(jget "d['changedAt'] is not None")"
 check "the stock was taken: the catalogue converges on 3" "3" "$(wait_for_stock "$SAGA_OK_PRODUCT" 3)"
-if ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
+if ctr_available "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}"; then
     check "payment-service kept a COMPLETED payment for the order total" "COMPLETED|50.00" \
         "$(payment_psql_query "SELECT status || '|' || amount FROM payment WHERE order_id = $SAGA_OK_ORDER;")"
     check "inventory-service holds its reservation as RESERVED" "RESERVED|2" \
@@ -3393,7 +3393,7 @@ check "the saga ends CANCELLED" "CANCELLED" "$(wait_for_order_status "$SAGA_FAIL
 request GET "/api/orders/$SAGA_FAIL_ORDER/status" >/dev/null
 check "and the status says why" "True" \
     "$(jget "d['reason'].startswith('Payment declined: 12000.00 exceeds the limit')")"
-if ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1; then
+if ctr_available "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}"; then
     check "payment-service kept the decline, with its reason" "FAILED|12000.00" \
         "$(payment_psql_query "SELECT status || '|' || amount FROM payment WHERE order_id = $SAGA_FAIL_ORDER;")"
     # THE COMPENSATION. Polled: it runs in inventory-service when it reads payments.failed, which
@@ -3509,10 +3509,9 @@ check "and a SERVICE one: a shopper's token is refused (403)" "403" \
 check "the dead-letter admin API is an administrator's (403 for a shopper)" "403" \
     "$(as_customer; request GET /api/admin/dead-letters)"
 
-if command -v docker >/dev/null 2>&1 \
-    && ctr_exec "${KAFKA_CONTAINER:-ecomdemo-kafka}" true >/dev/null 2>&1 \
-    && ctr_exec "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" true >/dev/null 2>&1 \
-    && ctr_exec "$PAYMENT_CONTAINER" true >/dev/null 2>&1; then
+if ctr_available "${KAFKA_CONTAINER:-ecomdemo-kafka}" \
+    && ctr_available "${PAYMENT_DB_CONTAINER:-ecomdemo-payment-db}" \
+    && ctr_available "$PAYMENT_CONTAINER"; then
 
     DLT_PRODUCT="$(saga_product "Saga Dead Letter Probe" 10.00 5)"
     scrape
