@@ -59,7 +59,8 @@ public class ProductCacheEvictor {
      * {@link CacheConfig}: the order is committed and the customer has been told so, and a cache
      * that cannot be reached must not turn that into an error. The cost of a missed eviction is
      * one TTL of staleness — the very thing this class removes in the normal case, and not worth
-     * failing a completed sale over.
+     * failing a completed sale over. The cache writes synchronously (KI-075), so a failed delete
+     * does arrive here as an exception, and this method returns only after the entries are gone.
      */
     /**
      * <h2>A Kafka listener since Phase 20b, and it used to be a Spring event</h2>
