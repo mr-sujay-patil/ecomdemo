@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-074 (catalog clears its cache with KEYS) and KI-075 (async evictions never reach `CacheConfig`'s error handler); grouped per workflow rule 11 (same code: catalog's `CacheConfig` cache writer); approved 2026-10-11 ("KI-074 + KI-075")
 - **Branch:** fix/ki-074-075-catalog-cache-scan (cut from `main` at `4767124`)
-- **Step:** TESTING
-- **Waiting for user:** no
+- **Step:** PR_OPEN (PR #99, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #99, the k8s smoke, then review / `approved, merge it`
 - **History:** Phase 37 (PR #98) merged as `4767124`; the owner pushes `phase-37-complete` (tag pushes are refused here, 403)
 
 ## Checklist
@@ -14,12 +14,13 @@
 - [x] Fix KI-074 (`bcbca8e`): `BatchStrategies.scan(1000)` in `CacheConfig`; ACL: `-keys`, `+scan`
 - [x] Fix KI-075 (`7005379`): `immediateWrites()` in `CacheConfig`; ACL `-unlink`, `+del`; `CatalogCacheAclIT` 4/4 green
 - [x] `RedisAclConfigTest` (19), `RedisAclIT` (10) follow the catalog line, green; smoke test: catalog refused KEYS; `scripts/test-smoke-*.sh` 4/4
-- [ ] `./mvnw -B clean verify`
-- [x] Docs: KNOWN_ISSUES (fixed, PR # to fill), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
-- [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
+- [x] `./mvnw -B clean verify`: 931 tests (686 unit, 245 IT), green on the 1st run
+- [x] Docs: KNOWN_ISSUES (Fixed (PR #99)), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
+- [x] Push, PR #99 (label `run-smoke`), CURRENT to PR_OPEN
+- [ ] CI green on PR #99; the owner runs the k8s smoke (`scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, `scripts/k8s-smoke.sh`)
 
 ## Next action
-Full `./mvnw -B clean verify` running (log `~/.cache/ecomdemo-claude/full.log`); if green, open the PR (label `run-smoke`), fill PR # in KNOWN_ISSUES, CURRENT to PR_OPEN.
+Wait for CI on PR #99 (build, scans, compose smoke via `run-smoke`); fix it on this branch if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
