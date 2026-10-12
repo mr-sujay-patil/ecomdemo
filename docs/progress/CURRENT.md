@@ -5,21 +5,21 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-074 (catalog clears its cache with KEYS) and KI-075 (async evictions never reach `CacheConfig`'s error handler); grouped per workflow rule 11 (same code: catalog's `CacheConfig` cache writer); approved 2026-10-11 ("KI-074 + KI-075")
 - **Branch:** fix/ki-074-075-catalog-cache-scan (cut from `main` at `4767124`)
-- **Step:** BRANCHED
+- **Step:** IMPLEMENTING
 - **Waiting for user:** no
 - **History:** Phase 37 (PR #98) merged as `4767124`; the owner pushes `phase-37-complete` (tag pushes are refused here, 403)
 
 ## Checklist
-- [ ] Regression tests (red first): `CatalogCacheAclIT` proves KEYS is never sent (INFO commandstats) and the clear still empties the keys under the `catalog` user with no `+keys`; a refused delete (user without `+del`/`+unlink`) reaches `CacheConfig`'s error handler (logged ERROR) and `ProductCacheEvictor`'s warning
-- [ ] Fix KI-074: `BatchStrategies.scan(n)` in `CacheConfig`; ACL: `-keys`, `+scan`
-- [ ] Fix KI-075: immediate (synchronous) cache writes in `CacheConfig`; ACL follows the commands sent (DEL, not UNLINK)
+- [x] Regression tests (red first, `297a379`: `cmdstat_keys:calls=1` after a clear; nothing logged for refused deletes): `CatalogCacheAclIT` proves KEYS is never sent (INFO commandstats) and the clear still empties the keys under the `catalog` user with no `+keys`; a refused delete (user without `+del`/`+unlink`) reaches `CacheConfig`'s error handler (logged ERROR) and `ProductCacheEvictor`'s warning
+- [x] Fix KI-074 (`bcbca8e`): `BatchStrategies.scan(1000)` in `CacheConfig`; ACL: `-keys`, `+scan`
+- [x] Fix KI-075 (`7005379`): `immediateWrites()` in `CacheConfig`; ACL `-unlink`, `+del`; `CatalogCacheAclIT` 4/4 green
 - [ ] `RedisAclConfigTest`, `RedisAclIT` follow the catalog line; smoke test: catalog refused KEYS
 - [ ] `./mvnw -B clean verify`
 - [ ] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
 ## Next action
-Write the regression tests first and show them red on this tree (see the checklist), then implement.
+Smoke-test check (catalog refused KEYS), run ecomdemo-app `RedisAclConfigTest`/`RedisAclIT`, then docs, then full `./mvnw -B clean verify` (background), then PR.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
