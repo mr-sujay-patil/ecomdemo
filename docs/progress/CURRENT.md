@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-11
 - **Fix:** KI-074 (catalog clears its cache with KEYS) and KI-075 (async evictions never reach `CacheConfig`'s error handler); grouped per workflow rule 11 (same code: catalog's `CacheConfig` cache writer); approved 2026-10-11 ("KI-074 + KI-075")
 - **Branch:** fix/ki-074-075-catalog-cache-scan (cut from `main` at `4767124`)
-- **Step:** IMPLEMENTING
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** Phase 37 (PR #98) merged as `4767124`; the owner pushes `phase-37-complete` (tag pushes are refused here, 403)
 
@@ -13,13 +13,13 @@
 - [x] Regression tests (red first, `297a379`: `cmdstat_keys:calls=1` after a clear; nothing logged for refused deletes): `CatalogCacheAclIT` proves KEYS is never sent (INFO commandstats) and the clear still empties the keys under the `catalog` user with no `+keys`; a refused delete (user without `+del`/`+unlink`) reaches `CacheConfig`'s error handler (logged ERROR) and `ProductCacheEvictor`'s warning
 - [x] Fix KI-074 (`bcbca8e`): `BatchStrategies.scan(1000)` in `CacheConfig`; ACL: `-keys`, `+scan`
 - [x] Fix KI-075 (`7005379`): `immediateWrites()` in `CacheConfig`; ACL `-unlink`, `+del`; `CatalogCacheAclIT` 4/4 green
-- [ ] `RedisAclConfigTest`, `RedisAclIT` follow the catalog line; smoke test: catalog refused KEYS
+- [x] `RedisAclConfigTest` (19), `RedisAclIT` (10) follow the catalog line, green; smoke test: catalog refused KEYS; `scripts/test-smoke-*.sh` 4/4
 - [ ] `./mvnw -B clean verify`
-- [ ] Docs: KNOWN_ISSUES (fixed), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
+- [x] Docs: KNOWN_ISSUES (fixed, PR # to fill), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
 - [ ] Push, PR (label `run-smoke`), CURRENT to PR_OPEN
 
 ## Next action
-Smoke-test check (catalog refused KEYS), run ecomdemo-app `RedisAclConfigTest`/`RedisAclIT`, then docs, then full `./mvnw -B clean verify` (background), then PR.
+Full `./mvnw -B clean verify` running (log `~/.cache/ecomdemo-claude/full.log`); if green, open the PR (label `run-smoke`), fill PR # in KNOWN_ISSUES, CURRENT to PR_OPEN.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
