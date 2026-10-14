@@ -10,16 +10,16 @@
 - **History:** KI-074 + KI-075 (PR #99) merged as `e0a13eb` and verified; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
-- [ ] Root cause: read the test, the `cert-reload` sidecar script it runs, the detection and its timeouts; reproduce (alone, repeated, and under load) and record the exact failure
-- [ ] Fix the cause (test or sidecar), assertions intact
+- [x] Root cause: a race, not a short window. The test copied the cert, then the key; the reloader (1 s) waking between them installs new cert + OLD key, Postgres refuses (`key values mismatch`, `SSL configuration was not reloaded`), `pg_reload_conf()` still says `t`, the script logs "reloaded" and never retries. Deterministic repro fails 2/2 (30 s, PKIX); under load one copy took 2.2 s (> the 1 s interval). Original failure (`full-verify-1.log`, 2026-10-11): catalog-db, 34.49 s, same PKIX
+- [x] Fix (`b89dbfe`, test only): wait for the script's `+ last=` (`sh -x` trace), then key first, cert last; timeout and assertions unchanged. Adversarial (reloader acts between the copies) passes
 - [ ] Prove it: fails (or measured slowness beyond the old window) before, passes after, 20 runs alone + several under load
-- [ ] Sibling renewal ITs (`KafkaTlsIT`, Redis) checked for the same pattern; new KI if they share it
+- [x] Siblings: `KafkaTlsIT.renewalIsReloaded` shares it (repro: broker takes the mismatched pair, `Invalid CertificateVerify signature`, 60 s) → KI-077; Redis already copies the key first; the sidecars' false "reloaded" → KI-078
 - [ ] `./mvnw -B clean verify` once
 - [ ] Docs: KNOWN_ISSUES (Fixed (PR #NN), root cause), decisions [Fix KI-076]
 - [ ] Push, PR, CURRENT to PR_OPEN
 
 ## Next action
-Root-cause KI-076: read `ecomdemo-app/src/test/java/com/ecomdemo/PostgresTlsIT.java` and the `cert-reload` script it extracts from the k8s manifest; list every timing assumption; reproduce.
+Collect the repeat-run evidence in `~/.cache/ecomdemo-claude/ki076/{before-load,after-alone,after-load}/summary.txt` (loops running; don't edit `PostgresTlsIT.java` while they run), put the numbers in the KI-076 row and PR body, then the full `./mvnw -B clean verify` in the background, then push and open the PR (no `run-smoke`: test only).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
