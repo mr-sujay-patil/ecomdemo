@@ -157,8 +157,10 @@ class RedisAclConfigTest {
                 .noneMatch(rule -> rule.startsWith("+@") || rule.startsWith("&"));
         // Only the gateway uses another database (1, application.yml); the others stay in database 0.
         assertThat(rules.contains("+select")).isEqualTo("gateway".equals(user));
-        // KEYS only where Spring Data Redis needs it: a whole-cache clear of the catalogue.
-        assertThat(rules.contains("+keys")).isEqualTo("catalog".equals(user));
+        // No service may run KEYS: it walks the whole keyspace in one blocking call and stalls Redis for everyone.
+        // The catalogue cache clears with SCAN since KI-074, as the assistant's memory always has.
+        assertThat(rules).as("KEYS (KI-074)").doesNotContain("+keys");
+        assertThat(rules.contains("+scan")).isEqualTo("catalog".equals(user) || "assistant".equals(user));
     }
 
     @Test

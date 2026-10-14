@@ -100,8 +100,12 @@ class RedisAclIT {
     void catalogStaysInItsKeys() throws Exception {
         assertThat(cliAs("catalog", "SET", "product::acl", "x", "EX", "60")).isEqualTo("OK");
         assertThat(cliAs("catalog", "GET", "product::acl")).isEqualTo("x");
-        assertThat(cliAs("catalog", "UNLINK", "product::acl")).isEqualTo("1");
-        assertThat(cliAs("catalog", "DEL", "product::acl")).as("DEL: the code uses UNLINK").startsWith("NOPERM");
+        assertThat(cliAs("catalog", "DEL", "product::acl")).isEqualTo("1");
+        assertThat(cliAs("catalog", "UNLINK", "product::acl"))
+                .as("UNLINK: the cache deletes synchronously, with DEL, since KI-075").startsWith("NOPERM");
+        assertThat(cliAs("catalog", "SCAN", "0", "MATCH", "productList::*")).doesNotContain("NOPERM");
+        assertThat(cliAs("catalog", "KEYS", "productList::*")).as("KEYS: the cache clears with SCAN since KI-074")
+                .startsWith("NOPERM");
         assertThat(cliAs("catalog", "GET", "assistant:memory:42:any")).startsWith("NOPERM");
         assertThat(cliAs("catalog", "GET", "request_rate_limiter.{user:x}.tokens")).startsWith("NOPERM");
         assertThat(cliAs("catalog", "SELECT", "1")).startsWith("NOPERM");

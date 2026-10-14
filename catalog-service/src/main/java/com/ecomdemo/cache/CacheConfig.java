@@ -15,6 +15,7 @@ import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.cache.BatchStrategies;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.cache.RedisCacheWriter;
@@ -39,6 +40,19 @@ import tools.jackson.databind.type.TypeFactory;
  * invalidation. Explicit {@code @CacheEvict} handles the changes this application makes itself;
  * the TTL handles everything else — a migration, a manual {@code UPDATE}, a bug in an eviction
  * rule. Without one, a single missed eviction is wrong for ever.
+ *
+ * <p><strong>Writes are synchronous (KI-075).</strong> Spring Data Redis 4 performs a put, an evict and a clear
+ * ASYNCHRONOUSLY by default: {@code Cache.evict()} hands the delete to the reactive driver and returns at once,
+ * and the future it gets back is dropped. So when Redis refuses or fails the delete, nobody hears: the
+ * {@link #errorHandler() error handler} below, written for exactly that case, is never called, and the stale
+ * entry lives out its TTL in silence (Phase 37 found it when a missing ACL permission left entries behind with no
+ * log line). With {@code immediateWrites()} the write runs on the caller's thread, its failure is an exception
+ * there, and Spring's cache interceptor passes it to the handler. It also keeps the order the stock-changed
+ * eviction relies on: {@link ProductCacheEvictor} returns, and Kafka commits its offset, only after the entries
+ * are really gone, so a failed delete is logged rather than acknowledged. The cost is one Redis round trip
+ * (well under a millisecond on the cluster network) on the request that writes, which the database query it
+ * follows dwarfs. Synchronous deletes are DEL (the asynchronous path used UNLINK); a cache entry is a few
+ * kilobytes, so freeing it in place costs Redis nothing UNLINK would save.
  */
 @Configuration
 @EnableCaching
@@ -63,6 +77,19 @@ public class CacheConfig implements CachingConfigurer {
      * it — the entry is both the most expensive to hold and the most likely to be wrong.
      */
     private static final Duration PRODUCT_LIST_TTL = Duration.ofMinutes(2);
+
+    /**
+     * How many keys one SCAN step of a whole-cache clear looks at (KI-074).
+     *
+     * <p>A clear ({@code @CacheEvict(allEntries = true)}, and {@link ProductCacheEvictor} on every stock change)
+     * has to find the cache's keys. Spring Data Redis's default is one {@code KEYS productList::*}, which walks the
+     * WHOLE keyspace in a single call; Redis runs one command at a time, so for that walk nobody else is served:
+     * not the gateway's rate limiter, not the assistant. SCAN walks it in steps of about this many slots and
+     * answers everyone else between steps. 1000 keeps a step well under a millisecond while a clear of a keyspace
+     * of a few thousand keys stays a handful of round trips; the matching keys are deleted in batches of the same
+     * size.
+     */
+    static final int CLEAR_SCAN_BATCH = 1000;
 
     private final JsonMapper jsonMapper;
 
@@ -147,7 +174,8 @@ public class CacheConfig implements CachingConfigurer {
      *
      * <p>Note the asymmetry: a failed <em>put</em> or <em>evict</em> is logged and swallowed too,
      * and a swallowed evict means a stale entry survives. That is what the TTL is for, and it is
-     * the reason every cache here has one.
+     * the reason every cache here has one. A write only reaches this handler because writes are
+     * synchronous (KI-075); an asynchronous one would fail after the handler had stopped listening.
      */
     @Override
     public CacheErrorHandler errorHandler() {
@@ -196,7 +224,12 @@ public class CacheConfig implements CachingConfigurer {
                 RedisCacheConfiguration defaultConfiguration,
                 Map<String, RedisCacheConfiguration> perCacheConfiguration) {
             super(
-                    RedisCacheWriter.nonLockingRedisCacheWriter(connectionFactory),
+                    RedisCacheWriter.create(connectionFactory, writer -> writer
+                            // SCAN, not the default KEYS, to find a cache's keys on a clear (KI-074).
+                            .batchStrategy(BatchStrategies.scan(CLEAR_SCAN_BATCH))
+                            // Every put, evict and clear finishes before the call returns (KI-075): see
+                            // the class comment.
+                            .immediateWrites()),
                     defaultConfiguration,
                     perCacheConfiguration);
         }
