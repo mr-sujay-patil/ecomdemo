@@ -5,21 +5,21 @@
 - **Updated:** 2026-10-14
 - **Fix:** KI-076 (`PostgresTlsIT.renewalIsReloaded` fails under a loaded full verify); approved 2026-10-14 ("KI-076 flaky Postgres test")
 - **Branch:** fix/ki-076-postgres-renewal-it (cut from `main` at `e0a13eb`)
-- **Step:** FIX (root cause found; proving it)
+- **Step:** VERIFY (full `./mvnw -B clean verify` running, log `~/.cache/ecomdemo-claude/ki076/full-verify.log`)
 - **Waiting for user:** NO
 - **History:** KI-074 + KI-075 (PR #99) merged as `e0a13eb` and verified; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
 - [x] Root cause: a race, not a short window. The test copied the cert, then the key; the reloader (1 s) waking between them installs new cert + OLD key, Postgres refuses (`key values mismatch`, `SSL configuration was not reloaded`), `pg_reload_conf()` still says `t`, the script logs "reloaded" and never retries. Deterministic repro fails 2/2 (30 s, PKIX); under load one copy took 2.2 s (> the 1 s interval). Original failure (`full-verify-1.log`, 2026-10-11): catalog-db, 34.49 s, same PKIX
 - [x] Fix (`b89dbfe`, test only): wait for the script's `+ last=` (`sh -x` trace), then key first, cert last; timeout and assertions unchanged. Adversarial (reloader acts between the copies) passes
-- [ ] Prove it: fails (or measured slowness beyond the old window) before, passes after, 20 runs alone + several under load
+- [x] Prove it: deterministic repro fails 2/2 before, adversarial passes after; after: 20/20 alone, 8/8 under 16 busy loops (before: 15/15 under CPU load: the race needs a slow copy)
 - [x] Siblings: `KafkaTlsIT.renewalIsReloaded` shares it (repro: broker takes the mismatched pair, `Invalid CertificateVerify signature`, 60 s) → KI-077; Redis already copies the key first; the sidecars' false "reloaded" → KI-078
 - [ ] `./mvnw -B clean verify` once
-- [ ] Docs: KNOWN_ISSUES (Fixed (PR #NN), root cause), decisions [Fix KI-076]
+- [x] Docs: KNOWN_ISSUES (Fixed (PR #101), root cause; KI-077, KI-078), decisions [Fix KI-076]
 - [ ] Push, PR, CURRENT to PR_OPEN
 
 ## Next action
-Collect the repeat-run evidence in `~/.cache/ecomdemo-claude/ki076/{before-load,after-alone,after-load}/summary.txt` (loops running; don't edit `PostgresTlsIT.java` while they run), put the numbers in the KI-076 row and PR body, then the full `./mvnw -B clean verify` in the background, then push and open the PR (no `run-smoke`: test only).
+When the full verify ends: record its test count here, push, open the PR (expected #101; fix the number in KNOWN_ISSUES if it differs; no `run-smoke`: test only), CURRENT to PR_OPEN.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
