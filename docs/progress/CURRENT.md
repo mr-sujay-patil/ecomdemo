@@ -5,7 +5,7 @@
 - **Updated:** 2026-10-14
 - **Fix:** KI-076 (`PostgresTlsIT.renewalIsReloaded` fails under a loaded full verify); approved 2026-10-14 ("KI-076 flaky Postgres test")
 - **Branch:** fix/ki-076-postgres-renewal-it (cut from `main` at `e0a13eb`)
-- **Step:** ROOT_CAUSE
+- **Step:** FIX (root cause found; proving it)
 - **Waiting for user:** NO
 - **History:** KI-074 + KI-075 (PR #99) merged as `e0a13eb` and verified; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403)
 

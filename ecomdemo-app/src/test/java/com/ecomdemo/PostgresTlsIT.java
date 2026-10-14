@@ -129,15 +129,26 @@ class PostgresTlsIT {
                     .isInstanceOf(SQLException.class);
 
             // The sidecar's own script, in the same container (in the pod they share these directories and
-            // the socket), checking every second instead of every 30.
+            // the socket), checking every second instead of every 30. Traced (`sh -x`, to its own file) so the
+            // test can see the moment it has recorded the certificate it compares against.
             String reload = String.join("\n", PostgresTlsConfigTest.strings(PostgresTlsConfigTest.container(
                     pod(database), "cert-reload").get("args")));
-            postgres.execInContainer("sh", "-c", "RELOAD_INTERVAL=1 nohup sh -c \"$1\" >/tmp/reload.log 2>&1 &",
-                    "reloader", reload);
-            postgres.copyFileToContainer(Transferable.of(Files.readAllBytes(files.resolve(database + "-new.crt")), 0644),
-                    "/etc/ecomdemo-tls/tls.crt");
+            postgres.execInContainer("sh", "-c",
+                    "RELOAD_INTERVAL=1 nohup sh -xc \"$1\" >/tmp/reload.log 2>/tmp/reload.trace &", "reloader", reload);
+            // KI-076: the script runs in the background, so the renewal must not land before its first `last=`,
+            // or it takes the NEW certificate as its baseline and never sees a change.
+            await().atMost(Duration.ofSeconds(30)).until(() ->
+                    postgres.execInContainer("cat", "/tmp/reload.trace").getStdout().contains("+ last="));
+            // KI-076: the KEY first, the certificate last. The script watches only the certificate and reads the
+            // key when it sees it change; in the pod the kubelet swaps both files at once (an atomic symlink
+            // switch), and two copies here can only match that in this order. Certificate first, a wake-up
+            // between the copies pairs the new certificate with the OLD key: Postgres refuses it ("key values
+            // mismatch", "SSL configuration was not reloaded"), but pg_reload_conf() has returned true, so the
+            // script reports success and never retries, and the old certificate stays in service.
             postgres.copyFileToContainer(Transferable.of(Files.readAllBytes(files.resolve(database + "-new.key")), 0644),
                     "/etc/ecomdemo-tls/tls.key");
+            postgres.copyFileToContainer(Transferable.of(Files.readAllBytes(files.resolve(database + "-new.crt")), 0644),
+                    "/etc/ecomdemo-tls/tls.crt");
 
             // Until the reload, the server still presents the old certificate and the handshake fails.
             await().atMost(Duration.ofSeconds(30)).ignoreExceptionsInstanceOf(SQLException.class).untilAsserted(() -> {
