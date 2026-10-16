@@ -4382,6 +4382,9 @@ for redis_client in app catalog-service gateway-service assistant-service; do
 done
 check "catalog-service's Redis user is refused FLUSHALL" "True" \
     "$(redis_as catalog-service-client-tls FLUSHALL | grep -q "NOPERM User catalog" && echo True || echo False)"
+# KI-074: the catalogue cache clears with SCAN; KEYS (one blocking walk of the whole keyspace) is not granted.
+check "catalog-service's Redis user is refused KEYS (KI-074: the cache clears with SCAN)" "True" \
+    "$(redis_as catalog-service-client-tls KEYS 'productList::*' | grep -q "NOPERM User catalog" && echo True || echo False)"
 check "a cluster certificate whose CN is not a Redis user gets NOAUTH (customer-service's)" "True" \
     "$(redis_as customer-service-client-tls PING | grep -q NOAUTH && echo True || echo False)"
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \

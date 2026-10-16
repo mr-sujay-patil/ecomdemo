@@ -3682,11 +3682,12 @@ now decides authorization (the ACL user).
   every command.
 - **The ACL** (`k8s/data/cache-acl.yaml`, the `cache-acl` ConfigMap, mounted at `/etc/ecomdemo-acl`) has
   one line per user, derived from the code, with the reason above each line. Commands are named one by one
-  (`+get +set +unlink +keys`), not as categories: `+@write` would also allow `FUNCTION FLUSH`, and
+  (`+get +set +del +scan`), not as categories: `+@write` would also allow `FUNCTION FLUSH`, and
   `+@connection` `CLIENT KILL`. The tests read the key prefixes from the code (`CacheNames`, the assistant's
   `PREFIX` constants), so a renamed cache fails a test before it fails on the cluster.
 - **What running the real code found.** Spring Data Redis 4 deletes cache entries with `UNLINK`, not `DEL`,
-  and does it asynchronously, so a refused delete never reaches the caller; the assistant's
+  and does it asynchronously, so a refused delete never reaches the caller (fixed since: the catalogue
+  cache writes synchronously, with `DEL`, KI-075, and clears with `SCAN`, never `KEYS`, KI-074); the assistant's
   `expire(Duration)` is `PEXPIRE`; the rate limiter's keys are `request_rate_limiter.{<route>.<key>}.*`.
   Each service's IT runs its own Redis code under its user and then asks Redis's `ACL LOG` what it refused:
   the cache's error handler and the rate limiter (which fails OPEN) would otherwise hide a refusal.
