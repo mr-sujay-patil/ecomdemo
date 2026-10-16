@@ -135,7 +135,7 @@
 		<tomcat.version>11.0.25</tomcat.version>
 		<jackson-bom.version>3.1.7</jackson-bom.version>
 		<jackson-2-bom.version>2.21.7</jackson-2-bom.version>
-		<lz4-java.version>1.11.4</lz4-java.version>
+		<lz4-java.version>1.12.0</lz4-java.version>
 
 		<!--
 			Empty defaults. The JaCoCo executions below fill these in, and Surefire and Failsafe
