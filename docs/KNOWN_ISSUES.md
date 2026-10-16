@@ -63,6 +63,7 @@ carry the scope. Found during a phase or fix? Record it here in that branch; don
 | KI-074 | catalog-service clears a cache (`@CacheEvict(allEntries = true)`, `ProductCacheEvictor` on every stock change) with `KEYS productList::*`, Spring Data Redis's default batch strategy (`RedisCacheWriter.nonLockingRedisCacheWriter(connectionFactory)` in `CacheConfig`). KEYS walks the whole keyspace in one blocking call, so every sale stalls Redis for everyone (the rate limiter and the assistant included) in proportion to its size, and it is why the `catalog` ACL user needs `+keys` (in `@dangerous`). `BatchStrategies.scan(n)` would clear in steps with SCAN | Low | Phase 13 | Phase 37 (2026-10-11): `CatalogCacheAclIT` without `+keys` leaves the keys | Fixed (PR #99): `BatchStrategies.scan(1000)`; the `catalog` ACL user has `+scan`, no `+keys`; `CatalogCacheAclIT` proves no KEYS is sent (INFO commandstats) |
 | KI-075 | Spring Data Redis 4 writes cache evictions and clears ASYNCHRONOUSLY (`DefaultRedisCacheWriter.evict`/`clear` branch on `writeAsynchronously()`; in `CatalogCacheAclIT` the keys go a moment after `evict()` returns). So `CacheConfig`'s `CacheErrorHandler.handleCacheEvictError` ("a STALE entry may survive", logged as ERROR) cannot see a failed eviction: a refused or failed UNLINK is lost, and a refused one only shows in Redis's ACL LOG. Found while a missing `+unlink` left entries in place with no log line. Also worth checking whether the AFTER_COMMIT ordering `ProductCacheEvictor` relies on still holds when the delete lands later | Low | Phase 13 (Boot 4 / Spring Data Redis 4 upgrade) | Phase 37 (2026-10-11) | Fixed (PR #99): `immediateWrites()`, so a failed write reaches the error handler and the evictor returns only after the delete; the `catalog` user has `+del`, no `+unlink`; `CatalogCacheAclIT.aRefusedEvictionIsReported` |
 | KI-076 | `PostgresTlsIT.renewalIsReloaded` (ecomdemo-app, Phase 35) is flaky under a full `./mvnw -B clean verify`: on 2026-10-11 its second case timed out after its 30 s Awaitility window (`PKIX path building failed`, the renewed files not yet in use), then passed twice when run alone. The window is short for a loaded machine running the whole build's containers | Low | Phase 35 | Phase 37 full verify (2026-10-11) | Open |
+| KI-077 | `compose.yaml` never passes `CORS_ALLOWED_ORIGINS` to `gateway-service`, so the variable in `.env` has no effect under compose and the gateway always allows only `http://localhost:3000`. A browser frontend on any other origin (a Vite dev server on 5173, a preview on 4173) is refused at the preflight (403), and the origin list cannot be changed without editing compose (details below) | Medium | Phase 21 (KI-041 added the variable to `application.yml` only) | Found 2026-10-15 while briefing the frontend team: `CORS_ALLOWED_ORIGINS` in `.env` changed nothing; a preflight from `http://localhost:5173` got 403 | In progress |
 
 ### KI-001: Swagger UI and OpenAPI docs unreachable since the split
 
@@ -154,6 +155,29 @@ passed on the same run (the NVD has not scored these at 7 or more yet); it may f
 
 **Done when:** the same local scan reports no HIGH or CRITICAL finding in all 8 images, CI's `Image scan`
 and `Dependency scan` pass on the PR, and the build and smoke tests pass.
+
+### KI-077: compose does not forward CORS_ALLOWED_ORIGINS to the gateway
+
+**Found:** 2026-10-15, while briefing the frontend team. **Branch:** `fix/ki-077-compose-cors-origins`.
+
+**What's broken:** KI-041 made the gateway's allowed origins `${CORS_ALLOWED_ORIGINS:http://localhost:3000}`
+in `application.yml`, but `gateway-service` in `compose.yaml` has no such entry in `environment:`, and
+a variable in `.env` only reaches a container when compose interpolates it into one. So under compose
+the default always wins. Port 3000 is also inside Windows's reserved TCP range 2906-3005 on the
+workstation, so a frontend cannot even bind it. Workaround: a local `compose.override.yaml` that
+forwards the variable.
+
+**Fix scope:**
+- `compose.yaml`: `gateway-service` gets `CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}`
+  (same default as `application.yml`, so nothing changes for anyone who sets nothing).
+- `.env.example`: document the variable (comma-separated exact origins, no `*`).
+- Regression test `scripts/test-compose-cors.sh` (renders compose, no stack): the gateway receives the
+  variable, the default is unchanged, and a value set in the environment is passed through.
+- Not in scope (suggested): the same variable for the Kubernetes gateway (`k8s/`).
+
+**Done when:** the new test fails before the change and passes after; with
+`CORS_ALLOWED_ORIGINS=http://localhost:5173` a preflight from that origin gets 200 and one from
+`http://localhost:3000` gets 403, on a live stack.
 
 ## Covered by an approved phase
 

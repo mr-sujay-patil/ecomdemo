@@ -2,36 +2,25 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-10-11
-- **Fix:** KI-074 (catalog clears its cache with KEYS) and KI-075 (async evictions never reach `CacheConfig`'s error handler); grouped per workflow rule 11 (same code: catalog's `CacheConfig` cache writer); approved 2026-10-11 ("KI-074 + KI-075")
-- **Branch:** fix/ki-074-075-catalog-cache-scan (cut from `main` at `4767124`)
-- **Step:** PR_OPEN (PR #99, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #99, the k8s smoke, then review / `approved, merge it`
-- **History:** Phase 37 (PR #98) merged as `4767124`; the owner pushes `phase-37-complete` (tag pushes are refused here, 403)
+- **Updated:** 2026-10-16
+- **Fix:** KI-077 (compose does not forward `CORS_ALLOWED_ORIGINS` to the gateway); approved 2026-10-16 ("Log and fix CORS gap")
+- **Branch:** fix/ki-077-compose-cors-origins (cut from `main` at `11e6240`)
+- **Step:** BRANCHED
+- **Waiting for user:** NO
+- **History:** PR #99 (KI-074, KI-075) merged as `e0a13eb`, merge verification passed 2026-10-16; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403)
 
 ## Checklist
-- [x] Regression tests (red first, `297a379`: `cmdstat_keys:calls=1` after a clear; nothing logged for refused deletes): `CatalogCacheAclIT` proves KEYS is never sent (INFO commandstats) and the clear still empties the keys under the `catalog` user with no `+keys`; a refused delete (user without `+del`/`+unlink`) reaches `CacheConfig`'s error handler (logged ERROR) and `ProductCacheEvictor`'s warning
-- [x] Fix KI-074 (`bcbca8e`): `BatchStrategies.scan(1000)` in `CacheConfig`; ACL: `-keys`, `+scan`
-- [x] Fix KI-075 (`7005379`): `immediateWrites()` in `CacheConfig`; ACL `-unlink`, `+del`; `CatalogCacheAclIT` 4/4 green
-- [x] `RedisAclConfigTest` (19), `RedisAclIT` (10) follow the catalog line, green; smoke test: catalog refused KEYS; `scripts/test-smoke-*.sh` 4/4
-- [x] `./mvnw -B clean verify`: 931 tests (686 unit, 245 IT), green on the 1st run
-- [x] Docs: KNOWN_ISSUES (Fixed (PR #99)), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
-- [x] Push, PR #99 (label `run-smoke`), CURRENT to PR_OPEN
-- [ ] CI green on PR #99; the owner runs the k8s smoke (`scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, `scripts/k8s-smoke.sh`)
+- [ ] Regression test `scripts/test-compose-cors.sh` (red first)
+- [ ] `compose.yaml`: forward `CORS_ALLOWED_ORIGINS` to `gateway-service`; `.env.example` documents it
+- [ ] Testing protocol (steps 1, 3, 4, 7, 8 + the regression test); live preflight check (5173 allowed, 3000 refused)
+- [ ] KNOWN_ISSUES Fixed, decisions `[KI-077]` if the fix changes what a doc says
+- [ ] Push, PR, CURRENT to PR_OPEN
 
 ## Next action
-Wait for CI on PR #99 (build, scans, compose smoke via `run-smoke`); fix it on this branch if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403).
+Write `scripts/test-compose-cors.sh` modelled on `scripts/test-compose-ports.sh`; run it and see it fail; then fix `compose.yaml`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
-- **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
-  uses the SAME container names and ports (and has its own `ecomdemo-backend-readonly_kafka-data` volume: never touch it). kind does not conflict.
-- compose ports are loopback-only now; probe from the LAN address (`hostname -I`) to check exposure.
-- kind: `docker start ecomdemo-control-plane` revives the cluster; `scripts/k8s-up.sh` loads images but does NOT restart
-  pods: `kubectl -n ecomdemo rollout restart deploy` after it, or the pods keep the old code.
-- Never edit `scripts/smoke-test.sh` while it runs; run a copy placed inside `scripts/` and delete it after. Never print `.env`.
-- Flyway checksums comments too: never edit an applied migration; on a local DB roll back by hand if you must.
-- Awaitility polls on its own thread: use `pollInSameThread()` when the condition needs the caller's transaction.
-- `pkill -f <pattern>` kills this tool's own shell if the pattern appears in the command line; use PIDs.
-- Logs and scratch files go to `~/.cache/ecomdemo-claude/`.
-- In this Claude shell `grep` is a broken wrapper function: use `command grep`.
-- `~/projects/ecomdemo-web` is the frontend team's workspace: never modified from here.
+- Windows reserves TCP 2906-3005 (so 3000) and 9014-9113: Grafana is on host 13000 (`GRAFANA_PORT` in `.env`), Prometheus on 19090.
+- Local, untracked `compose.override.yaml` (in `.git/info/exclude`) forwards `CORS_ALLOWED_ORIGINS` until KI-077 lands; delete it after the merge.
+- The frontend team's `webstack-*` stack is gone; the frontend now uses this backend only (gateway `:8080`).
+- `scripts/k8s-up.sh` loads images but does NOT restart pods: `kubectl -n ecomdemo rollout restart deploy` after it.
