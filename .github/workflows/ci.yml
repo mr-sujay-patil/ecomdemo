@@ -406,6 +406,11 @@ jobs:
           # well as the final image, which is what the multi-stage Dockerfile needs.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # Except the runtime stage: its `apk upgrade` layer would be as old as the first build
+          # that cached it, so the image published here would miss Alpine fixes the image scanned
+          # above (built without a cache) has. Rebuilding it costs the upgrade and the copies,
+          # not the Maven build (KI-077).
+          no-cache-filters: runtime
 
       - name: Say what was published
         run: |

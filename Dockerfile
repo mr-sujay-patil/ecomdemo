@@ -106,6 +106,15 @@ RUN java -Djarmode=tools -jar ${MODULE}/target/*.jar extract --layers --launcher
 # attack surface. Alpine keeps it to ~287 MB against ~450 MB for the Ubuntu-based tag.
 FROM eclipse-temurin:21-jre-alpine AS runtime
 
+# --- Alpine's security fixes, as of this build (KI-077) ---------------------------------------
+# The base tag is only as fresh as its last push. Alpine published libexpat 2.9.0-r0 for
+# CVE-2026-77214 after eclipse-temurin:21-jre-alpine was last pushed, so every image kept
+# 2.8.5-r0 and the image scan stayed red with nothing to change here. Upgrading the installed
+# packages takes each fix the day Alpine publishes it, within the same Alpine release (no new
+# packages, no release jump). Before the COPYs, so a code change reuses this layer locally; the
+# publish job in ci.yml rebuilds this stage without its cache, or it would ship an old upgrade.
+RUN apk upgrade --no-cache
+
 # --- Run as a non-root user ------------------------------------------------------------------
 # Containers run as root by default, and a container's root IS the host's root: the isolation is
 # namespaces, not a different user table. So a container escape, or a bind-mounted host
