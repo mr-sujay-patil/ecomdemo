@@ -5,20 +5,20 @@
 - **Updated:** 2026-10-21
 - **Fix:** KI-078 (the image scan never saves its Trivy cache: `~/.cache/trivy/fanal` is owned by root, so `actions/cache` cannot read it); approved 2026-10-21 (the owner chose "KI-078 Trivy cache")
 - **Branch:** fix/ki-078-trivy-cache-owner (cut from `main` at `8d36b19`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** KI-077 (PR #101) merged as `8d36b19` and merge-verified 2026-10-21 (branch tip in `main`; push run 291 on `main` green: both scans and the publish). Tags for the owner (403 here): `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
 - [x] KI-078 In progress in `docs/KNOWN_ISSUES.md`
-- [ ] Regression test (red first): the image scan runs Trivy as the runner's user, on a cache directory the runner created
-- [ ] Fix in `ci.yml`'s image-scan job: `mkdir -p` the cache, `docker run --user "$(id -u):$(id -g)" --group-add <docker socket gid>`, cache at a path that needs no root
+- [x] Regression test red first: `TrivyCacheOwnerTest` failed on `main`'s ci.yml (no `mkdir -p "$HOME/.cache/trivy"`, Trivy as root at `/root/.cache/trivy`)
+- [x] Fix in `ci.yml`'s image-scan job: `mkdir -p "$HOME/.cache/trivy"`, `docker run --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" -e HOME=/tmp`, mounted at `/cache` with `--cache-dir /cache`; `TrivyCacheOwnerTest` and the Dockerfile tests 4/4 green
 - [ ] Proof in CI (no Docker here): the PR's first run logs "Cache saved with key: trivy-…" with no `Permission denied`; a second push restores it ("Cache restored from key")
-- [ ] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-078]`, `docs/security.md` if it describes how Trivy runs
+- [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-078]` (`docs/security.md` does not describe how Trivy runs: unchanged)
 - [ ] Push, PR, CURRENT to PR_OPEN; CI green
 
 ## Next action
-Write the regression test beside `DockerfileRuntimePackagesTest` in `ecomdemo-app/src/test/java/com/ecomdemo/`, see it fail, then change the image-scan job in `.github/workflows/ci.yml`.
+Push, open the PR `Fix KI-078: …`, add its number in one more commit (that push is the second CI run, which must restore the cache the first one saved). Read both runs' image-scan logs: run 1 "Cache saved with key: trivy-…" and no `Permission denied`; run 2 "Cache restored from key". Then STOP for the owner.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
