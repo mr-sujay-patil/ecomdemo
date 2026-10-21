@@ -17,10 +17,11 @@
 - [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-077]`, `docs/security.md` (findings row, base-image paragraph)
 - [ ] Push, PR, CURRENT to PR_OPEN; CI green
 - [x] Push, PR #101 (label `run-smoke`), CURRENT to PR_OPEN
-- [ ] CI green on PR #101: `Image scan (Trivy)` clean proves the fix; `Build and test` runs the full verify with ITs
+- [x] CI green on PR #101 (run 39629396387 at `64e76d2`): `Image scan (Trivy)` clean (the `alpine 3.24.2` section with libexpat is gone), `Build and test` (full verify with ITs), both smoke jobs, dependency scan
+- [x] Found along the way, recorded only (rule 7): KI-078, the Trivy cache is never saved (root-owned `fanal/`), Low, also on `main`
 
 ## Next action
-Wait for CI on PR #101; fix it on this branch if red. Then STOP for the owner. After the merge: merge verification (section 5; the push run on `main` is the scans and the publish, which this fix changes, so wait for it to be green); the owner pushes `ki-077-fixed` (tag pushes are refused here, 403), plus `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`).
+Wait for CI on the KI-078 docs commit (docs only); then STOP for the owner's review of PR #101. After the merge: merge verification (section 5; the push run on `main` is the scans and the publish, which this fix changes, so wait for it to be green); the owner pushes `ki-077-fixed` (tag pushes are refused here, 403), plus `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
