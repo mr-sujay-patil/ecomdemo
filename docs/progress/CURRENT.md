@@ -2,25 +2,26 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-10-11
-- **Fix:** KI-074 (catalog clears its cache with KEYS) and KI-075 (async evictions never reach `CacheConfig`'s error handler); grouped per workflow rule 11 (same code: catalog's `CacheConfig` cache writer); approved 2026-10-11 ("KI-074 + KI-075")
-- **Branch:** fix/ki-074-075-catalog-cache-scan (cut from `main` at `4767124`)
-- **Step:** PR_OPEN (PR #99, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #99, the k8s smoke, then review / `approved, merge it`
-- **History:** Phase 37 (PR #98) merged as `4767124`; the owner pushes `phase-37-complete` (tag pushes are refused here, 403)
+- **Updated:** 2026-10-21
+- **Fix:** KI-077 (CI's image scan red on `main` since 2026-10-18: Alpine `libexpat` 2.8.5-r0, CVE-2026-77214 HIGH, fixed in 2.9.0-r0; the runtime base image `eclipse-temurin:21-jre-alpine` was last pushed 2026-09-25); approved 2026-10-21 (the owner: "go with your recommended approach")
+- **Branch:** fix/ki-077-alpine-os-packages (cut from `main` at `11e6240`)
+- **Step:** PR_OPEN (PR #101, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #101 (image scan, build and test, compose smoke), then review / `approved, merge it`
+- **History:** KI-074 and KI-075 (PR #99) merged as `e0a13eb` and merge-verified 2026-10-21 (branch tip `5fda842` in `main`; push CI on `main`, run 281, green). Tags `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`) are the owner's to push (403 here)
 
 ## Checklist
-- [x] Regression tests (red first, `297a379`: `cmdstat_keys:calls=1` after a clear; nothing logged for refused deletes): `CatalogCacheAclIT` proves KEYS is never sent (INFO commandstats) and the clear still empties the keys under the `catalog` user with no `+keys`; a refused delete (user without `+del`/`+unlink`) reaches `CacheConfig`'s error handler (logged ERROR) and `ProductCacheEvictor`'s warning
-- [x] Fix KI-074 (`bcbca8e`): `BatchStrategies.scan(1000)` in `CacheConfig`; ACL: `-keys`, `+scan`
-- [x] Fix KI-075 (`7005379`): `immediateWrites()` in `CacheConfig`; ACL `-unlink`, `+del`; `CatalogCacheAclIT` 4/4 green
-- [x] `RedisAclConfigTest` (19), `RedisAclIT` (10) follow the catalog line, green; smoke test: catalog refused KEYS; `scripts/test-smoke-*.sh` 4/4
-- [x] `./mvnw -B clean verify`: 931 tests (686 unit, 245 IT), green on the 1st run
-- [x] Docs: KNOWN_ISSUES (Fixed (PR #99)), decisions [Fix KI-074, KI-075], comments in cache-acl.yaml, security.md/README where they name the commands
-- [x] Push, PR #99 (label `run-smoke`), CURRENT to PR_OPEN
-- [ ] CI green on PR #99; the owner runs the k8s smoke (`scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, `scripts/k8s-smoke.sh`)
+- [x] KI-077 recorded in `docs/KNOWN_ISSUES.md` (In progress)
+- [x] Regression test red first (`f7b0bf6`): `DockerfileRuntimePackagesTest` 2 of 2 failed on `main`'s Dockerfile and ci.yml
+- [x] Fix (`9dbb3d8`): `RUN apk upgrade --no-cache` at the top of the runtime stage; ci.yml publish `no-cache-filters: runtime`; the test 2/2 green
+- [x] Tests here: `./mvnw -B test` (all modules, failures ignored to see every module): 688 unit tests, 0 failures, 29 errors, all in the 4 Testcontainers classes (CatalogSchemaTest, ConcurrentReservationTest, InventorySagaTest, PaymentServiceTest: "Could not find a valid Docker environment"; no Docker in this container). ITs, the full verify and the image scan run in CI
+- [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-077]`, `docs/security.md` (findings row, base-image paragraph)
+- [ ] Push, PR, CURRENT to PR_OPEN; CI green
+- [x] Push, PR #101 (label `run-smoke`), CURRENT to PR_OPEN
+- [x] CI green on PR #101 (run 39629396387 at `64e76d2`): `Image scan (Trivy)` clean (the `alpine 3.24.2` section with libexpat is gone), `Build and test` (full verify with ITs), both smoke jobs, dependency scan
+- [x] Found along the way, recorded only (rule 7): KI-078, the Trivy cache is never saved (root-owned `fanal/`), Low, also on `main`
 
 ## Next action
-Wait for CI on PR #99 (build, scans, compose smoke via `run-smoke`); fix it on this branch if red. Then STOP for the owner. After the merge: merge verification; the owner pushes `ki-074-fixed` and `ki-075-fixed` (tag pushes are refused here, 403).
+Wait for CI on the KI-078 docs commit (docs only); then STOP for the owner's review of PR #101. After the merge: merge verification (section 5; the push run on `main` is the scans and the publish, which this fix changes, so wait for it to be green); the owner pushes `ki-077-fixed` (tag pushes are refused here, 403), plus `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
