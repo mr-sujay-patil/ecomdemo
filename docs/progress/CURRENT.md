@@ -6,7 +6,7 @@
 - **Fix:** KI-078 (the image scan never saves its Trivy cache: `~/.cache/trivy/fanal` is owned by root, so `actions/cache` cannot read it); approved 2026-10-21 (the owner chose "KI-078 Trivy cache")
 - **Branch:** fix/ki-078-trivy-cache-owner (cut from `main` at `8d36b19`)
 - **Step:** PR_OPEN (PR #102)
-- **Waiting for user:** YES: review of PR #102 / `approved, merge it` (after its second CI run restores the cache)
+- **Waiting for user:** YES: review of PR #102 / `approved, merge it`
 - **History:** KI-077 (PR #101) merged as `8d36b19` and merge-verified 2026-10-21 (branch tip in `main`; push run 291 on `main` green: both scans and the publish). Tags for the owner (403 here): `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
@@ -14,12 +14,12 @@
 - [x] Regression test red first: `TrivyCacheOwnerTest` failed on `main`'s ci.yml (no `mkdir -p "$HOME/.cache/trivy"`, Trivy as root at `/root/.cache/trivy`)
 - [x] Fix in `ci.yml`'s image-scan job: `mkdir -p "$HOME/.cache/trivy"`, `docker run --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" -e HOME=/tmp`, mounted at `/cache` with `--cache-dir /cache`; `TrivyCacheOwnerTest` and the Dockerfile tests 4/4 green
 - [x] Proof, run 1 (39646793637, `f745077`): all green; image scan's post step "Cache saved with key: trivy-39646793637" (1.0 GB), no `Permission denied`
-- [ ] Proof, run 2 (this PR-number commit): "Cache restored from key: trivy-39646793637"
+- [x] Proof, run 2 (39648388500, `61cd7fe`): all green; restore step 16 s (about 1 GB; run 1: 0 s), scan 65 s (run 1: 87 s, the database download gone). PR description updated with both runs
 - [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-078]` (`docs/security.md` does not describe how Trivy runs: unchanged)
 - [x] Push, PR #102, CURRENT to PR_OPEN
 
 ## Next action
-Read run 2's image-scan log: "Cache restored from key: trivy-39646793637" and the scan still green; add both runs to the PR description. Then STOP for the owner. After the merge: merge verification (the push run on `main` must be green); the owner pushes `ki-078-fixed` (403 here).
+STOP: PR #102 awaits the owner (`approved, merge it`). After the merge: merge verification (the push run on `main` green); the owner pushes `ki-078-fixed` (403 here). Not done, offered: a per-day Trivy cache key (each run saves about 1 GB under a new key now).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
