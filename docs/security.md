@@ -70,6 +70,7 @@ Trivy.
 | CVE-2026-91776, CVE-2026-91777 | `tools.jackson.core:jackson-databind` 3.1.6 (8 images) | HIGH | Trivy (CI on `main`, 2026-10-01) | **Fixed** (KI-042): `jackson-bom.version` 3.1.7 |
 | CVE-2026-91776, CVE-2026-91777 | `com.fasterxml.jackson.core:jackson-databind` 2.21.6 (8 images) | HIGH | Trivy (CI on `main`, 2026-10-01) | **Fixed** (KI-042): `jackson-2-bom.version` 2.21.7 |
 | CVE-2026-106451 | `at.yawk.lz4:lz4-java` 1.10.1 (5 images, via kafka-clients) | HIGH | Trivy (CI on PR #78, 2026-10-08) | **Fixed** (KI-053): pinned `lz4-java.version` 1.11.4 in the parent pom's `dependencyManagement` (Boot does not manage it) |
+| CVE-2026-77214 | Alpine `libexpat` 2.8.5-r0 (8 images, from the base `eclipse-temurin:21-jre-alpine`) | HIGH | Trivy (scheduled CI on `main`, 2026-10-18) | **Fixed** (KI-077): `RUN apk upgrade --no-cache` in the Dockerfile's runtime stage (2.9.0-r0); the publish job rebuilds that stage without its layer cache |
 | CVE-2026-53914 (9.8) | `kotlin-stdlib` 2.3.21, `kotlin-stdlib-common` 1.9.10, `kotlin-reflect` 2.3.21 | CRITICAL | Dependency-Check | **Suppressed, false positive**: the CVE is in Kotlin's *build cache* (compiler tooling), and the CPE covers the whole product, so every Kotlin jar matches. Only the runtime libraries ship here (via OkHttp and the OpenAI client); Trivy doesn't flag them. Expires 2027-03-31 |
 | CVE-2026-18022 (8.8) | `com.pgvector:pgvector` 0.1.6 (Java client) | HIGH | Dependency-Check | **Suppressed, false positive**: the CVE is in the PostgreSQL *extension's* IVFFlat build, on 32-bit only. The jar has no index code, and the running extension was checked: 0.8.6 (fixed), HNSW index, 64-bit. Expires 2027-03-31 |
 
@@ -87,7 +88,10 @@ builds, tests and publishes nothing. A red scheduled run is how a new CVE shows 
 GitHub emails whoever last changed the schedule, and the run's page lists the failing findings.
 
 After the fixes, **all 8 images scan clean** at HIGH/CRITICAL, and the Alpine base had no
-HIGH/CRITICAL findings to begin with. **Dependency-Check** covered 142 dependencies and passes
+HIGH/CRITICAL findings to begin with. **The base image can fall behind Alpine** (KI-077): a tag is only as fresh as
+its last push, so the runtime stage runs `apk upgrade --no-cache` and takes Alpine's fixes on the
+day of the build; the publish job rebuilds that stage (`no-cache-filters: runtime`), or a cached
+upgrade would ship older packages than the image the scan passed. **Dependency-Check** covered 142 dependencies and passes
 with the two suppressions above.
 
 **Below the gate (MEDIUM, recorded, not failing the build)**, from Dependency-Check. These are
