@@ -5,8 +5,8 @@
 - **Updated:** 2026-10-21
 - **Fix:** KI-077 (CI's image scan red on `main` since 2026-10-18: Alpine `libexpat` 2.8.5-r0, CVE-2026-77214 HIGH, fixed in 2.9.0-r0; the runtime base image `eclipse-temurin:21-jre-alpine` was last pushed 2026-09-25); approved 2026-10-21 (the owner: "go with your recommended approach")
 - **Branch:** fix/ki-077-alpine-os-packages (cut from `main` at `11e6240`)
-- **Step:** TESTING
-- **Waiting for user:** no
+- **Step:** PR_OPEN (PR #101, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #101 (image scan, build and test, compose smoke), then review / `approved, merge it`
 - **History:** KI-074 and KI-075 (PR #99) merged as `e0a13eb` and merge-verified 2026-10-21 (branch tip `5fda842` in `main`; push CI on `main`, run 281, green). Tags `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`) are the owner's to push (403 here)
 
 ## Checklist
@@ -16,9 +16,11 @@
 - [x] Tests here: `./mvnw -B test` (all modules, failures ignored to see every module): 688 unit tests, 0 failures, 29 errors, all in the 4 Testcontainers classes (CatalogSchemaTest, ConcurrentReservationTest, InventorySagaTest, PaymentServiceTest: "Could not find a valid Docker environment"; no Docker in this container). ITs, the full verify and the image scan run in CI
 - [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-077]`, `docs/security.md` (findings row, base-image paragraph)
 - [ ] Push, PR, CURRENT to PR_OPEN; CI green
+- [x] Push, PR #101 (label `run-smoke`), CURRENT to PR_OPEN
+- [ ] CI green on PR #101: `Image scan (Trivy)` clean proves the fix; `Build and test` runs the full verify with ITs
 
 ## Next action
-Push, open the PR `Fix KI-077: …`, add its number to KNOWN_ISSUES and CURRENT (PR_OPEN), wait for CI: `Image scan (Trivy)` must be green (it proves the fix), and `Build and test` (full verify with ITs). Then STOP for the owner.
+Wait for CI on PR #101; fix it on this branch if red. Then STOP for the owner. After the merge: merge verification (section 5; the push run on `main` is the scans and the publish, which this fix changes, so wait for it to be green); the owner pushes `ki-077-fixed` (tag pushes are refused here, 403), plus `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
