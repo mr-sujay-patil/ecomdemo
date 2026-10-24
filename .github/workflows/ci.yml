@@ -302,18 +302,28 @@ jobs:
       # looked at and written into .trivyignore.yaml with a statement and an expiry. The SBOM
       # (CycloneDX) is written for every image whatever the result - the list of what is inside
       # is worth having most on the day a new CVE is announced.
+      #
+      # Trivy runs as the runner's user (KI-078). As root it left its cache owned by root, and
+      # actions/cache, which runs as the runner, could not read it back to save it: every run
+      # downloaded the database again. The directory is created here first, because Docker
+      # creates a missing bind-mount source as root; the socket's group lets the non-root Trivy
+      # reach the Docker daemon to read the images; HOME points at a writable /tmp.
       - name: Scan every image
         run: |
           mkdir -p trivy-reports
+          mkdir -p "$HOME/.cache/trivy"
           status=0
           for module in $MODULES; do
             echo "::group::$module"
             run() {
               docker run --rm \
+                --user "$(id -u):$(id -g)" \
+                --group-add "$(stat -c %g /var/run/docker.sock)" \
+                -e HOME=/tmp \
                 -v /var/run/docker.sock:/var/run/docker.sock \
-                -v "$HOME/.cache/trivy:/root/.cache/trivy" \
+                -v "$HOME/.cache/trivy:/cache" \
                 -v "$PWD:/work" -w /work \
-                "$TRIVY_IMAGE" image --quiet "$@" "scan/$module:ci"
+                "$TRIVY_IMAGE" image --quiet --cache-dir /cache "$@" "scan/$module:ci"
             }
             run --format cyclonedx --output "trivy-reports/$module.cdx.json"
             run --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml \

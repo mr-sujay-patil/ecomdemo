@@ -3,25 +3,23 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-10-21
-- **Fix:** KI-077 (CI's image scan red on `main` since 2026-10-18: Alpine `libexpat` 2.8.5-r0, CVE-2026-77214 HIGH, fixed in 2.9.0-r0; the runtime base image `eclipse-temurin:21-jre-alpine` was last pushed 2026-09-25); approved 2026-10-21 (the owner: "go with your recommended approach")
-- **Branch:** fix/ki-077-alpine-os-packages (cut from `main` at `11e6240`)
-- **Step:** PR_OPEN (PR #101, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #101 (image scan, build and test, compose smoke), then review / `approved, merge it`
-- **History:** KI-074 and KI-075 (PR #99) merged as `e0a13eb` and merge-verified 2026-10-21 (branch tip `5fda842` in `main`; push CI on `main`, run 281, green). Tags `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`) are the owner's to push (403 here)
+- **Fix:** KI-078 (the image scan never saves its Trivy cache: `~/.cache/trivy/fanal` is owned by root, so `actions/cache` cannot read it); approved 2026-10-21 (the owner chose "KI-078 Trivy cache")
+- **Branch:** fix/ki-078-trivy-cache-owner (cut from `main` at `8d36b19`)
+- **Step:** PR_OPEN (PR #102)
+- **Waiting for user:** YES: review of PR #102 / `approved, merge it`
+- **History:** KI-077 (PR #101) merged as `8d36b19` and merge-verified 2026-10-21 (branch tip in `main`; push run 291 on `main` green: both scans and the publish). Tags for the owner (403 here): `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
-- [x] KI-077 recorded in `docs/KNOWN_ISSUES.md` (In progress)
-- [x] Regression test red first (`f7b0bf6`): `DockerfileRuntimePackagesTest` 2 of 2 failed on `main`'s Dockerfile and ci.yml
-- [x] Fix (`9dbb3d8`): `RUN apk upgrade --no-cache` at the top of the runtime stage; ci.yml publish `no-cache-filters: runtime`; the test 2/2 green
-- [x] Tests here: `./mvnw -B test` (all modules, failures ignored to see every module): 688 unit tests, 0 failures, 29 errors, all in the 4 Testcontainers classes (CatalogSchemaTest, ConcurrentReservationTest, InventorySagaTest, PaymentServiceTest: "Could not find a valid Docker environment"; no Docker in this container). ITs, the full verify and the image scan run in CI
-- [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-077]`, `docs/security.md` (findings row, base-image paragraph)
-- [ ] Push, PR, CURRENT to PR_OPEN; CI green
-- [x] Push, PR #101 (label `run-smoke`), CURRENT to PR_OPEN
-- [x] CI green on PR #101 (run 39629396387 at `64e76d2`): `Image scan (Trivy)` clean (the `alpine 3.24.2` section with libexpat is gone), `Build and test` (full verify with ITs), both smoke jobs, dependency scan
-- [x] Found along the way, recorded only (rule 7): KI-078, the Trivy cache is never saved (root-owned `fanal/`), Low, also on `main`
+- [x] KI-078 In progress in `docs/KNOWN_ISSUES.md`
+- [x] Regression test red first: `TrivyCacheOwnerTest` failed on `main`'s ci.yml (no `mkdir -p "$HOME/.cache/trivy"`, Trivy as root at `/root/.cache/trivy`)
+- [x] Fix in `ci.yml`'s image-scan job: `mkdir -p "$HOME/.cache/trivy"`, `docker run --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" -e HOME=/tmp`, mounted at `/cache` with `--cache-dir /cache`; `TrivyCacheOwnerTest` and the Dockerfile tests 4/4 green
+- [x] Proof, run 1 (39646793637, `f745077`): all green; image scan's post step "Cache saved with key: trivy-39646793637" (1.0 GB), no `Permission denied`
+- [x] Proof, run 2 (39648388500, `61cd7fe`): all green; restore step 16 s (about 1 GB; run 1: 0 s), scan 65 s (run 1: 87 s, the database download gone). PR description updated with both runs
+- [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-078]` (`docs/security.md` does not describe how Trivy runs: unchanged)
+- [x] Push, PR #102, CURRENT to PR_OPEN
 
 ## Next action
-Wait for CI on the KI-078 docs commit (docs only); then STOP for the owner's review of PR #101. After the merge: merge verification (section 5; the push run on `main` is the scans and the publish, which this fix changes, so wait for it to be green); the owner pushes `ki-077-fixed` (tag pushes are refused here, 403), plus `ki-074-fixed`, `ki-075-fixed` (`e0a13eb`) and `phase-37-complete` (`4767124`).
+STOP: PR #102 awaits the owner (`approved, merge it`). After the merge: merge verification (the push run on `main` green); the owner pushes `ki-078-fixed` (403 here). Not done, offered: a per-day Trivy cache key (each run saves about 1 GB under a new key now).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
