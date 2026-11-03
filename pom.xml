@@ -127,6 +127,9 @@
 			  jackson 2.21.6 -> 2.21.7          CVE-2026-91776, CVE-2026-91777 (HIGH), found 2026-10-01
 			  lz4-java 1.10.1 -> 1.11.4         CVE-2026-106451 (HIGH), found 2026-10-08. Not managed by Boot:
 			                                    kafka-clients brings it, so it is pinned in dependencyManagement below.
+			  snappy-java 1.1.10.7 -> 1.1.10.12 CVE-2026-108106, CVE-2026-93451 (HIGH), found 2026-10-28 (KI-080).
+			                                    Same route as lz4-java: kafka-clients 4.2.1 (and 4.2.2, in Boot
+			                                    4.1.2) brings it, so it is pinned in dependencyManagement below.
 
 			Remove each line when a Boot release manages that version or newer: an override left
 			behind would pin the project to an OLD version the day Boot moves past it.
@@ -136,6 +139,7 @@
 		<jackson-bom.version>3.1.7</jackson-bom.version>
 		<jackson-2-bom.version>2.21.7</jackson-2-bom.version>
 		<lz4-java.version>1.12.0</lz4-java.version>
+		<snappy-java.version>1.1.10.12</snappy-java.version>
 
 		<!--
 			Empty defaults. The JaCoCo executions below fill these in, and Surefire and Failsafe
@@ -182,6 +186,12 @@
 				<groupId>at.yawk.lz4</groupId>
 				<artifactId>lz4-java</artifactId>
 				<version>${lz4-java.version}</version>
+			</dependency>
+			<!-- KI-080. Kafka's other compression codec, also reached through kafka-clients. -->
+			<dependency>
+				<groupId>org.xerial.snappy</groupId>
+				<artifactId>snappy-java</artifactId>
+				<version>${snappy-java.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>io.swagger.core.v3</groupId>
