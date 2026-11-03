@@ -2,24 +2,23 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-10-21
-- **Fix:** KI-078 (the image scan never saves its Trivy cache: `~/.cache/trivy/fanal` is owned by root, so `actions/cache` cannot read it); approved 2026-10-21 (the owner chose "KI-078 Trivy cache")
-- **Branch:** fix/ki-078-trivy-cache-owner (cut from `main` at `8d36b19`)
-- **Step:** PR_OPEN (PR #102)
-- **Waiting for user:** YES: review of PR #102 / `approved, merge it`
-- **History:** KI-077 (PR #101) merged as `8d36b19` and merge-verified 2026-10-21 (branch tip in `main`; push run 291 on `main` green: both scans and the publish). Tags for the owner (403 here): `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
+- **Updated:** 2026-11-03
+- **Fix:** KI-080 (CI's image scan red on `main` since 2026-10-28: `snappy-java` 1.1.10.7 through `kafka-clients`, CVE-2026-108106 and CVE-2026-93451, HIGH, fixed in 1.1.10.9); approved 2026-11-03 (the owner said "continue" on the proposed fix)
+- **Branch:** fix/ki-080-snappy-java (cut from `main` at `d69b738`)
+- **Step:** BRANCHED
+- **Waiting for user:** no
+- **History:** KI-078 (PR #102) merged as `d69b738`, merge-verified 2026-10-24 (push run 299 on `main` green). Tags for the owner (403 here): `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Open Dependabot PRs #103 to #106 are untouched (#103, Boot 4.1.2, does not fix this: its Kafka 4.2.2 still declares snappy-java 1.1.10.7)
 
 ## Checklist
-- [x] KI-078 In progress in `docs/KNOWN_ISSUES.md`
-- [x] Regression test red first: `TrivyCacheOwnerTest` failed on `main`'s ci.yml (no `mkdir -p "$HOME/.cache/trivy"`, Trivy as root at `/root/.cache/trivy`)
-- [x] Fix in `ci.yml`'s image-scan job: `mkdir -p "$HOME/.cache/trivy"`, `docker run --user "$(id -u):$(id -g)" --group-add "$(stat -c %g /var/run/docker.sock)" -e HOME=/tmp`, mounted at `/cache` with `--cache-dir /cache`; `TrivyCacheOwnerTest` and the Dockerfile tests 4/4 green
-- [x] Proof, run 1 (39646793637, `f745077`): all green; image scan's post step "Cache saved with key: trivy-39646793637" (1.0 GB), no `Permission denied`
-- [x] Proof, run 2 (39648388500, `61cd7fe`): all green; restore step 16 s (about 1 GB; run 1: 0 s), scan 65 s (run 1: 87 s, the database download gone). PR description updated with both runs
-- [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-078]` (`docs/security.md` does not describe how Trivy runs: unchanged)
-- [x] Push, PR #102, CURRENT to PR_OPEN
+- [x] KI-080 recorded (In progress)
+- [ ] Reproduce: `./mvnw dependency:tree -Dincludes=org.xerial.snappy:snappy-java` resolves 1.1.10.7 (CI's Trivy scan is red on it; no Docker here)
+- [ ] Fix: `snappy-java.version` 1.1.10.12 in the root pom's properties, managed in `dependencyManagement` beside lz4-java (KI-053's pattern), with its line in the override comment
+- [ ] Tests: the dependency tree resolves 1.1.10.12 in every Kafka module; `./mvnw -B test` (unit; ITs and the image scan in CI)
+- [ ] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-080]`, `docs/security.md` findings row
+- [ ] Push, PR (label `run-smoke`: Kafka compression codec at runtime), CI green
 
 ## Next action
-STOP: PR #102 awaits the owner (`approved, merge it`). After the merge: merge verification (the push run on `main` green); the owner pushes `ki-078-fixed` (403 here). Not done, offered: a per-day Trivy cache key (each run saves about 1 GB under a new key now).
+Run the dependency tree to reproduce, then add the pin in `pom.xml`.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
