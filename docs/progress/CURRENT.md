@@ -5,8 +5,8 @@
 - **Updated:** 2026-11-03
 - **Fix:** KI-080 (CI's image scan red on `main` since 2026-10-28: `snappy-java` 1.1.10.7 through `kafka-clients`, CVE-2026-108106 and CVE-2026-93451, HIGH, fixed in 1.1.10.9); approved 2026-11-03 (the owner said "continue" on the proposed fix)
 - **Branch:** fix/ki-080-snappy-java (cut from `main` at `d69b738`)
-- **Step:** TESTING
-- **Waiting for user:** no
+- **Step:** PR_OPEN (PR #107, label `run-smoke`)
+- **Waiting for user:** YES: CI on PR #107, then review / `approved, merge it`
 - **History:** KI-078 (PR #102) merged as `d69b738`, merge-verified 2026-10-24 (push run 299 on `main` green). Tags for the owner (403 here): `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Open Dependabot PRs #103 to #106 are untouched (#103, Boot 4.1.2, does not fix this: its Kafka 4.2.2 still declares snappy-java 1.1.10.7)
 
 ## Checklist
@@ -15,10 +15,11 @@
 - [x] Fix (`92cf7d9`): `snappy-java.version` 1.1.10.12, managed beside lz4-java, with its line in the override comment
 - [x] Tests: the tree resolves 1.1.10.12 in all six; `./mvnw -B test`: 689 unit tests, 0 failures, 29 errors all in the 4 Testcontainers classes (no Docker here)
 - [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-080]`, `docs/security.md` findings row
-- [ ] Push, PR (label `run-smoke`: Kafka compression codec at runtime), CI green
+- [x] Push, PR #107 (label `run-smoke`)
+- [ ] CI green on PR #107: `Image scan (Trivy)` clean on the 5 Kafka images (the proof), `Build and test`, compose smoke
 
 ## Next action
-Push, open the PR `Fix KI-080: …` with label `run-smoke`, add its number in one more commit, wait for CI (the image scan must be clean on the 5 Kafka images), then STOP for the owner.
+Wait for CI on PR #107; fix it on this branch if red; add the results to the PR description; STOP for `approved, merge it`. After the merge: merge verification (the push run on `main`: scans and publish must be green); the owner pushes `ki-080-fixed` (403 here).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
