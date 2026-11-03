@@ -3,23 +3,21 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-03
-- **Fix:** KI-080 (CI's image scan red on `main` since 2026-10-28: `snappy-java` 1.1.10.7 through `kafka-clients`, CVE-2026-108106 and CVE-2026-93451, HIGH, fixed in 1.1.10.9); approved 2026-11-03 (the owner said "continue" on the proposed fix)
-- **Branch:** fix/ki-080-snappy-java (cut from `main` at `d69b738`)
-- **Step:** PR_OPEN (PR #107, label `run-smoke`)
-- **Waiting for user:** YES: CI on PR #107, then review / `approved, merge it`
-- **History:** KI-078 (PR #102) merged as `d69b738`, merge-verified 2026-10-24 (push run 299 on `main` green). Tags for the owner (403 here): `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed` and `ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Open Dependabot PRs #103 to #106 are untouched (#103, Boot 4.1.2, does not fix this: its Kafka 4.2.2 still declares snappy-java 1.1.10.7)
+- **Fix:** KI-076 + KI-079 together (workflow rule 11: same code, the cert-reload scripts and their renewal ITs). KI-076: `PostgresTlsIT.renewalIsReloaded` times out (CI again on PR #107, 2026-11-03). KI-079: `KafkaTlsIT.renewalIsReloaded` timed out (PR #102). Started on the owner's "keep working" (2026-11-03) after KI-080
+- **Branch:** fix/ki-076-079-cert-reload-race (cut from `main` at `f872e3d`)
+- **Step:** IMPLEMENTING
+- **Waiting for user:** no
+- **History:** KI-080 (PR #107) merged as `f872e3d`, merge-verified 2026-11-03 (push run 316 on `main`: image scan, dependency scan and publish green; images published again). Tags for the owner (403 here): `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
-- [x] KI-080 recorded (In progress)
-- [x] Reproduced: `./mvnw dependency:tree -Dincludes=org.xerial.snappy:snappy-java` resolved 1.1.10.7 in catalog, ecomdemo-app, inventory, notification, outbox, payment
-- [x] Fix (`92cf7d9`): `snappy-java.version` 1.1.10.12, managed beside lz4-java, with its line in the override comment
-- [x] Tests: the tree resolves 1.1.10.12 in all six; `./mvnw -B test`: 689 unit tests, 0 failures, 29 errors all in the 4 Testcontainers classes (no Docker here)
-- [x] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-080]`, `docs/security.md` findings row
-- [x] Push, PR #107 (label `run-smoke`)
-- [ ] CI green on PR #107: `Image scan (Trivy)` clean on the 5 Kafka images (the proof), `Build and test`, compose smoke
+- [x] KI-076 and KI-079 In progress
+- [ ] Cause (read, 2026-11-03): each cert-reload script hashes only `tls.crt`; the ITs copy `tls.crt` and then `tls.key`. A poll between the two installs the new certificate with the OLD key: PostgreSQL rejects the pair and keeps the old one, but `pg_reload_conf()` returns t, so the script logs "reloaded" and never retries (the hash no longer changes) -> the 30 s window runs out. Kafka validates a dynamic keystore update with a handshake, so there the race retries; KI-079's cause is not shown by the log (the test reads reload.log only after success)
+- [ ] Red first: `PostgresTlsConfigTest`/`KafkaTlsConfigTest` check the change marker covers the key (local); `PostgresTlsIT` copies the certificate, waits for a reload attempt, then the key (deterministic red with the old script, CI only)
+- [ ] Fix: the marker is `cat "$key" "$cert" | sha256sum` in the 6 Postgres manifests and kafka.yaml; both ITs put reload.log in a timeout's message
+- [ ] Tests, docs (KNOWN_ISSUES, decisions), PR, CI green
 
 ## Next action
-Wait for CI on PR #107; fix it on this branch if red; add the results to the PR description; STOP for `approved, merge it`. After the merge: merge verification (the push run on `main`: scans and publish must be green); the owner pushes `ki-080-fixed` (403 here).
+Write the red tests (config tests first, locally), then change the scripts.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
