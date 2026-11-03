@@ -137,12 +137,15 @@ spec:
           args:
             - |
               cert=/etc/ecomdemo-tls/tls.crt
-              last="$(sha256sum "$cert" | cut -d' ' -f1)"
+              key=/etc/ecomdemo-tls/tls.key
+              # A renewal is the key AND the certificate: hashing both makes a change to either one a reload, so an
+              # update that lands in two steps is reloaded again when its second half arrives (KI-076).
+              last="$(cat "$key" "$cert" | sha256sum | cut -d' ' -f1)"
               while true; do
                 sleep "${RELOAD_INTERVAL:-30}"
-                now="$(sha256sum "$cert" | cut -d' ' -f1)"
+                now="$(cat "$key" "$cert" | sha256sum | cut -d' ' -f1)"
                 if [ "$now" != "$last" ]; then
-                  if (umask 077 && cat /etc/ecomdemo-tls/tls.key "$cert" > /etc/kafka-tls/keystore.pem.new) \
+                  if (umask 077 && cat "$key" "$cert" > /etc/kafka-tls/keystore.pem.new) \
                     && mv -f /etc/kafka-tls/keystore.pem.new /etc/kafka-tls/keystore.pem \
                     && /opt/kafka/bin/kafka-configs.sh --bootstrap-server 127.0.0.1:9094 --entity-type brokers \
                          --entity-name 1 --alter \
