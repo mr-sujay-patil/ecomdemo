@@ -55,6 +55,24 @@ class PostgresTlsConfigTest {
         assertThat(container(pod, "cert-reload").get("args").toString()).contains("pg_reload_conf()");
     }
 
+    /**
+     * KI-076. The sidecar decides "this is a renewal" from a hash. Of the certificate alone, a poll that lands between the
+     * certificate and its key changing installs the new certificate with the OLD key: PostgreSQL refuses the pair and keeps
+     * the old one, yet {@code pg_reload_conf()} still answers t, so the script logs a reload, records the new hash and never
+     * looks again. Hashing the key with the certificate makes the second half of the update a change of its own.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({"db", "catalog-db", "customer-db", "inventory-db", "notification-db", "payment-db"})
+    @DisplayName("each cert-reload notices a change to the key as well as the certificate (KI-076)")
+    void eachReloadWatchesTheKeyToo(String database) throws IOException {
+        Map<String, Object> pod = podSpec(resource("k8s/data/" + database + ".yaml", "StatefulSet", database));
+        String reload = String.join("\n", strings(container(pod, "cert-reload").get("args")));
+
+        assertThat(reload).contains("key=/etc/ecomdemo-tls/tls.key")
+                .contains("last=\"$(cat \"$key\" \"$cert\" | sha256sum | cut -d' ' -f1)\"")
+                .contains("now=\"$(cat \"$key\" \"$cert\" | sha256sum | cut -d' ' -f1)\"");
+    }
+
     @Test
     @DisplayName("pg_hba.conf accepts TCP connections only over TLS")
     void hbaAcceptsOnlyTls() throws IOException {

@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -93,18 +94,26 @@ class KafkaTlsIT {
                     KafkaTestBroker.pod(), "cert-reload").get("args")));
             broker.execInContainer("sh", "-c", "RELOAD_INTERVAL=1 nohup sh -c \"$1\" >/tmp/reload.log 2>&1 &",
                     "reloader", reload);
+            // The certificate, then its key, with the script let to try in between: an update that is not atomic (KI-079,
+            // as KI-076 for PostgreSQL).
             KafkaTestBroker.copy(broker, files.resolve("renewed.crt"), "/etc/ecomdemo-tls/tls.crt");
+            await().atMost(Duration.ofSeconds(60)).until(() -> reloadLog(broker).contains("the Kafka certificate"));
             KafkaTestBroker.copy(broker, files.resolve("renewed.key"), "/etc/ecomdemo-tls/tls.key");
 
             // Until the reload, the broker still presents the old certificate and the handshake fails.
             Map<String, Object> properties = adminProperties("localhost:" + port, mount);
-            await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofSeconds(2)).ignoreExceptions().untilAsserted(() -> {
-                try (Admin admin = Admin.create(properties)) {
-                    assertThat(admin.listTopics().names().get(10, TimeUnit.SECONDS)).isNotNull();
-                }
-            });
-            assertThat(broker.execInContainer("cat", "/tmp/reload.log").getStdout())
-                    .contains("reloaded the Kafka certificate");
+            try {
+                await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofSeconds(2)).ignoreExceptions().untilAsserted(() -> {
+                    try (Admin admin = Admin.create(properties)) {
+                        assertThat(admin.listTopics().names().get(10, TimeUnit.SECONDS)).isNotNull();
+                    }
+                });
+            } catch (ConditionTimeoutException timeout) {
+                // KI-079 timed out here once with nothing to show for it: the script's log says which step it was on.
+                throw new AssertionError("the renewed certificate was not in service; the script's log:\n"
+                        + reloadLog(broker), timeout);
+            }
+            assertThat(reloadLog(broker)).contains("reloaded the Kafka certificate");
             assertThat(broker.isRunning()).isTrue();
         }
     }
@@ -123,5 +132,10 @@ class KafkaTlsIT {
         properties.put(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG, 15_000);
         properties.put(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG, 5_000);
         return properties;
+    }
+
+    /** What the cert-reload script has written so far (KI-079: shown when a renewal times out). */
+    private static String reloadLog(GenericContainer<?> container) throws Exception {
+        return container.execInContainer("cat", "/tmp/reload.log").getStdout();
     }
 }

@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.stream.Stream;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -134,17 +135,26 @@ class PostgresTlsIT {
                     pod(database), "cert-reload").get("args")));
             postgres.execInContainer("sh", "-c", "RELOAD_INTERVAL=1 nohup sh -c \"$1\" >/tmp/reload.log 2>&1 &",
                     "reloader", reload);
+            // The renewal arrives in two steps, the certificate and then its key, and the script is let to try in between:
+            // the worst case of an update that is not atomic (KI-076). Before the fix the script installed the new
+            // certificate with the OLD key, PostgreSQL kept the old pair, and the script never looked again.
             postgres.copyFileToContainer(Transferable.of(Files.readAllBytes(files.resolve(database + "-new.crt")), 0644),
                     "/etc/ecomdemo-tls/tls.crt");
+            await().atMost(Duration.ofSeconds(30)).until(() -> reloadLog(postgres).contains("the PostgreSQL certificate"));
             postgres.copyFileToContainer(Transferable.of(Files.readAllBytes(files.resolve(database + "-new.key")), 0644),
                     "/etc/ecomdemo-tls/tls.key");
 
             // Until the reload, the server still presents the old certificate and the handshake fails.
-            await().atMost(Duration.ofSeconds(30)).ignoreExceptionsInstanceOf(SQLException.class).untilAsserted(() -> {
-                try (Connection connection = DriverManager.getConnection(url, clientProperties(database, "other-ca"))) {
-                    assertThat(sslInUse(connection)).isTrue();
-                }
-            });
+            try {
+                await().atMost(Duration.ofSeconds(30)).ignoreExceptionsInstanceOf(SQLException.class).untilAsserted(() -> {
+                    try (Connection connection = DriverManager.getConnection(url, clientProperties(database, "other-ca"))) {
+                        assertThat(sslInUse(connection)).isTrue();
+                    }
+                });
+            } catch (ConditionTimeoutException timeout) {
+                throw new AssertionError("the renewed certificate was not in service; the script's log:\n"
+                        + reloadLog(postgres), timeout);
+            }
             assertThat(postgres.execInContainer("cat", "/tmp/reload.log").getStdout())
                     .contains("reloaded the PostgreSQL certificate");
             assertThat(postgres.isRunning()).isTrue();
@@ -365,6 +375,11 @@ class PostgresTlsIT {
             return ((java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
                     .generateCertificate(in)).getSerialNumber().toString();
         }
+    }
+
+    /** What the cert-reload script has written so far (KI-076: shown when a renewal times out). */
+    private static String reloadLog(GenericContainer<?> container) throws Exception {
+        return container.execInContainer("cat", "/tmp/reload.log").getStdout();
     }
 
     private static Map<String, Object> pod(String database) throws IOException {
