@@ -5,8 +5,8 @@
 - **Updated:** 2026-11-03
 - **Fix:** KI-076 + KI-079 together (workflow rule 11: same code, the cert-reload scripts and their renewal ITs). KI-076: `PostgresTlsIT.renewalIsReloaded` times out (CI again on PR #107, 2026-11-03). KI-079: `KafkaTlsIT.renewalIsReloaded` timed out (PR #102). Started on the owner's "keep working" (2026-11-03) after KI-080
 - **Branch:** fix/ki-076-079-cert-reload-race (cut from `main` at `f872e3d`)
-- **Step:** TESTING
-- **Waiting for user:** no
+- **Step:** PR_OPEN (PR #108)
+- **Waiting for user:** YES: CI on PR #108, the k8s smoke (owner's machine), then `approved, merge it`
 - **History:** KI-080 (PR #107) merged as `f872e3d`, merge-verified 2026-11-03 (push run 316 on `main`: image scan, dependency scan and publish green; images published again). Tags for the owner (403 here): `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
@@ -16,10 +16,11 @@
 - [x] Fix (`da5c7d5`): the marker is `cat "$key" "$cert" | sha256sum` in the 6 Postgres manifests and kafka.yaml; both ITs put reload.log in a timeout's message
 - [x] Tests: config tests 26/26 and 9/9; the real script against stub install/psql: `main`'s ends on (old key, new cert), the fix's on (new, new); `sh -n` on all 7 scripts; `./mvnw -pl ecomdemo-app -am test`: 0 failures, the 29 Docker-only errors as before
 - [x] Docs: KNOWN_ISSUES (both Fixed), decisions `[Fix KI-076, KI-079]`
-- [ ] Push, PR, CI green (the two renewal ITs run in `Build and test`); the k8s smoke is the owner's (manifests changed; no kind here)
+- [x] Push, PR #108 (https://github.com/mr-sujay-patil/ecomdemo/pull/108)
+- [ ] CI green on PR #108 (`Build and test` runs both renewal ITs, two-step); the k8s smoke is the owner's (manifests changed; no kind here)
 
 ## Next action
-Open the PR `Fix KI-076, KI-079: …`, add its number in one more commit, wait for CI (`Build and test` runs PostgresTlsIT and KafkaTlsIT with the two-step renewal), then STOP for the owner. Ask the owner to run the k8s smoke (`scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, `scripts/k8s-smoke.sh`): the manifests changed.
+Wait for CI on PR #108; fix it on this branch if red (a renewal IT timeout now prints the script's log); add the results to the PR description; STOP for the owner, who also runs the k8s smoke. After the merge: merge verification; the owner pushes `ki-076-fixed` and `ki-079-fixed` (403 here).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
