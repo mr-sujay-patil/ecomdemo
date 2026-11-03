@@ -51,6 +51,10 @@ class PostgresTlsConfigTest {
 
         assertThat(start).contains("-c ssl=on", "-c ssl_cert_file=/etc/postgres-tls/tls.crt",
                 "-c ssl_key_file=/etc/postgres-tls/tls.key", "-c hba_file=/etc/postgresql-hba/pg_hba.conf");
+        // The start command copies the mounted pair itself (no shell variables of cert-reload's there): a path that
+        // does not resolve leaves PostgreSQL without a key file, and the pod never starts.
+        assertThat(start).contains("install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key",
+                "install -o postgres -g postgres -m 0644 /etc/ecomdemo-tls/tls.crt /etc/postgres-tls/tls.crt");
         assertThat(volumeSources(pod)).contains("secret:" + database + "-tls", "configMap:postgres-hba");
         assertThat(container(pod, "cert-reload").get("args").toString()).contains("pg_reload_conf()");
     }
