@@ -77,6 +77,18 @@ class KafkaTlsConfigTest {
                 .contains("listener.name.internal.ssl.keystore.location");
     }
 
+    /** KI-079: as for PostgreSQL (KI-076), a renewal is the certificate AND its key, so both go into the change marker. */
+    @Test
+    @DisplayName("the cert-reload notices a change to the key as well as the certificate (KI-079)")
+    void reloadWatchesTheKeyToo() throws IOException {
+        Map<String, Object> pod = podSpec(resource("k8s/data/kafka.yaml", "StatefulSet", "kafka"));
+        String reload = String.join("\n", strings(container(pod, "cert-reload").get("args")));
+
+        assertThat(reload).contains("key=/etc/ecomdemo-tls/tls.key")
+                .contains("last=\"$(cat \"$key\" \"$cert\" | sha256sum | cut -d' ' -f1)\"")
+                .contains("now=\"$(cat \"$key\" \"$cert\" | sha256sum | cut -d' ' -f1)\"");
+    }
+
     @ParameterizedTest(name = "{0}")
     @CsvSource({"app", "catalog-service", "inventory-service", "notification-service", "payment-service"})
     @DisplayName("each client speaks SSL and trusts the cluster CA")

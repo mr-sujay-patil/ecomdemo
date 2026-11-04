@@ -107,12 +107,15 @@ spec:
           args:
             - |
               cert=/etc/ecomdemo-tls/tls.crt
-              last="$(sha256sum "$cert" | cut -d' ' -f1)"
+              key=/etc/ecomdemo-tls/tls.key
+              # A renewal is the key AND the certificate: hashing both makes a change to either one a reload, so an
+              # update that lands in two steps is reloaded again when its second half arrives (KI-076).
+              last="$(cat "$key" "$cert" | sha256sum | cut -d' ' -f1)"
               while true; do
                 sleep "${RELOAD_INTERVAL:-30}"
-                now="$(sha256sum "$cert" | cut -d' ' -f1)"
+                now="$(cat "$key" "$cert" | sha256sum | cut -d' ' -f1)"
                 if [ "$now" != "$last" ]; then
-                  if install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key \
+                  if install -o postgres -g postgres -m 0600 "$key" /etc/postgres-tls/tls.key \
                     && install -o postgres -g postgres -m 0644 "$cert" /etc/postgres-tls/tls.crt \
                     && psql -h /var/run/postgresql -U ecomdemo -d ecomdemo -Atc 'select pg_reload_conf()' | grep -q t; then
                     echo "reloaded the PostgreSQL certificate"; last="$now"

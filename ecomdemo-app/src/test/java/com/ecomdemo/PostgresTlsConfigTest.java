@@ -51,8 +51,30 @@ class PostgresTlsConfigTest {
 
         assertThat(start).contains("-c ssl=on", "-c ssl_cert_file=/etc/postgres-tls/tls.crt",
                 "-c ssl_key_file=/etc/postgres-tls/tls.key", "-c hba_file=/etc/postgresql-hba/pg_hba.conf");
+        // The start command copies the mounted pair itself (no shell variables of cert-reload's there): a path that
+        // does not resolve leaves PostgreSQL without a key file, and the pod never starts.
+        assertThat(start).contains("install -o postgres -g postgres -m 0600 /etc/ecomdemo-tls/tls.key /etc/postgres-tls/tls.key",
+                "install -o postgres -g postgres -m 0644 /etc/ecomdemo-tls/tls.crt /etc/postgres-tls/tls.crt");
         assertThat(volumeSources(pod)).contains("secret:" + database + "-tls", "configMap:postgres-hba");
         assertThat(container(pod, "cert-reload").get("args").toString()).contains("pg_reload_conf()");
+    }
+
+    /**
+     * KI-076. The sidecar decides "this is a renewal" from a hash. Of the certificate alone, a poll that lands between the
+     * certificate and its key changing installs the new certificate with the OLD key: PostgreSQL refuses the pair and keeps
+     * the old one, yet {@code pg_reload_conf()} still answers t, so the script logs a reload, records the new hash and never
+     * looks again. Hashing the key with the certificate makes the second half of the update a change of its own.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource({"db", "catalog-db", "customer-db", "inventory-db", "notification-db", "payment-db"})
+    @DisplayName("each cert-reload notices a change to the key as well as the certificate (KI-076)")
+    void eachReloadWatchesTheKeyToo(String database) throws IOException {
+        Map<String, Object> pod = podSpec(resource("k8s/data/" + database + ".yaml", "StatefulSet", database));
+        String reload = String.join("\n", strings(container(pod, "cert-reload").get("args")));
+
+        assertThat(reload).contains("key=/etc/ecomdemo-tls/tls.key")
+                .contains("last=\"$(cat \"$key\" \"$cert\" | sha256sum | cut -d' ' -f1)\"")
+                .contains("now=\"$(cat \"$key\" \"$cert\" | sha256sum | cut -d' ' -f1)\"");
     }
 
     @Test
