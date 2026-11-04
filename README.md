@@ -2249,6 +2249,18 @@ docker exec ecomdemo-db psql -U ecomdemo -d ecomdemo -c \
 
 `scripts/smoke-test.sh` runs exactly that sequence as 18 scripted checks.
 
+### Who notices a relay that cannot send (KI-031)
+
+Holding the events is half the job; the other half is somebody finding out. Every service with an
+outbox publishes two gauges, refreshed every 15 seconds by a check of its own:
+`outbox_events_pending` (how many wait) and `outbox_events_oldest_pending_age_seconds` (how long the
+oldest has waited, worked out when Prometheus reads it, so it keeps growing while the events are
+stuck). A healthy relay publishes within a second, so the alert **OutboxEventsStuck** fires when an
+event has waited more than 5 minutes, for 5 minutes, per `service`. In the demo above, with Kafka
+stopped, Prometheus shows the age climbing at http://localhost:19090 (query
+`max by (service) (outbox_events_oldest_pending_age_seconds)`), and the alert goes pending after 5
+minutes and fires 5 minutes later.
+
 ### A bug this phase caught, which had nothing to do with the outbox
 
 The relay needs a `StringSerializer` producer to send the committed bytes verbatim. The obvious

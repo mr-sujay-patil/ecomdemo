@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.support.ScheduledTaskObservationContext;
 
 /**
- * Keeps the outbox relay's tick out of Tempo, and only the relay's.
+ * Keeps the outbox relay's tick (and the backlog check's, KI-031) out of Tempo, and only theirs.
  *
  * <p>Spring observes every {@code @Scheduled} run as {@code tasks.scheduled.execution}. The relay
  * runs every second, so each tick was a trace of its own, around the clock, recording that nothing
@@ -24,6 +24,9 @@ import org.springframework.scheduling.support.ScheduledTaskObservationContext;
  *
  * <p>No observation means no span AND no metric. Losing the relay's timer is the accepted cost: a
  * timer that fires every second measured an empty poll almost every time.
+ *
+ * <p>The backlog check (KI-031) is dropped for the same reason: every 15 s, in every service, it
+ * would be a trace recording one count. What it measures is in its own gauges ({@link OutboxMetrics}).
  */
 @Configuration(proxyBeanMethods = false)
 class OutboxObservationConfig {
@@ -31,6 +34,7 @@ class OutboxObservationConfig {
     @Bean
     ObservationPredicate noOutboxRelayObservations() {
         return (name, context) -> !(context instanceof ScheduledTaskObservationContext task
-                && OutboxRelay.class.equals(task.getTargetClass()));
+                && (OutboxRelay.class.equals(task.getTargetClass())
+                        || OutboxBacklogCheck.class.equals(task.getTargetClass())));
     }
 }

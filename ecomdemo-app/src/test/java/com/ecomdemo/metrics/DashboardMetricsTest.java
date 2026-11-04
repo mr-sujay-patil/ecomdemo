@@ -1,6 +1,7 @@
 package com.ecomdemo.metrics;
 
 import com.ecomdemo.order.internal.saga.SagaMetrics;
+import com.ecomdemo.outbox.internal.OutboxMetrics;
 import com.ecomdemo.support.ProjectRoot;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -152,6 +153,19 @@ class DashboardMetricsTest {
     }
 
     @Test
+    @DisplayName("an alert watches the outbox (KI-031): events that wait are the relay failing to send")
+    void anAlertWatchesTheOutbox() throws IOException {
+        assertThat(metricNamesIn(ALERTS)).contains("outbox_events_oldest_pending_age_seconds");
+        assertThat(Files.readString(ALERTS)).contains("alert: OutboxEventsStuck");
+        // Per SERVICE, which is the scrape label that names one (prometheus.yml). Every service is
+        // a target of the one job `ecomdemo`, so `by (job)` would fold five outboxes into one row.
+        assertThat(Files.readString(ALERTS))
+                .contains("max by (service) (outbox_events_oldest_pending_age_seconds)");
+        assertThat(Files.readString(PROMETHEUS_CONFIG)).contains("service: ecomdemo-app", "service: catalog-service",
+                "service: inventory-service", "service: notification-service", "service: payment-service");
+    }
+
+    @Test
     void theDashboardBindsToTheProvisionedDatasourceByUid() throws IOException {
         // The usual reason a provisioned dashboard comes up saying "Datasource not found": it
         // refers to the datasource by name, or by a UID Grafana generated on some other machine.
@@ -202,6 +216,8 @@ class DashboardMetricsTest {
         new CheckoutMetrics(registry);
         // Phase 32: the saga deadline's gauge and counter, from the class the application runs.
         new SagaMetrics(registry);
+        // KI-031: the outbox library's backlog gauges, which every service with an outbox registers.
+        new OutboxMetrics(registry);
         // The resilience series, from the same Micrometer binders Resilience4j's Boot module
         // registers - so a Resilience4j upgrade that renamed one fails here, not on a blank panel.
         CircuitBreakerRegistry breakers = CircuitBreakerRegistry.ofDefaults();
@@ -231,7 +247,11 @@ class DashboardMetricsTest {
                     names.add(base + "_max");
                     names.add(base + "_bucket");
                 }
-                default -> names.add(base);
+                // A gauge with a base unit gets it as a suffix, as the Prometheus registry writes it:
+                // outbox.events.oldest.pending.age in seconds is ..._age_seconds.
+                default -> names.add(meter.getId().getBaseUnit() == null
+                        ? base
+                        : base + "_" + meter.getId().getBaseUnit());
             }
         }
         return names;
@@ -270,7 +290,8 @@ class DashboardMetricsTest {
                 || name.startsWith("process_cpu")
                 || name.startsWith("system_cpu")
                 || name.startsWith("resilience4j_")
-                || name.startsWith("saga_");
+                || name.startsWith("saga_")
+                || name.startsWith("outbox_");
     }
 
     private static String datasourceUid() throws IOException {

@@ -1960,6 +1960,34 @@ print(len(json.load(sys.stdin)['data']['result']) > 0)" || echo False)"
         sleep 1
     done
     check "the dashboard's orders-per-minute query returns data" "True" "$DASHBOARD_HAS_DATA"
+
+    # KI-031: the outbox is watched. Each of the five services with an outbox publishes the age of
+    # its oldest unpublished event (0 when none waits; registered at start-up, so it is there from
+    # the first scrape), and the rule on it loads, evaluates and stays quiet: by now this script
+    # has placed orders, and every event they caused must already be published.
+    OUTBOX_SERVICES=""
+    for _ in $(seq 1 45); do
+        OUTBOX_SERVICES="$(curl -sS --get "$PROMETHEUS_URL/api/v1/query" \
+            --data-urlencode 'query=max by (service) (outbox_events_oldest_pending_age_seconds)' \
+            | python3 -c "
+import json, sys
+print(' '.join(sorted(r['metric'].get('service', '?') for r in json.load(sys.stdin)['data']['result'])))" \
+            || echo "")"
+        [ "$OUTBOX_SERVICES" = "catalog-service ecomdemo-app inventory-service notification-service payment-service" ] && break
+        sleep 1
+    done
+    check "every service with an outbox reports its backlog's age (KI-031)" \
+        "catalog-service ecomdemo-app inventory-service notification-service payment-service" "$OUTBOX_SERVICES"
+    check "the outbox alert (OutboxEventsStuck) is loaded and Prometheus can evaluate it" "ok" \
+        "$(printf '%s' "$RULES" | python3 -c "
+import json, sys
+g = json.load(sys.stdin)['data']['groups']
+print(next((r['health'] for grp in g for r in grp['rules'] if r['name'] == 'OutboxEventsStuck'), 'MISSING'))")"
+    check "and it is inactive: every relay keeps up" "inactive" \
+        "$(curl -sS "$PROMETHEUS_URL/api/v1/rules" | python3 -c "
+import json, sys
+g = json.load(sys.stdin)['data']['groups']
+print(next((r['state'] for grp in g for r in grp['rules'] if r['name'] == 'OutboxEventsStuck'), 'MISSING'))")"
 else
     skip "Prometheus checks" "no Prometheus at $PROMETHEUS_URL (set PROMETHEUS_URL to override)"
 fi

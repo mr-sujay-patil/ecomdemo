@@ -45,6 +45,15 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
     long countByPublishedAtIsNull();
 
     /**
+     * How many events are waiting, and since when the oldest has (KI-031), in one query for
+     * {@link OutboxBacklogCheck}. The pending rows are the {@code published_at IS NULL} slice of
+     * {@code idx_outbox_event_pending}, which a healthy relay keeps near empty.
+     */
+    @Query("SELECT new com.ecomdemo.outbox.internal.OutboxBacklog(COUNT(e), MIN(e.createdAt)) "
+            + "FROM OutboxEvent e WHERE e.publishedAt IS NULL")
+    OutboxBacklog backlog();
+
+    /**
      * Deletes published events older than the cutoff, and returns how many went.
      *
      * <p><strong>{@code published_at IS NOT NULL} is the load-bearing half of this predicate.</strong>
