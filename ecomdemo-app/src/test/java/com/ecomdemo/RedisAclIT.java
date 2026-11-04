@@ -79,7 +79,7 @@ class RedisAclIT {
     }
 
     @ParameterizedTest(name = "{0} is the user {1}")
-    @CsvSource({"app, ecomdemo", "catalog-service, catalog", "gateway-service, gateway", "assistant-service, assistant"})
+    @CsvSource({"catalog-service, catalog", "gateway-service, gateway", "assistant-service, assistant"})
     @DisplayName("each service's certificate logs in as its own user, with no password, and Boot's Redis health is UP")
     void eachServiceIsItsOwnUser(String service, String user) throws Exception {
         Path mount = KafkaTestBroker.clientMount(files, files.resolve("mount-" + service), user, "ca");
@@ -114,11 +114,10 @@ class RedisAclIT {
     }
 
     @Test
-    @DisplayName("app's certificate (ecomdemo) touches no key at all")
-    void appTouchesNoKey() throws Exception {
-        assertThat(cliAs("ecomdemo", "PING")).isEqualTo("PONG");
-        assertThat(cliAs("ecomdemo", "GET", "product::1")).startsWith("NOPERM");
-        assertThat(cliAs("ecomdemo", "SET", "anything", "x")).startsWith("NOPERM");
+    @DisplayName("app's certificate (ecomdemo) is no Redis user any more: NOAUTH for every command (KI-073)")
+    void appIsNoUser() throws Exception {
+        assertThat(cliAs("ecomdemo", "PING")).contains("NOAUTH");
+        assertThat(cliAs("ecomdemo", "GET", "product::1")).contains("NOAUTH");
     }
 
     @Test

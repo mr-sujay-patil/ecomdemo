@@ -42,7 +42,7 @@ class RedisClientAuthConfigTest {
 
     /** The Redis clients and the CN of their client certificate. */
     static final Map<String, String> REDIS_CLIENTS = Map.of(
-            "app", "ecomdemo", "catalog-service", "catalog", "gateway-service", "gateway",
+            "catalog-service", "catalog", "gateway-service", "gateway",
             "assistant-service", "assistant");
 
     /** The arguments that make Redis present ITS certificate as a client: the in-pod tools' identity. */
@@ -84,7 +84,7 @@ class RedisClientAuthConfigTest {
     }
 
     @Test
-    @DisplayName("the Redis clients are exactly the four services that set SPRING_DATA_REDIS_HOST")
+    @DisplayName("the Redis clients are exactly the three services that set SPRING_DATA_REDIS_HOST (app is none since KI-073)")
     void everyRedisClientIsListed() throws IOException {
         List<String> clients = new ArrayList<>();
         try (Stream<Path> files = Files.list(ProjectRoot.resolve("k8s/services"))) {
@@ -117,7 +117,7 @@ class RedisClientAuthConfigTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"app", "catalog-service", "gateway-service", "assistant-service"})
+    @CsvSource({"catalog-service", "gateway-service", "assistant-service"})
     @DisplayName("each Redis client presents its certificate through the `redis` SSL bundle, which reloads on renewal")
     void eachClientPresentsItsCertificate(String service) throws IOException {
         Map<String, Object> settings = clientSettings(service);
@@ -131,7 +131,7 @@ class RedisClientAuthConfigTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"app", "catalog-service", "gateway-service", "assistant-service"})
+    @CsvSource({"catalog-service", "gateway-service", "assistant-service"})
     @DisplayName("each Redis client mounts its own client certificate, the key readable by the service only")
     void eachClientMountsItsCertificate(String service) throws IOException {
         Map<String, Object> pod = podSpec(resource("k8s/services/" + service + ".yaml", "Deployment", service));

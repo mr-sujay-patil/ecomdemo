@@ -11,6 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecomdemo.support.ProjectRoot;
 import com.ecomdemo.support.RedisAcl;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * Redis authorizes each service by an ACL user named by its client certificate (Phase 37, KI-065).
@@ -145,7 +147,7 @@ class RedisAclConfigTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"ecomdemo", "catalog", "gateway", "assistant"})
+    @CsvSource({"catalog", "gateway", "assistant"})
     @DisplayName("a service user is enabled, names its commands one by one, has no channels, and no admin or flush command")
     void serviceUsersAreLeastPrivilege(String user) throws IOException {
         List<String> rules = rules(user);
@@ -187,7 +189,7 @@ class RedisAclConfigTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"app", "catalog-service", "gateway-service", "assistant-service"})
+    @CsvSource({"catalog-service", "gateway-service", "assistant-service"})
     @DisplayName("a Redis client sends no password and no user name: its certificate names the user")
     void clientsSendNoPassword(String service) throws IOException {
         assertThat(clientSettings(service)).doesNotContainKeys("SPRING_DATA_REDIS_PASSWORD", "SPRING_DATA_REDIS_USERNAME",
@@ -216,7 +218,47 @@ class RedisAclConfigTest {
         String smoke = Files.readString(ProjectRoot.resolve("scripts/smoke-test.sh"));
 
         assertThat(smoke).contains("Phase 37", "is refused another service's key (NOPERM)", "is refused FLUSHALL",
-                "a cluster certificate whose CN is not a Redis user gets NOAUTH");
+                "a cluster certificate whose CN is not a Redis user gets NOAUTH",
+                "app's client certificate is no Redis user (KI-073)");
+    }
+
+    /**
+     * KI-073. ecomdemo-app uses no Redis key since the catalogue and its cache moved to catalog-service (Phase 20c): its
+     * connection served Boot's health indicator only, and still needed a user, a certificate bundle and settings in
+     * three places. It is no Redis client now, and the ACL has no user for it, so its certificate gets NOAUTH.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    @DisplayName("app (ecomdemo-app) is no Redis client: no Redis starter, no Redis settings in compose or k8s, no ACL user (KI-073)")
+    void appIsNoRedisClient() throws IOException {
+        String pom = Files.readString(ProjectRoot.resolve("ecomdemo-app/pom.xml"));
+        assertThat(pom).as("the cache abstraction: nothing in app caches any more").doesNotContain("spring-boot-starter-cache");
+        Matcher redis = Pattern.compile("<dependency>\\s*<groupId>org.springframework.boot</groupId>\\s*"
+                + "<artifactId>spring-boot-starter-data-redis</artifactId>(.*?)</dependency>", Pattern.DOTALL).matcher(pom);
+        while (redis.find()) {
+            assertThat(redis.group(1)).as("data-redis only for the tests of the other services' clients")
+                    .contains("<scope>test</scope>");
+        }
+
+        assertThat(clientSettings("app").keySet()).as("k8s/services/app.yaml ConfigMap")
+                .noneMatch(name -> name.startsWith("SPRING_DATA_REDIS_") || name.startsWith("SPRING_SSL_BUNDLE_PEM_REDIS_"));
+        Map<String, Object> deployment = podSpec(resource("k8s/services/app.yaml", "Deployment", "app"));
+        assertThat(String.valueOf(deployment.get("initContainers"))).as("app waits for no Redis").doesNotContain("cache:6379");
+
+        Map<String, Object> app = composeService("app");
+        assertThat(((Map<String, Object>) app.get("environment")).keySet()).as("compose.yaml app")
+                .noneMatch(name -> name.startsWith("SPRING_DATA_REDIS_"));
+        assertThat(((Map<String, Object>) app.get("depends_on")).keySet()).as("compose.yaml app").doesNotContain("cache");
+
+        assertThat(users()).as(RedisAcl.MANIFEST).doesNotContainKey("ecomdemo");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> composeService(String name) throws IOException {
+        try (Reader reader = Files.newBufferedReader(ProjectRoot.resolve("compose.yaml"))) {
+            return (Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) new Yaml().load(reader))
+                    .get("services")).get(name);
+        }
     }
 
     /** Each user line as {@code name -> the rest}, from the file the ConfigMap mounts. */
