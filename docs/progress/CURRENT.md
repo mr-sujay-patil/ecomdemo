@@ -14,6 +14,7 @@
 - [x] Red first: `CacheMetricsTest` (4 of 4 red on `main`: no `cache.gets` meter for either cache)
 - [x] Fix: `collectStatistics()`; `CacheMeterBinderProvider<LoggingCache>` (named class) binding `RedisCacheMetrics` to `LoggingCache.getDelegate()`; dashboard panel 12 "Catalogue cache hit ratio" (`service="catalog-service"`); DashboardMetricsTest (`cache_gets_total` Boot-provided, panel pinned); smoke check (both caches' series, reads counted); docs (KNOWN_ISSUES, decisions, README caching section)
 - [x] Full unit run: 0 failures (29 Docker-only errors, as on `main`); fix `53daaa1`; PR #112 with `run-smoke`
+- [x] CI on `b4ae31f`: compose smoke 476/477, the failure is the assistant's Retry-After check racing its own pipe (pre-existing, recorded as KI-082, not fixed here: hard rule 7); this push re-runs CI
 - [ ] CI green, then STOP for review
 
 ## Next action
