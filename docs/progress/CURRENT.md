@@ -3,22 +3,20 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-04
-- **Fix:** KI-073 (ecomdemo-app keeps a Redis client it does not use: `spring-boot-starter-data-redis` + `-cache`, an ACL user `ecomdemo`, the `redis` SSL bundle, compose and k8s settings, all for Boot's health indicator). Approved 2026-11-04 ("continue on next" after KI-076/079)
-- **Branch:** fix/ki-073-app-without-redis (cut from `main` at `f68f00b`)
-- **Step:** PR OPEN (#109), CI green, waiting for the owner
-- **Waiting for user:** yes: review of PR #109 ("approved, merge it") and the k8s smoke
-- **History:** KI-076 + KI-079 (PR #108) merged as `f68f00b`, merge-verified 2026-11-04 (branch tip `a800a59` in `main`; manifests and tests only, so the `main` run is not waited on). The owner's k8s smoke for #108 is not confirmed. Tags for the owner (403 here): `ki-076-fixed`, `ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
+- **Fix:** KI-031 (nothing watches the outbox: no pending gauge, no alert). Re-checked against the code and approved 2026-11-04 ("re-check backend KI-031 ... turn it into a fix if it's still real")
+- **Branch:** fix/ki-031-outbox-backlog (cut from `main` at `b712df7`)
+- **Step:** BRANCHED
+- **Waiting for user:** no
+- **History:** KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (branch tip `3bc9057` in `main`; `./mvnw -pl ecomdemo-app -am test` on `main`: 448 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Waiting after this fix: web chore for KI-030/031's stale rows (web PR #61 open, one PR at a time)
 
 ## Checklist
-- [x] KI-073 In progress; inventory (2026-11-04): ecomdemo-app pom (cache + data-redis), application-dev Redis settings, IntegrationTest's Redis container and application-it `spring.cache.type=redis`, compose `app` (depends_on cache, SPRING_DATA_REDIS_*), k8s/services/app.yaml (SPRING_DATA_REDIS_*, the `redis` SSL bundle, init wait on cache:6379), k8s/data/cache-acl.yaml (user ecomdemo), RedisAcl/RedisAclConfigTest/RedisAclIT/RedisClientAuthIT/RedisClientAuthConfigTest (app as a Redis client), scripts/smoke-test.sh (app as a Redis client). The client certificate (CN ecomdemo) stays: PostgreSQL and Kafka use it
-- [x] Red first (`d32dc43`): `RedisAclConfigTest.appIsNoRedisClient`, `oneUserPerClient`, `smokeTestChecksTheUsers`, `RedisClientAuthConfigTest.everyRedisClientIsListed` red (4 of 31); `RedisAclIT.appIsNoUser`, `RedisClientAuthIT` sample client now catalog-service
-- [x] Fix across the inventory: pom (no cache starter, data-redis test-scoped), application-dev, `it`/`test` profiles exclude `DataRedisAutoConfiguration` (no Redis in the test context; no `spring.cache.type`), IntegrationTest without RedisContainerConfig, compose, k8s app ConfigMap and init wait, cache-acl (no `ecomdemo`), smoke test (app's certificate: NOAUTH), `RedisAclIT` (issues the `ecomdemo` certificate itself; ACL reload case uses `assistant`); docs (KNOWN_ISSUES, decisions, security, README)
-- [x] Unit locally: 448 tests, 0 failures, 0 errors (common, outbox, app); fix `6013e94`; PR #109 with `run-smoke`
-- [x] CI green on `e298c91` (Build and test, Trivy, OWASP, smoke script tests, compose smoke). First run red: `RedisClientAuthIT.certReloadSidecar` still read `ecomdemo.crt`; its handshake now presents catalog's certificate
-- [ ] The owner runs the k8s smoke (manifests changed): `scripts/k8s-up.sh`, `kubectl -n ecomdemo rollout restart deploy`, the smoke
+- [x] Re-checked: `OutboxObservationConfig` only drops the relay's traces; `countByPublishedAtIsNull()` used only by tests; no outbox rule in `docker/prometheus/alerts.yml`. Moved from "Needs check" to the fix queue (Medium)
+- [ ] Red first: an outbox unit test for the two gauges (`outbox.events.pending`, `outbox.events.oldest.pending.age`) refreshed by the relay's tick; DashboardMetricsTest knows them and the alert rule references them
+- [ ] Fix: `OutboxMetrics` in the outbox library (one query per relay tick: count and oldest `created_at` of unpublished rows; age computed at scrape), the relay refreshes it after each tick (also when the tick fails, the last values stay), alert `OutboxEventsStuck` in `docker/prometheus/alerts.yml`. No health indicator (a backlog must not take instances out of readiness)
+- [ ] Tests (outbox and app unit locally; ITs in CI), docs (KNOWN_ISSUES, decisions, README "Known gaps", observability docs), PR
 
 ## Next action
-STOPPED for the owner's review of PR #109. On "approved, merge it": merge with a merge commit, merge-verify (`main` contains the branch tip, local unit run on `main`), tag `ki-073-fixed` for the owner to push.
+Write the red tests in the outbox module and DashboardMetricsTest, then implement.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
