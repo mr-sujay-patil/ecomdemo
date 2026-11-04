@@ -45,14 +45,17 @@ public interface CartRepository extends JpaRepository<Cart, Long> {
      *
      * <p>{@code ON CONFLICT DO NOTHING} makes the check and the insert one statement. When
      * another transaction has just inserted the same account's row, this one waits for it to
-     * commit and then does nothing, with no error, and the next query sees that row. No conflict
-     * target is named because H2's PostgreSQL mode (the unit tests' database) accepts only the
-     * bare form; {@code uq_cart_user} is the one constraint an insert of a {@code user_id} alone
-     * can hit.
+     * commit and then does nothing, with no error, and the next query sees that row. The target
+     * {@code (user_id)} names {@code uq_cart_user}, so any other conflict still fails loudly.
+     *
+     * <p>PostgreSQL SQL, like the outbox's advisory lock: H2 does not parse it, so it is tested
+     * against PostgreSQL by {@code CartApiIT} (every test there creates a cart through it), and
+     * the unit tests mock this repository.
      *
      * @return 1 if this call created the cart, 0 if the account already had one
      */
     @Modifying
-    @Query(value = "insert into cart (user_id) values (:userId) on conflict do nothing", nativeQuery = true)
+    @Query(value = "insert into cart (user_id) values (:userId) on conflict (user_id) do nothing",
+            nativeQuery = true)
     int createIfAbsent(@Param("userId") Long userId);
 }
