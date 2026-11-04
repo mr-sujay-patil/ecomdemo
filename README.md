@@ -1085,6 +1085,12 @@ cache PUT  product for key 1
 cache HIT  product for key 1
 ```
 
+A log answers "what happened to this key"; how well the cache works overall is a number. catalog-service
+publishes Boot's `cache_gets_total{cache, result="hit"|"miss"}` for each cache, and the Grafana overview
+graphs the hit ratio ("Catalogue cache hit ratio"). Until KI-032 nothing was published: Boot binds those
+counters only to a `RedisCache`, and the logging decorator above hid it, so `CacheConfig` now tells Boot how to
+measure the cache inside the decorator, and asks Redis's cache writer to count.
+
 ### Cache-aside
 
 `@Cacheable` implements the **cache-aside** pattern: look in the cache; on a miss, call the method

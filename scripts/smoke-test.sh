@@ -1988,6 +1988,17 @@ print(next((r['health'] for grp in g for r in grp['rules'] if r['name'] == 'Outb
 import json, sys
 g = json.load(sys.stdin)['data']['groups']
 print(next((r['state'] for grp in g for r in grp['rules'] if r['name'] == 'OutboxEventsStuck'), 'MISSING'))")"
+
+    # KI-032: the catalogue cache publishes its hits and misses (Boot's cache_gets_total, bound through
+    # LoggingCache), one series pair per cache, and this script's catalogue reads have been counted.
+    CACHE_SERIES="$(curl -sS --get "$PROMETHEUS_URL/api/v1/query" \
+        --data-urlencode 'query=sum by (cache) (cache_gets_total{service="catalog-service"})' \
+        | python3 -c "
+import json, sys
+r = json.load(sys.stdin)['data']['result']
+print(' '.join(sorted(x['metric']['cache'] for x in r)), sum(float(x['value'][1]) for x in r) > 0)" || echo "")"
+    check "catalog-service publishes each cache's reads, and they are counted (KI-032)" "product productList True" \
+        "$CACHE_SERIES"
 else
     skip "Prometheus checks" "no Prometheus at $PROMETHEUS_URL (set PROMETHEUS_URL to override)"
 fi
