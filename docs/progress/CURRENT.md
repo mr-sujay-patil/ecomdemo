@@ -5,18 +5,18 @@
 - **Updated:** 2026-11-04
 - **Fix:** KI-082 (smoke checks that pipe into `grep -q` under `set -o pipefail` can fail with the match present). The owner: "continue with the best recommendation according to you"
 - **Branch:** fix/ki-082-smoke-retry-after-pipe (cut from `main` at `9ce4adf`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** KI-032 (PR #112) merged as `9ce4adf`, merge-verified 2026-11-04 (`./mvnw -B test` on `main`: 0 failures, the 29 Docker-only errors). Web chore PR #63 (KI-030/031 rows) merged as `3afbfbc`, verified (local verify 1111 tests with Node 24; CI on `main` green). Tags for the owner (403 here): `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
 - [x] KI-082 In progress, scope: all 33 piped `grep -q` in `smoke-test.sh`; KI-083 recorded (stale app.yaml comment, not fixed here)
-- [ ] Red first: `scripts/test-smoke-pipes.sh` (CI runs every test-smoke-*.sh): the race reproduced (a producer still writing after the match: bare `grep -q` under pipefail says no); `contains` says yes; guard: no piped `grep -q` left in smoke-test.sh
-- [ ] Fix: `scripts/smoke-pipes.sh` with `contains` (grep that reads all its input), sourced by smoke-test.sh; every `| grep -q<flags>` becomes `| contains <flags>`
+- [x] Red first: `scripts/test-smoke-pipes.sh` (4 of 7 red on `main`; the race itself reproduced 3 of 3)
+- [x] Fix: `scripts/smoke-pipes.sh` (`contains`), sourced by smoke-test.sh beside smoke-clients.sh; 33 `| grep -q<flags>` became `| contains <flags>`; `bash -n` clean; all 5 `test-smoke-*.sh` pass; no Java test reads the text; docs (KNOWN_ISSUES, decisions)
 - [ ] Tests (bash -n, the test-smoke-*.sh suite), docs (KNOWN_ISSUES, decisions), PR with `run-smoke`, CI, STOP
 
 ## Next action
-Write the red test.
+Commit, push, PR with `run-smoke` (the compose smoke runs the converted checks), CI, STOP.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
