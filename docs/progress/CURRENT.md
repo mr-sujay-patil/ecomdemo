@@ -5,7 +5,7 @@
 - **Updated:** 2026-11-04
 - **Fix:** KI-081 (a new account's concurrent first cart requests race on `uq_cart_user`; the loser gets `500`). Reported by the web team (web KI-041, web PR #61 red on it); the owner chose "Fix it in the backend" 2026-11-04
 - **Branch:** fix/ki-081-cart-create-race (cut from `main` at `b712df7`, the merge of PR #109)
-- **Step:** IN_PROGRESS: red, fix and targeted tests done; full `./mvnw -B verify` running
+- **Step:** IN_PROGRESS: fix done (retry in the controller); module verify green; full `./mvnw -B verify` running
 - **Waiting for user:** no
 - **History:** KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (tip `3bc9057` in `main`; `./mvnw -B -pl ecomdemo-app -am test` on `main`: 376 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, and those listed before
 
@@ -13,10 +13,11 @@
 - [x] KI-081 In progress
 - [x] Cause (read and reproduced): `CartService.currentCart()` = `findByUserId(...).orElseGet(() -> save(new Cart(userId)))`; `cart` is `id` identity + `user_id` NOT NULL with `uq_cart_user`. Two concurrent first requests both insert; the loser's `DataIntegrityViolationException` is a `500`
 - [x] Red first (`70d7a1d`): `CartApiIT.concurrentFirstRequestsShareOneCart` (10 fresh accounts, 6 concurrent first requests each, one of them an add): red on `main`'s code, account 0 got `[200, 200, 200, 200, 500, 200]`
-- [x] Fix (`4f04394`, `7b70191`): `CartRepository.createIfAbsent` = `insert into cart (user_id) values (?) on conflict (user_id) do nothing`, then `findByUserId`. PostgreSQL-only (H2 does not parse it: the H2 repository test first added for it failed with a syntax error and was removed); `CartServiceTest` updated (+1 test)
-- [x] Targeted: `Cart*Test` 32 tests, `CartApiIT` 10 of 10 (the new one included), green
+- [x] Fix, first try (`4f04394`, `7b70191`): an `ON CONFLICT DO NOTHING` insert. Dropped: H2, the database of the `@SpringBootTest`s that reach `currentCart()` (`PlaceOrderFlowTest`, `ConcurrentCheckoutTest`), does not parse it (5 errors in the full verify)
+- [x] Fix (`595fda9`, `79b50ed`): `CartService`/`CartRepository` back to `main`; `CartController.onceMoreIfTheCartWasCreatedConcurrently` runs each of the four cart calls once more on `DataIntegrityViolationException` (the loser's transaction has rolled back whole; `open-in-view=false`). `CartControllerTest` +3 (retry on view, retry on add, a second failure propagates)
+- [x] `./mvnw -B -pl ecomdemo-app -am verify`: 379 unit, 101 IT (`CartApiIT` 10 of 10, the race test included), 0 failures
 - [ ] Full `./mvnw -B verify` once before the PR
-- [ ] Docs: decisions `[Fix KI-081]` done; KNOWN_ISSUES to Fixed with the PR number
+- [ ] Docs: decisions `[Fix KI-081]` rewritten for the retry; KNOWN_ISSUES to Fixed with the PR number
 - [ ] Push, PR; CI green; STOP for the owner
 
 ## Next action
