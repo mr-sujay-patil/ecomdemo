@@ -5,21 +5,22 @@
 - **Updated:** 2026-11-04
 - **Fix:** KI-081 (a new account's concurrent first cart requests race on `uq_cart_user`; the loser gets `500`). Reported by the web team (web KI-041, web PR #61 red on it); the owner chose "Fix it in the backend" 2026-11-04
 - **Branch:** fix/ki-081-cart-create-race (cut from `main` at `b712df7`, the merge of PR #109)
-- **Step:** IN_PROGRESS: KI-081 recorded; regression test next
+- **Step:** IN_PROGRESS: red, fix and targeted tests done; full `./mvnw -B verify` running
 - **Waiting for user:** no
 - **History:** KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (tip `3bc9057` in `main`; `./mvnw -B -pl ecomdemo-app -am test` on `main`: 376 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, and those listed before
 
 ## Checklist
 - [x] KI-081 In progress
 - [x] Cause (read and reproduced): `CartService.currentCart()` = `findByUserId(...).orElseGet(() -> save(new Cart(userId)))`; `cart` is `id` identity + `user_id` NOT NULL with `uq_cart_user`. Two concurrent first requests both insert; the loser's `DataIntegrityViolationException` is a `500`
-- [ ] Red first: `CartApiIT` sends concurrent first requests for fresh accounts and expects only `200`; red on `main`
-- [ ] Fix: create the cart with `INSERT … ON CONFLICT DO NOTHING` (waits for a concurrent insert, then does nothing; the transaction stays usable), then read it
-- [ ] Tests: the new IT green; `./mvnw -B -pl ecomdemo-app -am verify`; full `./mvnw -B verify` once before the PR
-- [ ] Docs: KNOWN_ISSUES (Fixed), decisions `[Fix KI-081]`
+- [x] Red first (`70d7a1d`): `CartApiIT.concurrentFirstRequestsShareOneCart` (10 fresh accounts, 6 concurrent first requests each, one of them an add): red on `main`'s code, account 0 got `[200, 200, 200, 200, 500, 200]`
+- [x] Fix (`4f04394`, `7b70191`): `CartRepository.createIfAbsent` = `insert into cart (user_id) values (?) on conflict (user_id) do nothing`, then `findByUserId`. PostgreSQL-only (H2 does not parse it: the H2 repository test first added for it failed with a syntax error and was removed); `CartServiceTest` updated (+1 test)
+- [x] Targeted: `Cart*Test` 32 tests, `CartApiIT` 10 of 10 (the new one included), green
+- [ ] Full `./mvnw -B verify` once before the PR
+- [ ] Docs: decisions `[Fix KI-081]` done; KNOWN_ISSUES to Fixed with the PR number
 - [ ] Push, PR; CI green; STOP for the owner
 
 ## Next action
-Write the red test in `ecomdemo-app/src/test/java/com/ecomdemo/cart/CartApiIT.java` and run it on this branch before the fix.
+When the full verify is green: open the PR (KI-081 Fixed with its number), wait for CI, STOP for the owner. Then the web's PR #61 moves its pin to the merge commit.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
