@@ -5,18 +5,18 @@
 - **Updated:** 2026-11-04
 - **Fix:** KI-031 (nothing watches the outbox: no pending gauge, no alert). Re-checked against the code and approved 2026-11-04 ("re-check backend KI-031 ... turn it into a fix if it's still real")
 - **Branch:** fix/ki-031-outbox-backlog (cut from `main` at `b712df7`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (branch tip `3bc9057` in `main`; `./mvnw -pl ecomdemo-app -am test` on `main`: 448 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Waiting after this fix: web chore for KI-030/031's stale rows (web PR #61 open, one PR at a time)
 
 ## Checklist
 - [x] Re-checked: `OutboxObservationConfig` only drops the relay's traces; `countByPublishedAtIsNull()` used only by tests; no outbox rule in `docker/prometheus/alerts.yml`. Moved from "Needs check" to the fix queue (Medium)
-- [ ] Red first: an outbox unit test for the two gauges (`outbox.events.pending`, `outbox.events.oldest.pending.age`) refreshed by the relay's tick; DashboardMetricsTest knows them and the alert rule references them
-- [ ] Fix: `OutboxMetrics` in the outbox library (one query per relay tick: count and oldest `created_at` of unpublished rows; age computed at scrape), the relay refreshes it after each tick (also when the tick fails, the last values stay), alert `OutboxEventsStuck` in `docker/prometheus/alerts.yml`. No health indicator (a backlog must not take instances out of readiness)
+- [x] Red first (compile-red): `OutboxMetricsTest`, `OutboxBacklogCheckTest`, `OutboxObservationConfigTest` (check untraced), `OutboxEventRepositoryTest` (the backlog query), `DashboardMetricsTest` (the alert)
+- [x] Fix: `OutboxBacklog` record + `OutboxEventRepository.backlog()` (JPQL count + min), `OutboxMetrics` (two gauges, age at read time), `OutboxBacklogCheck` (own 15 s schedule, NOT the relay's tick: the relay's test pins one query per idle tick; a failure keeps the last values), predicate drops its traces; `micrometer-core` in the outbox pom; alert `OutboxEventsStuck` (`max by (service)`: every service is a target of job `ecomdemo`, so `by (job)` would merge them; pinned in the test); smoke checks (five services' series, rule loaded/evaluates/inactive); docs (KNOWN_ISSUES, decisions, README outbox section, saga.md). No health indicator
 - [ ] Tests (outbox and app unit locally; ITs in CI), docs (KNOWN_ISSUES, decisions, README "Known gaps", observability docs), PR
 
 ## Next action
-Write the red tests in the outbox module and DashboardMetricsTest, then implement.
+Targeted tests green (outbox 55, DashboardMetricsTest 9, OutboxEventRepositoryTest 8). Full reactor unit run in progress; then commit, push, PR with `run-smoke`, CI, STOP.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

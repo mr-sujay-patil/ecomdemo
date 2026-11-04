@@ -140,7 +140,7 @@ it the way a database transaction would, so it marks it instead:
 | Failure | Result |
 |---|---|
 | inventory- or payment-service is down | Orders stay PENDING. Their events wait in Kafka, and the service catches up from its offsets when it returns. No checkout fails. |
-| Kafka is down | Checkout still succeeds (Phase 18). Every outbox holds its rows and drains when Kafka is back. |
+| Kafka is down | Checkout still succeeds (Phase 18). Every outbox holds its rows and drains when Kafka is back. `OutboxEventsStuck` fires per service once its oldest unpublished event has waited 5 minutes, for 5 minutes (KI-031). |
 | A relay publishes twice (crash after the send) | The consumer's `processed_event` absorbs the duplicate. |
 | Two shoppers take the last unit | Both usually pass the pre-check. The reservation locks the row and gives it to one; the other is CANCELLED "for stock". |
 | A message cannot be processed at all (bad JSON, a bug) | Three attempts in place, then `<topic>-dlt`. Since Phase 32 the **saga deadline** resolves the order (see below), and an administrator can replay the dead letter. |

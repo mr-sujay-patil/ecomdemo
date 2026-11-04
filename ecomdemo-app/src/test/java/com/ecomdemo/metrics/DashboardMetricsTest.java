@@ -157,6 +157,12 @@ class DashboardMetricsTest {
     void anAlertWatchesTheOutbox() throws IOException {
         assertThat(metricNamesIn(ALERTS)).contains("outbox_events_oldest_pending_age_seconds");
         assertThat(Files.readString(ALERTS)).contains("alert: OutboxEventsStuck");
+        // Per SERVICE, which is the scrape label that names one (prometheus.yml). Every service is
+        // a target of the one job `ecomdemo`, so `by (job)` would fold five outboxes into one row.
+        assertThat(Files.readString(ALERTS))
+                .contains("max by (service) (outbox_events_oldest_pending_age_seconds)");
+        assertThat(Files.readString(PROMETHEUS_CONFIG)).contains("service: ecomdemo-app", "service: catalog-service",
+                "service: inventory-service", "service: notification-service", "service: payment-service");
     }
 
     @Test
