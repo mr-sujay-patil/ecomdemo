@@ -7,7 +7,7 @@
 - **Branch:** fix/ki-081-cart-create-race (cut from `main` at `b712df7`, the merge of PR #109)
 - **Step:** PR_OPEN (PR #111): waiting for CI
 - **Waiting for user:** YES after CI is green: review of PR #111 (`approved, merge it`)
-- **History:** KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (tip `3bc9057` in `main`; `./mvnw -B -pl ecomdemo-app -am test` on `main`: 376 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, and those listed before
+- **History:** KI-031 (PR #110, outbox backlog gauges) merged as `d939733` while this fix was open (both cut from `b712df7`); merged into this branch 2026-11-04 (conflicts in KNOWN_ISSUES, decisions and this file, docs only: both sides kept); its tip `16438cd` is in `main`, and this branch's full verify covers its code. KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (tip `3bc9057` in `main`; `./mvnw -B -pl ecomdemo-app -am test` on `main`: 376 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, and those listed before
 
 ## Checklist
 - [x] KI-081 In progress

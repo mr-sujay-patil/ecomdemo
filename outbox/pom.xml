@@ -67,6 +67,15 @@
 			<artifactId>micrometer-tracing</artifactId>
 		</dependency>
 
+		<!--
+			OutboxMetrics registers the backlog gauges (KI-031). Only the Micrometer API: each
+			service's actuator supplies the registry and its Prometheus endpoint.
+		-->
+		<dependency>
+			<groupId>io.micrometer</groupId>
+			<artifactId>micrometer-core</artifactId>
+		</dependency>
+
 		<!-- @ApplicationModule on the package, which ModularityTest reads from the app's side. -->
 		<dependency>
 			<groupId>org.springframework.modulith</groupId>

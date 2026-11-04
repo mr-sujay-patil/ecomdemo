@@ -87,3 +87,30 @@ groups:
             {{ $value }} order(s) in the last 15 minutes were confirmed or cancelled by the saga
             deadline rather than by the saga itself. Some saga event was lost or dead-lettered: see
             GET /api/admin/dead-letters for what is waiting, and why.
+
+  # KI-031: the transactional outbox, in every service that has one (app, catalog, inventory,
+  # payment, notification). One rule, on the AGE of the oldest unpublished event, not the count:
+  # the count rises with traffic too, but a healthy relay publishes every event within about a
+  # second, so an event that has waited minutes means the relay cannot send.
+  - name: ecomdemo-outbox
+    rules:
+      - alert: OutboxEventsStuck
+        # outbox_events_oldest_pending_age_seconds is computed when scraped, from the oldest
+        # created_at the last backlog check (every 15 s) saw, so it keeps growing while the events
+        # stay stuck. `max by (service)`: every instance of a service reports the same database, and
+        # `service` is the scrape label that names it (prometheus.yml), the first thing the reader needs.
+        expr: max by (service) (outbox_events_oldest_pending_age_seconds) > 300
+        # Five minutes, held for five more: a Kafka restart or a rolling deploy holds events for
+        # seconds (a send gives up after delivery.timeout.ms, 10 s, and the next tick retries it).
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox events are not being published"
+          description: >-
+            The oldest unpublished event in {{ $labels.service }}'s outbox has waited
+            {{ $value | humanizeDuration }}. Its relay cannot send: everything that service
+            publishes (saga steps, notifications, catalogue changes) is held back. The service's
+            log says why ("could not be published on attempt"), and so does the row's last_error;
+            usually Kafka is down or refuses the service (TLS, ACL). outbox_events_pending says
+            how much is waiting.

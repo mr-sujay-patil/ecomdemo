@@ -40,6 +40,12 @@ class OutboxObservationConfigTest {
     }
 
     @Test
+    @DisplayName("drops the backlog check too (KI-031): every 15 s it would be a trace saying nothing happened")
+    void dropsTheBacklogCheck() {
+        assertThat(observe(OutboxBacklogCheck.class).isNoop()).isTrue();
+    }
+
+    @Test
     @DisplayName("keeps the outbox cleanup sweep")
     void keepsTheCleanupJob() {
         assertThat(observe(OutboxCleanupJob.class).isNoop()).isFalse();

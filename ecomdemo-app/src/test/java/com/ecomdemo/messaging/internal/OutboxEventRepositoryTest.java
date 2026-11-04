@@ -1,6 +1,7 @@
 package com.ecomdemo.messaging.internal;
 
 import com.ecomdemo.messaging.OrderPlacedEvent;
+import com.ecomdemo.outbox.internal.OutboxBacklog;
 import com.ecomdemo.outbox.internal.OutboxEvent;
 import com.ecomdemo.outbox.internal.OutboxEventRepository;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -99,6 +100,44 @@ class OutboxEventRepositoryTest {
         published("3", Instant.now());
 
         assertThat(outbox.countByPublishedAtIsNull()).isEqualTo(2);
+    }
+
+    /** Back-dates a row's created_at, as {@link #published} back-dates published_at. */
+    private void createdAt(OutboxEvent event, Instant at) {
+        entityManager
+                .getEntityManager()
+                .createQuery("UPDATE OutboxEvent e SET e.createdAt = :at WHERE e.id = :id")
+                .setParameter("at", at)
+                .setParameter("id", event.getId())
+                .executeUpdate();
+        entityManager.clear();
+    }
+
+    @Test
+    @DisplayName("the backlog (KI-031) counts the pending events and finds the oldest one's created_at")
+    void measuresTheBacklog() {
+        Instant hourAgo = Instant.now().minus(1, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MILLIS);
+        createdAt(pending("1"), hourAgo);
+        pending("2");
+        OutboxEvent older = published("3", Instant.now());
+        createdAt(older, hourAgo.minus(1, ChronoUnit.DAYS));
+
+        OutboxBacklog backlog = outbox.backlog();
+
+        // The published row is older still, and must not count: it is history, not backlog.
+        assertThat(backlog.pending()).isEqualTo(2);
+        assertThat(backlog.oldest()).isEqualTo(hourAgo);
+    }
+
+    @Test
+    @DisplayName("an empty backlog is 0 events and no oldest one")
+    void anEmptyBacklog() {
+        published("1", Instant.now());
+
+        OutboxBacklog backlog = outbox.backlog();
+
+        assertThat(backlog.pending()).isZero();
+        assertThat(backlog.oldest()).isNull();
     }
 
     @Test
