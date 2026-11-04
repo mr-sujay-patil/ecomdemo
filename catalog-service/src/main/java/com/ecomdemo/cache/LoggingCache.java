@@ -20,8 +20,10 @@ import org.springframework.cache.Cache;
  * <p>Enable it with:
  * <pre>logging.level.com.ecomdemo.cache=DEBUG</pre>
  *
- * <p>Note what it does NOT do: count. Hit ratios belong in metrics, not in a log somebody greps —
- * and Spring already exposes them through Micrometer, which arrives in Phase 15.
+ * <p>Note what it does NOT do: count. Hit ratios belong in metrics, not in a log somebody greps.
+ * They are Boot's {@code cache.gets{result=hit|miss}}, but Boot binds them only to a {@code RedisCache},
+ * and this decorator is not one: {@link CacheConfig#loggingCacheMeterBinderProvider()} binds them through
+ * {@link #getDelegate()} (KI-032; until then nothing was published).
  */
 public class LoggingCache implements Cache {
 
@@ -31,6 +33,11 @@ public class LoggingCache implements Cache {
 
     public LoggingCache(Cache delegate) {
         this.delegate = delegate;
+    }
+
+    /** The decorated cache: what the metrics binder measures (KI-032). */
+    public Cache getDelegate() {
+        return delegate;
     }
 
     @Override

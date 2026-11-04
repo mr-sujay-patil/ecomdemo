@@ -73,7 +73,10 @@ class DashboardMetricsTest {
             "hikaricp_connections_idle",
             "hikaricp_connections_pending",
             "process_cpu_usage",
-            "system_cpu_usage");
+            "system_cpu_usage",
+            // KI-032: Boot's cache binder (RedisCacheMetrics), published by catalog-service, whose
+            // classes this module cannot see; CacheMetricsTest there proves the meter is registered.
+            "cache_gets_total");
 
     /**
      * Anything that looks like a metric name in PromQL: a bare identifier not followed by a "(",
@@ -150,6 +153,16 @@ class DashboardMetricsTest {
 
         assertThat(referenced).isNotEmpty();
         assertThat(knownSeries()).containsAll(referenced);
+    }
+
+    @Test
+    @DisplayName("the catalogue cache's hit ratio is graphed, from catalog-service (KI-032)")
+    void theCacheHitRatioIsGraphed() throws IOException {
+        assertThat(metricNamesIn(DASHBOARD)).contains("cache_gets_total");
+        // The cache lives in catalog-service (Phase 20c): the `application` variable the other panels use
+        // selects the app, which has no cache since KI-073.
+        assertThat(Files.readString(DASHBOARD))
+                .contains("cache_gets_total{service=\\\"catalog-service\\\", result=\\\"hit\\\"}");
     }
 
     @Test
@@ -291,7 +304,8 @@ class DashboardMetricsTest {
                 || name.startsWith("system_cpu")
                 || name.startsWith("resilience4j_")
                 || name.startsWith("saga_")
-                || name.startsWith("outbox_");
+                || name.startsWith("outbox_")
+                || name.startsWith("cache_");
     }
 
     private static String datasourceUid() throws IOException {

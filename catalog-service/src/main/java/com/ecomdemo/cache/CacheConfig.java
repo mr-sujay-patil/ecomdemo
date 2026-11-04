@@ -2,12 +2,16 @@ package com.ecomdemo.cache;
 
 import com.ecomdemo.catalog.dto.ProductPage;
 import com.ecomdemo.catalog.dto.ProductResponse;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.cache.metrics.CacheMeterBinderProvider;
+import org.springframework.boot.cache.metrics.RedisCacheMetrics;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CachingConfigurer;
@@ -16,6 +20,7 @@ import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.cache.BatchStrategies;
+import org.springframework.data.redis.cache.RedisCache;
 import org.springframework.data.redis.cache.RedisCacheConfiguration;
 import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.cache.RedisCacheWriter;
@@ -212,6 +217,29 @@ public class CacheConfig implements CachingConfigurer {
     }
 
     /**
+     * Publishes each catalogue cache's hits and misses (KI-032): Boot's {@code cache.gets{cache, result}},
+     * {@code cache.puts} and {@code cache.evictions}, from {@link RedisCacheMetrics}.
+     *
+     * <p>Boot binds those only to a {@link RedisCache}, and every cache here is a {@link LoggingCache}: Boot's
+     * {@code CacheMetricsRegistrar} unwraps Spring's transaction-aware decorator and nothing else, so until this
+     * provider the catalogue published no cache metric at all. Boot uses every {@code CacheMeterBinderProvider}
+     * bean, and this one accepts a {@code LoggingCache} and measures the cache inside it.
+     */
+    @Bean
+    public CacheMeterBinderProvider<LoggingCache> loggingCacheMeterBinderProvider() {
+        return new LoggingCacheMeterBinderProvider();
+    }
+
+    /** A class, not a lambda: Boot picks a provider by its generic type, which a lambda does not keep. */
+    static final class LoggingCacheMeterBinderProvider implements CacheMeterBinderProvider<LoggingCache> {
+
+        @Override
+        public MeterBinder getMeterBinder(LoggingCache cache, Iterable<Tag> tags) {
+            return cache.getDelegate() instanceof RedisCache redis ? new RedisCacheMetrics(redis, tags) : null;
+        }
+    }
+
+    /**
      * A {@link RedisCacheManager} that wraps every cache in a {@link LoggingCache}.
      *
      * <p>{@code decorateCache} is the extension point {@code AbstractCacheManager} provides for
@@ -229,7 +257,10 @@ public class CacheConfig implements CachingConfigurer {
                             .batchStrategy(BatchStrategies.scan(CLEAR_SCAN_BATCH))
                             // Every put, evict and clear finishes before the call returns (KI-075): see
                             // the class comment.
-                            .immediateWrites()),
+                            .immediateWrites()
+                            // Hits, misses, puts and deletes per cache, which RedisCacheMetrics reads
+                            // (KI-032). Without it every count is 0, however well the cache works.
+                            .collectStatistics()),
                     defaultConfiguration,
                     perCacheConfiguration);
         }

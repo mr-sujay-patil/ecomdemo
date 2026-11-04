@@ -3,26 +3,22 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-04
-- **Fix:** KI-081 (a new account's concurrent first cart requests race on `uq_cart_user`; the loser gets `500`). Reported by the web team (web KI-041, web PR #61 red on it); the owner chose "Fix it in the backend" 2026-11-04
-- **Branch:** fix/ki-081-cart-create-race (cut from `main` at `b712df7`, the merge of PR #109)
-- **Step:** PR_OPEN (PR #111): waiting for CI
-- **Waiting for user:** YES after CI is green: review of PR #111 (`approved, merge it`)
-- **History:** KI-031 (PR #110, outbox backlog gauges) merged as `d939733` while this fix was open (both cut from `b712df7`); merged into this branch 2026-11-04 (conflicts in KNOWN_ISSUES, decisions and this file, docs only: both sides kept); its tip `16438cd` is in `main`, and this branch's full verify covers its code. KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (tip `3bc9057` in `main`; `./mvnw -B -pl ecomdemo-app -am test` on `main`: 376 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, and those listed before
+- **Fix:** KI-032 (the catalogue cache's hit rate is not observable: no `cache_gets_total` at all). Re-checked against the code; the owner said "continue on next" after KI-031
+- **Branch:** fix/ki-032-cache-metrics (cut from `main` at `d939733`)
+- **Step:** PR_OPEN (#112), CI green, waiting for the owner
+- **Waiting for user:** yes: review of PR #112 ("approved, merge it"); KI-033 placement (Accepted limits or Candidates)
+- **History:** KI-081 (PR #111, another session) merged into `main` as `fd278e7` while this PR was open; `main` merged into this branch 2026-11-04 (docs conflicts only: both rows and both decisions kept). KI-031 (PR #110) merged as `d939733`, merge-verified 2026-11-04 (tip `16438cd` in `main`; `./mvnw -B test` on `main`: 0 failures, the 29 Docker-only errors in 4 classes). Tags for the owner (403 here): `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Web: the approved chore for KI-030/031's stale rows waits for web PR #61 (one PR at a time)
 
 ## Checklist
-- [x] KI-081 In progress
-- [x] Cause (read and reproduced): `CartService.currentCart()` = `findByUserId(...).orElseGet(() -> save(new Cart(userId)))`; `cart` is `id` identity + `user_id` NOT NULL with `uq_cart_user`. Two concurrent first requests both insert; the loser's `DataIntegrityViolationException` is a `500`
-- [x] Red first (`70d7a1d`): `CartApiIT.concurrentFirstRequestsShareOneCart` (10 fresh accounts, 6 concurrent first requests each, one of them an add): red on `main`'s code, account 0 got `[200, 200, 200, 200, 500, 200]`
-- [x] Fix, first try (`4f04394`, `7b70191`): an `ON CONFLICT DO NOTHING` insert. Dropped: H2, the database of the `@SpringBootTest`s that reach `currentCart()` (`PlaceOrderFlowTest`, `ConcurrentCheckoutTest`), does not parse it (5 errors in the full verify)
-- [x] Fix (`595fda9`, `79b50ed`): `CartService`/`CartRepository` back to `main`; `CartController.onceMoreIfTheCartWasCreatedConcurrently` runs each of the four cart calls once more on `DataIntegrityViolationException` (the loser's transaction has rolled back whole; `open-in-view=false`). `CartControllerTest` +3 (retry on view, retry on add, a second failure propagates)
-- [x] `./mvnw -B -pl ecomdemo-app -am verify`: 379 unit, 101 IT (`CartApiIT` 10 of 10, the race test included), 0 failures
-- [x] Full `./mvnw -B verify`: 11 modules, 941 tests, 0 failures, 0 errors
-- [x] Docs: decisions `[Fix KI-081]` (the retry; ON CONFLICT rejected); KNOWN_ISSUES KI-081 Fixed (PR #111)
-- [x] Push, PR #111 (smoke test skipped: one controller, no deployment, config, startup or service-call change)
-- [ ] CI green on PR #111; STOP for the owner
+- [x] Re-checked: Boot binds `RedisCacheMetrics` only to a `RedisCache`; `LoggingCache` hides it; the writer collects no statistics
+- [x] Red first: `CacheMetricsTest` (4 of 4 red on `main`: no `cache.gets` meter for either cache)
+- [x] Fix: `collectStatistics()`; `CacheMeterBinderProvider<LoggingCache>` (named class) binding `RedisCacheMetrics` to `LoggingCache.getDelegate()`; dashboard panel 12 "Catalogue cache hit ratio" (`service="catalog-service"`); DashboardMetricsTest (`cache_gets_total` Boot-provided, panel pinned); smoke check (both caches' series, reads counted); docs (KNOWN_ISSUES, decisions, README caching section)
+- [x] Full unit run: 0 failures (29 Docker-only errors, as on `main`); fix `53daaa1`; PR #112 with `run-smoke`
+- [x] CI on `b4ae31f`: compose smoke 476/477, the failure is the assistant's Retry-After check racing its own pipe (pre-existing, recorded as KI-082, not fixed here: hard rule 7); this push re-runs CI
+- [x] CI green on `ec70469` (all six checks; OWASP back to 1 min after the NVD cache was rebuilt by a manual `nvd-data.yml` run, 13:09-14:06)
 
 ## Next action
-Wait for CI on PR #111; fix it here if red. Green: STOP for `approved, merge it`. After the merge: merge-verify; the owner tags `ki-081-fixed`; the web's PR #61 moves its pin to the merge commit.
+STOPPED for the owner's review of PR #112. On "approved, merge it": merge commit, merge-verify (`./mvnw -B test` on `main`), tag `ki-032-fixed` for the owner. Open questions for the owner: KI-033 (still true; a leader election is a phase, so Accepted limits or Candidates?); KI-082 (smoke checks racing their pipe) is Open; the stale app.yaml header comment about two relays (the relay has an advisory lock) is to be recorded. Web: the KI-030/031 rows chore waits for web PR #61.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
