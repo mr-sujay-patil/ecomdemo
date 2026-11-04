@@ -301,8 +301,8 @@ class RedisClientAuthIT {
 
     /** The serial of the certificate Redis serves now, from a TLS handshake that presents a client certificate. */
     private static BigInteger servedSerial(GenericContainer<?> server) throws Exception {
-        PemSslStoreDetails client = PemSslStoreDetails.forCertificate(files.resolve("ecomdemo.crt").toUri().toString())
-                .withPrivateKey(files.resolve("ecomdemo.key").toUri().toString());
+        PemSslStoreDetails client = PemSslStoreDetails.forCertificate(files.resolve("catalog.crt").toUri().toString())
+                .withPrivateKey(files.resolve("catalog.key").toUri().toString());
         PemSslStoreDetails ca = PemSslStoreDetails.forCertificate(files.resolve("ca.crt").toUri().toString());
         SslBundle bundle = SslBundle.of(new PemSslStoreBundle(client, ca));
         try (SSLSocket socket = (SSLSocket) bundle.createSslContext().getSocketFactory()
