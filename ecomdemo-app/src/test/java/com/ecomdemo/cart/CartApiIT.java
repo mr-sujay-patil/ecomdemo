@@ -13,12 +13,18 @@ import com.ecomdemo.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.resttestclient.TestRestTemplate;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 
 /**
@@ -248,5 +254,51 @@ class CartApiIT extends IntegrationTest {
         assertThat(theirs.items()).isEmpty();
         assertThat(theirs.id()).as("a cart of their own, not ours").isNotEqualTo(cart().id());
         assertThat(cart().items()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a new account's first cart requests can arrive together, and every one of them succeeds (KI-081)")
+    void concurrentFirstRequestsShareOneCart() throws Exception {
+        // KI-081: the cart is created on the first request that needs it, and an account has one
+        // (uq_cart_user). The web app reads the cart twice at once right after sign-in, so two
+        // requests could both find no cart, both insert one, and the second insert's constraint
+        // violation became a 500. One burst may not collide, so the test runs ten fresh accounts;
+        // on the unfixed code the first account already got a 500 among its six answers.
+        ProductSnapshot plug = product("IT Race Plug", "5.00", 50);
+        int accounts = 10;
+        int requestsEach = 6;
+        ExecutorService pool = Executors.newFixedThreadPool(requestsEach);
+        try {
+            for (int round = 0; round < accounts; round++) {
+                TestRestTemplate newcomer = asCustomer("it-cart-race-" + round + "-" + System.nanoTime());
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<HttpStatusCode>> answers = new ArrayList<>();
+                for (int i = 0; i < requestsEach; i++) {
+                    // One add among the reads: a first request that writes races the same way.
+                    boolean adds = i == 0;
+                    answers.add(pool.submit(() -> {
+                        start.await();
+                        return adds
+                                ? newcomer.postForEntity("/api/cart/items",
+                                        new AddCartItemRequest(plug.id(), 1), CartResponse.class).getStatusCode()
+                                : newcomer.getForEntity("/api/cart", CartResponse.class).getStatusCode();
+                    }));
+                }
+                start.countDown();
+                List<HttpStatusCode> statuses = new ArrayList<>();
+                for (Future<HttpStatusCode> answer : answers) {
+                    statuses.add(answer.get(30, TimeUnit.SECONDS));
+                }
+                assertThat(statuses).as("account %d's concurrent first requests", round)
+                        .allMatch(status -> status.equals(HttpStatus.OK));
+
+                CartResponse after = newcomer.getForObject("/api/cart", CartResponse.class);
+                assertThat(after.items()).as("the add landed in the one cart").hasSize(1);
+                assertThat(after.items().getFirst().quantity()).isEqualTo(1);
+                newcomer.delete("/api/cart/items/" + plug.id());
+            }
+        } finally {
+            pool.shutdownNow();
+        }
     }
 }

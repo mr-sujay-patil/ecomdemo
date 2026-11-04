@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.http.HttpStatus.BAD_REQUEST;
@@ -26,6 +27,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithAnonymousUser;
 import org.springframework.security.test.context.support.WithMockUser;
@@ -288,6 +290,55 @@ class CartControllerTest {
                     .isLenientlyEqualTo("""
                             {"status":401,"message":"Authentication required. Log in at POST /api/auth/login and send the token as 'Authorization: Bearer <token>'."}
                             """);
+        }
+    }
+
+    @Nested
+    @DisplayName("a request that lost the race to create the cart (KI-081)")
+    class FirstCartRace {
+
+        @Test
+        void view_whenTheFirstAttemptLosesTheRace_triesOnceMoreAndReturns200() {
+            // Given: the first attempt's insert broke uq_cart_user (another request created the
+            // cart first); the second finds that cart
+            when(cartService.view())
+                    .thenThrow(new DataIntegrityViolationException("uq_cart_user"))
+                    .thenReturn(EMPTY_CART);
+
+            // When / Then
+            assertThat(mvc.get().uri("/api/cart")).hasStatus(OK);
+            verify(cartService, times(2)).view();
+        }
+
+        @Test
+        void addItem_whenTheFirstAttemptLosesTheRace_addsOnTheSecondAttempt() {
+            // Given
+            when(cartService.addItem(any(AddCartItemRequest.class)))
+                    .thenThrow(new DataIntegrityViolationException("uq_cart_user"))
+                    .thenReturn(CART_WITH_ONE_LINE);
+
+            // When / Then
+            assertThat(mvc.post().uri("/api/cart/items")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("""
+                                    {"productId":10,"quantity":2}
+                                    """))
+                    .hasStatus(OK);
+            verify(cartService, times(2)).addItem(any(AddCartItemRequest.class));
+        }
+
+        @Test
+        void view_whenTheSecondAttemptFailsToo_doesNotHideIt() {
+            // Given: not a race this retry knows how to win
+            when(cartService.view()).thenThrow(new DataIntegrityViolationException("something else"));
+
+            // When / Then: the second failure propagates (the servlet wraps it), and there is no
+            // third attempt
+            assertThat(mvc.get().uri("/api/cart"))
+                    .hasFailed()
+                    .failure()
+                    .hasCauseInstanceOf(DataIntegrityViolationException.class);
+            verify(cartService, times(2)).view();
         }
     }
 }

@@ -3,21 +3,26 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-04
-- **Fix:** KI-031 (nothing watches the outbox: no pending gauge, no alert). Re-checked against the code and approved 2026-11-04 ("re-check backend KI-031 ... turn it into a fix if it's still real")
-- **Branch:** fix/ki-031-outbox-backlog (cut from `main` at `b712df7`)
-- **Step:** PR_OPEN (#110), CI green, waiting for the owner
-- **Waiting for user:** yes: review of PR #110 ("approved, merge it")
-- **History:** KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (branch tip `3bc9057` in `main`; `./mvnw -pl ecomdemo-app -am test` on `main`: 448 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Waiting after this fix: web chore for KI-030/031's stale rows (web PR #61 open, one PR at a time)
+- **Fix:** KI-081 (a new account's concurrent first cart requests race on `uq_cart_user`; the loser gets `500`). Reported by the web team (web KI-041, web PR #61 red on it); the owner chose "Fix it in the backend" 2026-11-04
+- **Branch:** fix/ki-081-cart-create-race (cut from `main` at `b712df7`, the merge of PR #109)
+- **Step:** PR_OPEN (PR #111): waiting for CI
+- **Waiting for user:** YES after CI is green: review of PR #111 (`approved, merge it`)
+- **History:** KI-031 (PR #110, outbox backlog gauges) merged as `d939733` while this fix was open (both cut from `b712df7`); merged into this branch 2026-11-04 (conflicts in KNOWN_ISSUES, decisions and this file, docs only: both sides kept); its tip `16438cd` is in `main`, and this branch's full verify covers its code. KI-073 (PR #109) merged as `b712df7`, merge-verified 2026-11-04 (tip `3bc9057` in `main`; `./mvnw -B -pl ecomdemo-app -am test` on `main`: 376 tests, 0 failures). Tags for the owner (403 here): `ki-073-fixed` `b712df7`, and those listed before
 
 ## Checklist
-- [x] Re-checked: `OutboxObservationConfig` only drops the relay's traces; `countByPublishedAtIsNull()` used only by tests; no outbox rule in `docker/prometheus/alerts.yml`. Moved from "Needs check" to the fix queue (Medium)
-- [x] Red first (compile-red): `OutboxMetricsTest`, `OutboxBacklogCheckTest`, `OutboxObservationConfigTest` (check untraced), `OutboxEventRepositoryTest` (the backlog query), `DashboardMetricsTest` (the alert)
-- [x] Fix: `OutboxBacklog` record + `OutboxEventRepository.backlog()` (JPQL count + min), `OutboxMetrics` (two gauges, age at read time), `OutboxBacklogCheck` (own 15 s schedule, NOT the relay's tick: the relay's test pins one query per idle tick; a failure keeps the last values), predicate drops its traces; `micrometer-core` in the outbox pom; alert `OutboxEventsStuck` (`max by (service)`: every service is a target of job `ecomdemo`, so `by (job)` would merge them; pinned in the test); smoke checks (five services' series, rule loaded/evaluates/inactive); docs (KNOWN_ISSUES, decisions, README outbox section, saga.md). No health indicator
-- [x] Full reactor unit run: 0 failures; 29 errors only in the 4 Docker-only classes (ConcurrentReservationTest, InventorySagaTest, CatalogSchemaTest, PaymentServiceTest), as without the change. Fix `71e068e`; PR #110 with `run-smoke`
-- [x] CI green on `b80ff31` (Build and test, Trivy, OWASP, smoke script tests, compose smoke: 476 passed, 0 failed, 3 skipped, the three KI-031 checks among them)
+- [x] KI-081 In progress
+- [x] Cause (read and reproduced): `CartService.currentCart()` = `findByUserId(...).orElseGet(() -> save(new Cart(userId)))`; `cart` is `id` identity + `user_id` NOT NULL with `uq_cart_user`. Two concurrent first requests both insert; the loser's `DataIntegrityViolationException` is a `500`
+- [x] Red first (`70d7a1d`): `CartApiIT.concurrentFirstRequestsShareOneCart` (10 fresh accounts, 6 concurrent first requests each, one of them an add): red on `main`'s code, account 0 got `[200, 200, 200, 200, 500, 200]`
+- [x] Fix, first try (`4f04394`, `7b70191`): an `ON CONFLICT DO NOTHING` insert. Dropped: H2, the database of the `@SpringBootTest`s that reach `currentCart()` (`PlaceOrderFlowTest`, `ConcurrentCheckoutTest`), does not parse it (5 errors in the full verify)
+- [x] Fix (`595fda9`, `79b50ed`): `CartService`/`CartRepository` back to `main`; `CartController.onceMoreIfTheCartWasCreatedConcurrently` runs each of the four cart calls once more on `DataIntegrityViolationException` (the loser's transaction has rolled back whole; `open-in-view=false`). `CartControllerTest` +3 (retry on view, retry on add, a second failure propagates)
+- [x] `./mvnw -B -pl ecomdemo-app -am verify`: 379 unit, 101 IT (`CartApiIT` 10 of 10, the race test included), 0 failures
+- [x] Full `./mvnw -B verify`: 11 modules, 941 tests, 0 failures, 0 errors
+- [x] Docs: decisions `[Fix KI-081]` (the retry; ON CONFLICT rejected); KNOWN_ISSUES KI-081 Fixed (PR #111)
+- [x] Push, PR #111 (smoke test skipped: one controller, no deployment, config, startup or service-call change)
+- [ ] CI green on PR #111; STOP for the owner
 
 ## Next action
-STOPPED for the owner's review of PR #110. On "approved, merge it": merge commit, merge-verify (`main` contains the tip; `./mvnw -B test` on `main`), tag `ki-031-fixed` for the owner. Then (web) the approved chore for KI-030/031's stale rows, once web PR #61 (the owner's backend-pin chore) is merged: one open web PR at a time.
+Wait for CI on PR #111; fix it here if red. Green: STOP for `approved, merge it`. After the merge: merge-verify; the owner tags `ki-081-fixed`; the web's PR #61 moves its pin to the merge commit.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
