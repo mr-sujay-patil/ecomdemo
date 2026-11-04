@@ -39,9 +39,8 @@ data:
     user default reset off
     # The tools in the Redis pod (cache-tls): readiness probe, cert-reload sidecar, smoke test.
     user cache-admin reset on ~* &* +@all
-    # app (ecomdemo-app): no keys. It keeps a Redis connection for its health indicator only; the catalogue
-    # cache moved to catalog-service in Phase 20c.
-    user ecomdemo reset on +hello +ping +client|setinfo +info
+    # app (ecomdemo-app, CN ecomdemo): no user since KI-073. It uses no Redis key (the catalogue cache moved to
+    # catalog-service in Phase 20c), so its certificate logs in as `default` and gets NOAUTH.
     # catalog-service: the catalogue cache (CacheConfig, CacheNames). RedisCacheManager keys are `<cache>::<key>`:
     # GET (@Cacheable), SET with a TTL (@Cacheable, @CachePut), DEL (@CacheEvict; CacheConfig writes synchronously,
     # KI-075, and a synchronous delete is DEL: the asynchronous one was UNLINK), and for a whole-cache clear

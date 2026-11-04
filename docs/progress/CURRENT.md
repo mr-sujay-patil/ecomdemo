@@ -11,12 +11,12 @@
 
 ## Checklist
 - [x] KI-073 In progress; inventory (2026-11-04): ecomdemo-app pom (cache + data-redis), application-dev Redis settings, IntegrationTest's Redis container and application-it `spring.cache.type=redis`, compose `app` (depends_on cache, SPRING_DATA_REDIS_*), k8s/services/app.yaml (SPRING_DATA_REDIS_*, the `redis` SSL bundle, init wait on cache:6379), k8s/data/cache-acl.yaml (user ecomdemo), RedisAcl/RedisAclConfigTest/RedisAclIT/RedisClientAuthIT/RedisClientAuthConfigTest (app as a Redis client), scripts/smoke-test.sh (app as a Redis client). The client certificate (CN ecomdemo) stays: PostgreSQL and Kafka use it
-- [ ] Red first: a config test that app has no Redis client (no data-redis in its main dependencies, no SPRING_DATA_REDIS in compose or its ConfigMap, no ACL user ecomdemo)
-- [ ] Fix across the inventory; the cluster-wide Redis ITs keep Lettuce test-scoped; app's certificate becomes the "refused" case (no Redis user)
+- [x] Red first (`d32dc43`): `RedisAclConfigTest.appIsNoRedisClient`, `oneUserPerClient`, `smokeTestChecksTheUsers`, `RedisClientAuthConfigTest.everyRedisClientIsListed` red (4 of 31); `RedisAclIT.appIsNoUser`, `RedisClientAuthIT` sample client now catalog-service
+- [x] Fix across the inventory: pom (no cache starter, data-redis test-scoped), application-dev, `it`/`test` profiles exclude `DataRedisAutoConfiguration` (no Redis in the test context; no `spring.cache.type`), IntegrationTest without RedisContainerConfig, compose, k8s app ConfigMap and init wait, cache-acl (no `ecomdemo`), smoke test (app's certificate: NOAUTH), `RedisAclIT` (issues the `ecomdemo` certificate itself; ACL reload case uses `assistant`); docs (KNOWN_ISSUES, decisions, security, README)
 - [ ] Tests (unit locally; ITs, image scan and compose smoke in CI with `run-smoke`), docs, PR; the owner runs the k8s smoke
 
 ## Next action
-Write the red config test, then work through the inventory.
+Config tests green locally; finish the module unit run (expect 0 failures plus the 29 Docker-only errors), commit, push, open the PR with label `run-smoke`, wait for CI, then STOP for review.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

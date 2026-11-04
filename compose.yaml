@@ -145,8 +145,6 @@ services:
         # container to be STARTED, which for PostgreSQL means "the process exists" — several
         # seconds before it answers. This waits for the health check above to pass.
         condition: service_healthy
-      cache:
-        condition: service_healthy
       kafka:
         # The application publishes on checkout, so it needs a broker that is genuinely serving
         # requests - not merely a container that has started. Spring's producer would retry
@@ -172,10 +170,7 @@ services:
       SERVICE_TOKEN_URI: http://customer-service:8083/oauth2/token
       SERVICE_CLIENT_SECRET: ${APP_CLIENT_SECRET:-}
 
-      # Redis, reached by service name on the compose network — same reasoning as `db` above.
-      SPRING_DATA_REDIS_HOST: cache
-      SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env (see .env.example)}
+      # No Redis since KI-073: app uses no Redis key; the cache lives in catalog-service.
 
       # `dev` is the profile that reads POSTGRES_* above. It is named for how it is run, not for
       # what it means; a `prod` profile arrives with the deployment phases.

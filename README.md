@@ -27,6 +27,7 @@ the last store a pod could use with the password alone. Now:
   the **password**: a client needs both.
 - Its four clients present one through a Spring SSL bundle `redis`: app and catalog-service the same
   certificate they show PostgreSQL and Kafka (Phase 35), gateway-service and assistant-service a new one.
+  (Since KI-073 app is no Redis client: it used no Redis key.)
 - A renewed client certificate is used by the next connection, with no restart. Spring Boot alone would
   keep the one of start-up (a test proves it), so `common` adds a small auto-configuration that hands
   Lettuce the bundle's current keys. The tools in the Redis pod (probe, `cert-reload`, the smoke test's

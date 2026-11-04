@@ -29,7 +29,7 @@ import org.junit.jupiter.params.provider.CsvSource;
  *
  * <p>Before, TLS proved only the SERVER to the client (KI-057): any pod with the password could use the cache,
  * the rate-limit counters and the assistant's conversations. Now Redis asks every client for a certificate from
- * the cluster CA in the TLS handshake, keeps {@code requirepass}, and each of its four clients presents its own
+ * the cluster CA in the TLS handshake, keeps {@code requirepass}, and each of its clients (three since KI-073) presents its own
  * certificate through a Spring Boot SSL bundle; the tools inside the Redis pod present the pod's certificate.
  *
  * <p>The fast half: it reads the manifests and the smoke test. {@code RedisClientAuthIT} runs the real image

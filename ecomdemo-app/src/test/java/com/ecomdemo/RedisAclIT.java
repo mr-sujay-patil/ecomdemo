@@ -64,8 +64,10 @@ class RedisAclIT {
         for (String commonName : RedisClientAuthConfigTest.REDIS_CLIENTS.values()) {
             KafkaTestBroker.issueClient(issuer, files, commonName, "ca", commonName);
         }
-        // A real client certificate of the cluster, for a service that does not use Redis: no user has its name.
+        // Real client certificates of the cluster, for services that do not use Redis: no user has their name.
+        // app's (ecomdemo) is one since KI-073.
         KafkaTestBroker.issueClient(issuer, files, "customer", "ca", "customer");
+        KafkaTestBroker.issueClient(issuer, files, "ecomdemo", "ca", "ecomdemo");
         redis = RedisClientAuthIT.startRedis(files, "cache");
     }
 
@@ -131,7 +133,7 @@ class RedisAclIT {
     @DisplayName("a certificate cannot become another user: AUTH to a service user, or to default with a password, is refused")
     void authCannotSwitchUsers() throws Exception {
         // Each call is a connection that is already `catalog` (its certificate) and then tries to AUTH as another.
-        for (String user : List.of("assistant", "gateway", "ecomdemo", RedisAcl.ADMIN, "default")) {
+        for (String user : List.of("assistant", "gateway", RedisAcl.ADMIN, "default")) {
             assertThat(cliAs("catalog", "AUTH", user, "a-guess")).as(user).contains("WRONGPASS");
         }
         assertThat(cliAs("catalog", "AUTH", "it-redis-password")).as("the old shared password").contains("WRONGPASS");
@@ -159,16 +161,16 @@ class RedisAclIT {
             String script = PostgresTlsConfigTest.strings(PostgresTlsConfigTest.container(RedisAclConfigTest.cachePod(),
                     "cert-reload").get("args")).getFirst().replace("sleep 30", "sleep 1");
             reloading.execInContainer("sh", "-c", "nohup sh -c \"$1\" >/tmp/cert-reload.log 2>&1 &", "cert-reload", script);
-            assertThat(cliAs(reloading, "ecomdemo", "GET", "product::1")).startsWith("NOPERM");
+            assertThat(cliAs(reloading, "assistant", "GET", "product::1")).startsWith("NOPERM");
 
-            // Kubernetes updates the mounted ConfigMap: here the ecomdemo user gains GET on the catalogue's keys.
-            String changed = RedisAcl.file().replace("user ecomdemo reset on", "user ecomdemo reset on ~product::* +get");
+            // Kubernetes updates the mounted ConfigMap: here the assistant user gains GET on the catalogue's keys.
+            String changed = RedisAcl.file().replace("user assistant reset on", "user assistant reset on ~product::* +get");
             assertThat(changed).isNotEqualTo(RedisAcl.file());
             reloading.copyFileToContainer(Transferable.of(changed.getBytes(StandardCharsets.UTF_8), 0644),
                     RedisAclConfigTest.ACL_PATH);
 
             await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(1)).ignoreExceptions()
-                    .untilAsserted(() -> assertThat(cliAs(reloading, "ecomdemo", "GET", "product::1"))
+                    .untilAsserted(() -> assertThat(cliAs(reloading, "assistant", "GET", "product::1"))
                             .doesNotContain("NOPERM"));
             assertThat(reloading.execInContainer("cat", "/tmp/cert-reload.log").getStdout())
                     .contains("reloaded the Redis ACL");
