@@ -332,11 +332,12 @@ class CartControllerTest {
             // Given: not a race this retry knows how to win
             when(cartService.view()).thenThrow(new DataIntegrityViolationException("something else"));
 
-            // When / Then: the second failure propagates, and there is no third attempt
+            // When / Then: the second failure propagates (the servlet wraps it), and there is no
+            // third attempt
             assertThat(mvc.get().uri("/api/cart"))
                     .hasFailed()
                     .failure()
-                    .isInstanceOf(DataIntegrityViolationException.class);
+                    .hasCauseInstanceOf(DataIntegrityViolationException.class);
             verify(cartService, times(2)).view();
         }
     }
