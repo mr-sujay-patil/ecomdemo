@@ -85,8 +85,8 @@ class RedisClientAuthIT {
         KafkaTestBroker.issueLeaf(issuer, files, "cache-renewed", "ca", RedisAcl.ADMIN, SERVER_EXTENSIONS);
         KafkaTestBroker.issueLeaf(issuer, files, "cache-server-only", "ca", RedisAcl.ADMIN,
                 "subjectAltName=DNS:localhost,IP:127.0.0.1\\nextendedKeyUsage=serverAuth");
-        KafkaTestBroker.issueClient(issuer, files, "ecomdemo", "ca", "ecomdemo");
-        KafkaTestBroker.issueClient(issuer, files, "other-ca-ecomdemo", "other-ca", "ecomdemo");
+        KafkaTestBroker.issueClient(issuer, files, "catalog", "ca", "catalog");
+        KafkaTestBroker.issueClient(issuer, files, "other-ca-catalog", "other-ca", "catalog");
         redis = startRedis(files, "cache");
     }
 
@@ -100,10 +100,10 @@ class RedisClientAuthIT {
     }
 
     @Test
-    @DisplayName("app's certificate, and no password: PONG")
+    @DisplayName("a service's certificate (catalog's), and no password: PONG")
     void certificateAlone() throws Exception {
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("app"), "ecomdemo", "ca");
-        appRedisClients(redis, mount, true).run(context -> {
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("catalog"), "catalog", "ca");
+        sampleRedisClients(redis, mount, true).run(context -> {
             try (RedisConnection connection = context.getBean(LettuceConnectionFactory.class).getConnection()) {
                 assertThat(connection.ping()).isEqualTo("PONG");
             }
@@ -113,8 +113,8 @@ class RedisClientAuthIT {
     @Test
     @DisplayName("a TLS client that trusts the CA but has no certificate is refused in the handshake")
     void noCertificate() throws Exception {
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("no-certificate"), "ecomdemo", "ca");
-        appRedisClients(redis, mount, true, "SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_CERTIFICATE",
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("no-certificate"), "catalog", "ca");
+        sampleRedisClients(redis, mount, true, "SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_CERTIFICATE",
                 "SPRING_SSL_BUNDLE_PEM_REDIS_KEYSTORE_PRIVATEKEY").run(context -> {
                     String before = redis.getLogs();
                     assertThatThrownBy(() -> ping(context.getBean(LettuceConnectionFactory.class)))
@@ -128,8 +128,8 @@ class RedisClientAuthIT {
     @Test
     @DisplayName("a certificate for the right name from another CA is refused in the handshake")
     void otherCa() throws Exception {
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("other-ca"), "other-ca-ecomdemo", "ca");
-        appRedisClients(redis, mount, true).run(context -> {
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("other-ca"), "other-ca-catalog", "ca");
+        sampleRedisClients(redis, mount, true).run(context -> {
             String before = redis.getLogs();
             assertThatThrownBy(() -> ping(context.getBean(LettuceConnectionFactory.class)))
                     .isInstanceOf(RedisConnectionFailureException.class);
@@ -142,8 +142,8 @@ class RedisClientAuthIT {
     @Test
     @DisplayName("the certificate with the old shared password: refused (Phase 37: the AUTH asks for `default`, which is off)")
     void certificateWithTheOldPassword() throws Exception {
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("old-password"), "ecomdemo", "ca");
-        appRedisClients(redis, mount, true).withPropertyValues("spring.data.redis.password=" + OLD_SHARED_PASSWORD)
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("old-password"), "catalog", "ca");
+        sampleRedisClients(redis, mount, true).withPropertyValues("spring.data.redis.password=" + OLD_SHARED_PASSWORD)
                 .run(context -> assertThatThrownBy(() -> ping(context.getBean(LettuceConnectionFactory.class)))
                         .hasStackTraceContaining("WRONGPASS"));
     }
@@ -153,12 +153,12 @@ class RedisClientAuthIT {
     void renewedCertificateIsUsed() throws Exception {
         // The service starts with a certificate Redis refuses, and cert-manager then "renews" it with one Redis
         // accepts: the difference is visible on the next connection.
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("renewal"), "other-ca-ecomdemo", "ca");
-        appRedisClients(redis, mount, true).run(context -> {
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("renewal"), "other-ca-catalog", "ca");
+        sampleRedisClients(redis, mount, true).run(context -> {
             LettuceConnectionFactory factory = context.getBean(LettuceConnectionFactory.class);
             assertThatThrownBy(() -> ping(factory)).isInstanceOf(RedisConnectionFailureException.class);
 
-            KafkaTestBroker.clientMount(files, mount, "ecomdemo", "ca");
+            KafkaTestBroker.clientMount(files, mount, "catalog", "ca");
 
             await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofSeconds(1)).ignoreExceptions()
                     .untilAsserted(() -> assertThat(ping(factory)).isEqualTo("PONG"));
@@ -170,14 +170,14 @@ class RedisClientAuthIT {
     void bootAloneKeepsTheStartUpCertificate() throws Exception {
         // The same renewal, with Boot's own Redis configuration only. Boot reloads the bundle, but Lettuce keeps
         // the key managers it was given at start-up: this is the expiry trap the auto-configuration closes.
-        Path mount = KafkaTestBroker.clientMount(files, files.resolve("boot-alone"), "other-ca-ecomdemo", "ca");
-        appRedisClients(redis, mount, false).run(context -> {
+        Path mount = KafkaTestBroker.clientMount(files, files.resolve("boot-alone"), "other-ca-catalog", "ca");
+        sampleRedisClients(redis, mount, false).run(context -> {
             LettuceConnectionFactory factory = context.getBean(LettuceConnectionFactory.class);
             SslBundles bundles = context.getBean(SslBundles.class);
             SslBundle atStart = bundles.getBundle("redis");
             assertThatThrownBy(() -> ping(factory)).isInstanceOf(RedisConnectionFailureException.class);
 
-            KafkaTestBroker.clientMount(files, mount, "ecomdemo", "ca");
+            KafkaTestBroker.clientMount(files, mount, "catalog", "ca");
             await().atMost(Duration.ofSeconds(60)).pollInterval(Duration.ofSeconds(1))
                     .until(() -> bundles.getBundle("redis") != atStart);
 
@@ -254,17 +254,17 @@ class RedisClientAuthIT {
     }
 
     /**
-     * {@code app}'s Redis clients, as the service builds them: its ConfigMap's {@code SPRING_DATA_REDIS_*} and
+     * A Redis client, catalog-service's, as the service builds it (app was the sample until KI-073 took Redis out of it): its ConfigMap's {@code SPRING_DATA_REDIS_*} and
      * {@code redis} bundle settings as environment variables, the host and port replaced, the client-certificate
      * paths pointing at {@code mount}, and no password (Phase 37); {@code without} names settings to leave out.
      * {@code currentCertificate} adds the service's own {@code com.ecomdemo.redis} auto-configuration.
      */
-    private static ApplicationContextRunner appRedisClients(GenericContainer<?> server, Path mount,
+    private static ApplicationContextRunner sampleRedisClients(GenericContainer<?> server, Path mount,
             boolean currentCertificate, String... without) throws IOException {
-        return redisClients("app", server, mount, currentCertificate, without);
+        return redisClients("catalog-service", server, mount, currentCertificate, without);
     }
 
-    /** {@code service}'s Redis clients, as {@link #appRedisClients} builds app's. */
+    /** {@code service}'s Redis clients, as {@link #sampleRedisClients} builds catalog-service's. */
     static ApplicationContextRunner redisClients(String service, GenericContainer<?> server, Path mount,
             boolean currentCertificate, String... without) throws IOException {
         Map<String, Object> environment = new HashMap<>();
@@ -301,8 +301,8 @@ class RedisClientAuthIT {
 
     /** The serial of the certificate Redis serves now, from a TLS handshake that presents a client certificate. */
     private static BigInteger servedSerial(GenericContainer<?> server) throws Exception {
-        PemSslStoreDetails client = PemSslStoreDetails.forCertificate(files.resolve("ecomdemo.crt").toUri().toString())
-                .withPrivateKey(files.resolve("ecomdemo.key").toUri().toString());
+        PemSslStoreDetails client = PemSslStoreDetails.forCertificate(files.resolve("catalog.crt").toUri().toString())
+                .withPrivateKey(files.resolve("catalog.key").toUri().toString());
         PemSslStoreDetails ca = PemSslStoreDetails.forCertificate(files.resolve("ca.crt").toUri().toString());
         SslBundle bundle = SslBundle.of(new PemSslStoreBundle(client, ca));
         try (SSLSocket socket = (SSLSocket) bundle.createSslContext().getSocketFactory()

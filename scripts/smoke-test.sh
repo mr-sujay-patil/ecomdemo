@@ -4325,7 +4325,7 @@ done
 # ACL user, and there is no password). From inside the Redis pod:
 # a TLS client that verifies the server but has no certificate is refused in the handshake, and so is one with a
 # certificate from another CA (made here with openssl, deleted after); Redis's log names the reason each time.
-# Then each of the four Redis clients' own certificates (copied from its Secret into the pod, never printed,
+# Then each Redis client's own certificate (three since KI-073: app is none; copied from its Secret, never printed,
 # deleted after) gets PONG. Without the password a certificate is not enough: "Redis refuses a client that has
 # no password" in the Caching section runs with the pod's certificate.
 check "Redis refuses a TLS client without a client certificate" "True" \
@@ -4361,11 +4361,10 @@ sys.stdout.write(base64.b64decode(data["tls.key"]).decode() + base64.b64decode(d
         | ctr_exec -i "$REDIS_CONTAINER" sh -c 'umask 077 && cat > /tmp/smoke-client.pem && redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /tmp/smoke-client.pem --key /tmp/smoke-client.pem "$@" 2>&1; rm -f /tmp/smoke-client.pem' sh "$@" \
         | tr -d '\r'
 }
-for redis_client in app catalog-service gateway-service assistant-service; do
+for redis_client in catalog-service gateway-service assistant-service; do
     # A read command the user has, on a key of its own service and on one of another service's: the refusal must
-    # be about the KEY ("No permissions to access a key"), not the command. app has no key and no read command.
+    # be about the KEY ("No permissions to access a key"), not the command.
     case "$redis_client" in
-        app) read_cmd="GET"; own_key=""; foreign_key="product::1"; refusal="NOPERM" ;;
         catalog-service) read_cmd="GET"; own_key="product::1"; foreign_key="assistant:memory:smoke"; refusal="access a key" ;;
         gateway-service) read_cmd="GET"; own_key="request_rate_limiter.{smoke}.tokens"; foreign_key="product::1"; refusal="access a key" ;;
         assistant-service) read_cmd="LRANGE"; own_key="assistant:memory:smoke"; foreign_key="product::1"; refusal="access a key" ;;
@@ -4373,10 +4372,8 @@ for redis_client in app catalog-service gateway-service assistant-service; do
     read_args=""; [ "$read_cmd" = "LRANGE" ] && read_args="0 0"
     check "$redis_client's client certificate, with no password, gets PONG from Redis" "PONG" \
         "$(redis_as "$redis_client-client-tls" PING | tr -d ' ')"
-    if [ -n "$own_key" ]; then
-        check "$redis_client's Redis user may read its own key ($own_key)" "True" \
-            "$(redis_as "$redis_client-client-tls" $read_cmd "$own_key" $read_args | grep -qE "NOPERM|NOAUTH|ERR|rror" && echo False || echo True)"
-    fi
+    check "$redis_client's Redis user may read its own key ($own_key)" "True" \
+        "$(redis_as "$redis_client-client-tls" $read_cmd "$own_key" $read_args | grep -qE "NOPERM|NOAUTH|ERR|rror" && echo False || echo True)"
     check "$redis_client's Redis user is refused another service's key (NOPERM)" "True" \
         "$(redis_as "$redis_client-client-tls" $read_cmd "$foreign_key" $read_args | grep -q "$refusal" && echo True || echo False)"
 done
@@ -4387,6 +4384,9 @@ check "catalog-service's Redis user is refused KEYS (KI-074: the cache clears wi
     "$(redis_as catalog-service-client-tls KEYS 'productList::*' | grep -q "NOPERM User catalog" && echo True || echo False)"
 check "a cluster certificate whose CN is not a Redis user gets NOAUTH (customer-service's)" "True" \
     "$(redis_as customer-service-client-tls PING | grep -q NOAUTH && echo True || echo False)"
+# KI-073: app uses no Redis key and is no Redis client, so the ACL has no user for its certificate (CN ecomdemo).
+check "app's client certificate is no Redis user (KI-073): NOAUTH" "True" \
+    "$(redis_as app-client-tls PING | grep -q NOAUTH && echo True || echo False)"
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
     "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"
 check "payment-service too" "0" \

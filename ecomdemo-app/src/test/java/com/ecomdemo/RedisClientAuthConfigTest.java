@@ -29,7 +29,7 @@ import org.junit.jupiter.params.provider.CsvSource;
  *
  * <p>Before, TLS proved only the SERVER to the client (KI-057): any pod with the password could use the cache,
  * the rate-limit counters and the assistant's conversations. Now Redis asks every client for a certificate from
- * the cluster CA in the TLS handshake, keeps {@code requirepass}, and each of its four clients presents its own
+ * the cluster CA in the TLS handshake, keeps {@code requirepass}, and each of its clients (three since KI-073) presents its own
  * certificate through a Spring Boot SSL bundle; the tools inside the Redis pod present the pod's certificate.
  *
  * <p>The fast half: it reads the manifests and the smoke test. {@code RedisClientAuthIT} runs the real image
@@ -42,7 +42,7 @@ class RedisClientAuthConfigTest {
 
     /** The Redis clients and the CN of their client certificate. */
     static final Map<String, String> REDIS_CLIENTS = Map.of(
-            "app", "ecomdemo", "catalog-service", "catalog", "gateway-service", "gateway",
+            "catalog-service", "catalog", "gateway-service", "gateway",
             "assistant-service", "assistant");
 
     /** The arguments that make Redis present ITS certificate as a client: the in-pod tools' identity. */
@@ -84,7 +84,7 @@ class RedisClientAuthConfigTest {
     }
 
     @Test
-    @DisplayName("the Redis clients are exactly the four services that set SPRING_DATA_REDIS_HOST")
+    @DisplayName("the Redis clients are exactly the three services that set SPRING_DATA_REDIS_HOST (app is none since KI-073)")
     void everyRedisClientIsListed() throws IOException {
         List<String> clients = new ArrayList<>();
         try (Stream<Path> files = Files.list(ProjectRoot.resolve("k8s/services"))) {
@@ -117,7 +117,7 @@ class RedisClientAuthConfigTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"app", "catalog-service", "gateway-service", "assistant-service"})
+    @CsvSource({"catalog-service", "gateway-service", "assistant-service"})
     @DisplayName("each Redis client presents its certificate through the `redis` SSL bundle, which reloads on renewal")
     void eachClientPresentsItsCertificate(String service) throws IOException {
         Map<String, Object> settings = clientSettings(service);
@@ -131,7 +131,7 @@ class RedisClientAuthConfigTest {
     }
 
     @ParameterizedTest(name = "{0}")
-    @CsvSource({"app", "catalog-service", "gateway-service", "assistant-service"})
+    @CsvSource({"catalog-service", "gateway-service", "assistant-service"})
     @DisplayName("each Redis client mounts its own client certificate, the key readable by the service only")
     void eachClientMountsItsCertificate(String service) throws IOException {
         Map<String, Object> pod = podSpec(resource("k8s/services/" + service + ".yaml", "Deployment", service));

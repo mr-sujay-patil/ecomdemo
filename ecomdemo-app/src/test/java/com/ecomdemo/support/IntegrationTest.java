@@ -23,7 +23,7 @@ import org.springframework.test.context.ActiveProfiles;
  * PostgreSQL in a container.
  *
  * <p>Every annotation here is part of the context cache key, so keeping them in one place is what
- * lets the integration tests share a single context — and therefore one PostgreSQL and one Redis
+ * lets the integration tests share a single context — and therefore one PostgreSQL and one Kafka
  * for the whole run rather than a pair per class. Add a {@code @MockitoBean} or a stray
  * {@code @TestPropertySource} to one subclass and that subclass silently gets a context, and both
  * containers, of its own.
@@ -76,7 +76,7 @@ import org.springframework.test.context.ActiveProfiles;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 @AutoConfigureTestRestTemplate
-@Import({PostgresContainerConfig.class, RedisContainerConfig.class, KafkaContainerConfig.class,
+@Import({PostgresContainerConfig.class, KafkaContainerConfig.class,
         InMemoryInventoryConfig.class, InMemoryCatalogConfig.class, FakeSagaParticipants.class})
 @ActiveProfiles("it")
 public abstract class IntegrationTest {
