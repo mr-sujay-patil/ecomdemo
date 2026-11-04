@@ -112,11 +112,17 @@ public class CartService {
      * this class's own. Propagation is {@code REQUIRED}, the default: an existing transaction is
      * joined rather than a second one started, so the cart the order reads and the cart it later
      * empties are the same managed instance in the same unit of work.
+     *
+     * <p>A missing cart is created with {@code createIfAbsent}, not {@code save()}, and then read:
+     * two first requests for one account used to both insert, and the loser answered 500
+     * (KI-081). Whichever request inserts, both read back the same row.
      */
     public Cart currentCart() {
-        return cartRepository
-                .findByUserId(currentUser.id())
-                .orElseGet(() -> cartRepository.save(new Cart(currentUser.id())));
+        Long userId = currentUser.id();
+        return cartRepository.findByUserId(userId).orElseGet(() -> {
+            cartRepository.createIfAbsent(userId);
+            return cartRepository.findByUserId(userId).orElseThrow();
+        });
     }
 
     /** Called by the order feature once an order has been placed. */

@@ -76,6 +76,24 @@ class CartRepositoryTest {
     }
 
     @Test
+    @DisplayName("createIfAbsent gives an account with no cart an empty one (KI-081)")
+    void createIfAbsent_whenTheUserHasNoCart_createsAnEmptyOne() {
+        // Given: a database with no cart row
+
+        // When
+        int created = cartRepository.createIfAbsent(OWNER_ID);
+        entityManager.clear();
+
+        // Then: the native insert runs on this database too, and the row reads back as a cart.
+        // That it does nothing when the cart exists needs uq_cart_user, which this schema
+        // (generated from the entity) does not have: CartApiIT checks it against PostgreSQL.
+        assertThat(created).isEqualTo(1);
+        Optional<Cart> found = cartRepository.findByUserId(OWNER_ID);
+        assertThat(found).isPresent();
+        assertThat(found.get().getItems()).isEmpty();
+    }
+
+    @Test
     void findByUserId_whenTheCartIsEmpty_stillFindsIt() {
         // Given: a cart with no lines at all
         entityManager.persistAndFlush(new Cart(OWNER_ID));

@@ -3,6 +3,7 @@ package com.ecomdemo.cart.internal;
 import com.ecomdemo.cart.Cart;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -31,4 +32,27 @@ public interface CartRepository extends JpaRepository<Cart, Long> {
     @Query("select distinct c from Cart c left join fetch c.items i "
             + "where c.userId = :userId")
     Optional<Cart> findByUserId(@Param("userId") Long userId);
+
+    /**
+     * Gives the account a cart unless it has one, and never fails because another request did it
+     * first (KI-081).
+     *
+     * <p>A cart is created on the first request that needs it, and {@code uq_cart_user} allows
+     * one per account. Find-then-{@code save()} is two steps, so two first requests arriving
+     * together both found nothing, both inserted, and the second insert's constraint violation
+     * was a 500. Catching that exception would not help: PostgreSQL aborts the whole transaction
+     * on a failed statement, so the request could not go on to read the winner's cart.
+     *
+     * <p>{@code ON CONFLICT DO NOTHING} makes the check and the insert one statement. When
+     * another transaction has just inserted the same account's row, this one waits for it to
+     * commit and then does nothing, with no error, and the next query sees that row. No conflict
+     * target is named because H2's PostgreSQL mode (the unit tests' database) accepts only the
+     * bare form; {@code uq_cart_user} is the one constraint an insert of a {@code user_id} alone
+     * can hit.
+     *
+     * @return 1 if this call created the cart, 0 if the account already had one
+     */
+    @Modifying
+    @Query(value = "insert into cart (user_id) values (:userId) on conflict do nothing", nativeQuery = true)
+    int createIfAbsent(@Param("userId") Long userId);
 }
