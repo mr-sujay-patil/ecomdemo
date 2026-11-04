@@ -5,18 +5,18 @@
 - **Updated:** 2026-11-04
 - **Fix:** KI-083 (`k8s/services/app.yaml`'s header argues one replica from a double-publishing relay that fix KI-002's lock prevents), with KI-033 moved to Accepted limits (the comment's remaining reason). The owner: "continue on the next task"
 - **Branch:** fix/ki-083-app-one-replica-reasons (cut from `main` at `eeaa277`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** KI-082 (PR #113) merged as `eeaa277`, merge-verified 2026-11-04 (tip `f191648` in `main`; the 5 `test-smoke-*.sh` pass; `./mvnw -B test` 0 failures, 29 Docker-only errors). Web PR #65 (KI-047) approved, merges when its CI is green. Tags for the owner (403 here): `ki-082-fixed` `eeaa277`, `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
 - [x] Re-checked each app schedule: relay (KI-002 lock: one publisher), outbox cleanup (idempotent DELETE), saga sweep (KI-038, accepted), sales report (KI-033: a second run for the day is refused)
-- [ ] Fix: app.yaml header states the real reasons (every replica would run every job: duplicate work and a refused report logged as an error each night; correctness holds); KI-033 to Accepted limits; KI-083 Fixed; decisions
-- [ ] No automated test (a comment's wording): said in the PR; `kubectl apply --dry-run` not available here, so a YAML parse check
+- [x] Fix: app.yaml header (schedules safe in N replicas, waste not correctness, leader election a phase); KI-033 to Accepted limits; KI-083 Fixed; decisions `[Fix KI-083]`
+- [x] No automated test (a comment's wording): said in the PR; the manifest still parses (PyYAML, all documents); no test reads the old wording
 - [ ] PR, CI, STOP
 
 ## Next action
-Rewrite the app.yaml header comment.
+Commit, push, PR, CI, STOP.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
