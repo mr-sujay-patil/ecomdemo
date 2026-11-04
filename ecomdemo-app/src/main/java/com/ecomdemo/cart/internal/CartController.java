@@ -14,6 +14,8 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import java.util.function.Supplier;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -46,6 +48,30 @@ public class CartController {
         this.cartService = cartService;
     }
 
+    /**
+     * Runs a cart call, and runs it once more if it lost the race to create the account's cart
+     * (KI-081).
+     *
+     * <p>The cart is created by the first request that needs it, and {@code uq_cart_user} allows
+     * one per account. Two first requests that arrive together (the web app reads the cart twice
+     * at once after sign-in) both find no cart and both insert one; the second insert breaks the
+     * constraint, and that request used to answer 500 for a valid call.
+     *
+     * <p>The retry is here, outside the service's transaction, because it cannot be inside it:
+     * PostgreSQL aborts a transaction at its first failed statement, so the losing request could
+     * not go on to read the winner's cart. By the time the exception reaches this method its
+     * transaction has rolled back whole (nothing of it is kept, so repeating an add cannot add
+     * twice), and the second call is a new transaction that finds the cart the other request
+     * committed. A second failure is not a race this method knows, so it propagates.
+     */
+    private static CartResponse onceMoreIfTheCartWasCreatedConcurrently(Supplier<CartResponse> call) {
+        try {
+            return call.get();
+        } catch (DataIntegrityViolationException lostTheRace) {
+            return call.get();
+        }
+    }
+
     @GetMapping
     @Operation(
             summary = "View your cart",
@@ -60,7 +86,7 @@ public class CartController {
             description = "Authenticated, but not as a CUSTOMER",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse view() {
-        return cartService.view();
+        return onceMoreIfTheCartWasCreatedConcurrently(cartService::view);
     }
 
     @PostMapping("/items")
@@ -77,7 +103,7 @@ public class CartController {
             description = "No product with that id",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse addItem(@Valid @RequestBody AddCartItemRequest request) {
-        return cartService.addItem(request);
+        return onceMoreIfTheCartWasCreatedConcurrently(() -> cartService.addItem(request));
     }
 
     @PutMapping("/items/{productId}")
@@ -97,7 +123,7 @@ public class CartController {
             @Parameter(description = "Id of the product whose line is being changed", example = "1")
             @PathVariable Long productId,
             @Valid @RequestBody UpdateCartItemRequest request) {
-        return cartService.updateItem(productId, request);
+        return onceMoreIfTheCartWasCreatedConcurrently(() -> cartService.updateItem(productId, request));
     }
 
     @DeleteMapping("/items/{productId}")
@@ -109,6 +135,6 @@ public class CartController {
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = ApiError.class)))
     public CartResponse removeItem(
             @Parameter(description = "Id of the product to remove", example = "1") @PathVariable Long productId) {
-        return cartService.removeItem(productId);
+        return onceMoreIfTheCartWasCreatedConcurrently(() -> cartService.removeItem(productId));
     }
 }

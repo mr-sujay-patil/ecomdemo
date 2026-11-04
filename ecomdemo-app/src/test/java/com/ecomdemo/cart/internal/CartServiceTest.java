@@ -250,41 +250,23 @@ class CartServiceTest {
             // Then
             assertThat(found).isSameAs(existing);
             verify(cartRepository, never()).save(any());
-            verify(cartRepository, never()).createIfAbsent(any());
         }
 
         @Test
-        void currentCart_whenNoCartExistsYet_createsOneForTheCallerAndReadsItBack() {
-            // Given: no cart on the first read, the created one on the second
+        void currentCart_whenNoCartExistsYet_createsAndSavesOneForTheCaller() {
+            // Given
             Cart created = TestData.cart(1L);
             when(currentUser.id()).thenReturn(OWNER.id());
-            when(cartRepository.findByUserId(OWNER.id())).thenReturn(Optional.empty(), Optional.of(created));
-
-            // When
-            Cart found = cartService.currentCart();
-
-            // Then: created with the insert that cannot fail on a concurrent first request
-            // (KI-081), never with save(new Cart), whose second insert broke uq_cart_user
-            assertThat(found).isSameAs(created);
-            verify(cartRepository).createIfAbsent(OWNER.id());
-            verify(cartRepository, never()).save(any());
-        }
-
-        @Test
-        void currentCart_whenAnotherRequestCreatedTheCartFirst_returnsThatCart() {
-            // Given: this request found nothing, but a concurrent one inserted first, so this
-            // request's createIfAbsent changes no row (KI-081)
-            Cart theirs = TestData.cart(1L);
             when(currentUser.id()).thenReturn(OWNER.id());
-            when(cartRepository.findByUserId(OWNER.id())).thenReturn(Optional.empty(), Optional.of(theirs));
-            when(cartRepository.createIfAbsent(OWNER.id())).thenReturn(0);
+            when(cartRepository.findByUserId(OWNER.id())).thenReturn(Optional.empty());
+            when(cartRepository.save(any(Cart.class))).thenReturn(created);
 
             // When
             Cart found = cartService.currentCart();
 
             // Then
-            assertThat(found).isSameAs(theirs);
-            verify(cartRepository, never()).save(any());
+            assertThat(found).isSameAs(created);
+            verify(cartRepository).save(any(Cart.class));
         }
 
         @Test
