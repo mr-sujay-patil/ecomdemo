@@ -3,22 +3,21 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-04
-- **Fix:** KI-032 (the catalogue cache's hit rate is not observable: no `cache_gets_total` at all). Re-checked against the code; the owner said "continue on next" after KI-031
-- **Branch:** fix/ki-032-cache-metrics (cut from `main` at `d939733`)
-- **Step:** PR_OPEN (#112), CI green, waiting for the owner
-- **Waiting for user:** yes: review of PR #112 ("approved, merge it"); KI-033 placement (Accepted limits or Candidates)
-- **History:** KI-081 (PR #111, another session) merged into `main` as `fd278e7` while this PR was open; `main` merged into this branch 2026-11-04 (docs conflicts only: both rows and both decisions kept). KI-031 (PR #110) merged as `d939733`, merge-verified 2026-11-04 (tip `16438cd` in `main`; `./mvnw -B test` on `main`: 0 failures, the 29 Docker-only errors in 4 classes). Tags for the owner (403 here): `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Web: the approved chore for KI-030/031's stale rows waits for web PR #61 (one PR at a time)
+- **Fix:** KI-082 (smoke checks that pipe into `grep -q` under `set -o pipefail` can fail with the match present). The owner: "continue with the best recommendation according to you"
+- **Branch:** fix/ki-082-smoke-retry-after-pipe (cut from `main` at `9ce4adf`)
+- **Step:** PR_OPEN (#113), waiting on CI
+- **Waiting for user:** no
+- **History:** KI-032 (PR #112) merged as `9ce4adf`, merge-verified 2026-11-04 (`./mvnw -B test` on `main`: 0 failures, the 29 Docker-only errors). Web chore PR #63 (KI-030/031 rows) merged as `3afbfbc`, verified (local verify 1111 tests with Node 24; CI on `main` green). Tags for the owner (403 here): `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
-- [x] Re-checked: Boot binds `RedisCacheMetrics` only to a `RedisCache`; `LoggingCache` hides it; the writer collects no statistics
-- [x] Red first: `CacheMetricsTest` (4 of 4 red on `main`: no `cache.gets` meter for either cache)
-- [x] Fix: `collectStatistics()`; `CacheMeterBinderProvider<LoggingCache>` (named class) binding `RedisCacheMetrics` to `LoggingCache.getDelegate()`; dashboard panel 12 "Catalogue cache hit ratio" (`service="catalog-service"`); DashboardMetricsTest (`cache_gets_total` Boot-provided, panel pinned); smoke check (both caches' series, reads counted); docs (KNOWN_ISSUES, decisions, README caching section)
-- [x] Full unit run: 0 failures (29 Docker-only errors, as on `main`); fix `53daaa1`; PR #112 with `run-smoke`
-- [x] CI on `b4ae31f`: compose smoke 476/477, the failure is the assistant's Retry-After check racing its own pipe (pre-existing, recorded as KI-082, not fixed here: hard rule 7); this push re-runs CI
-- [x] CI green on `ec70469` (all six checks; OWASP back to 1 min after the NVD cache was rebuilt by a manual `nvd-data.yml` run, 13:09-14:06)
+- [x] KI-082 In progress, scope: all 33 piped `grep -q` in `smoke-test.sh`; KI-083 recorded (stale app.yaml comment, not fixed here)
+- [x] Red first: `scripts/test-smoke-pipes.sh` (4 of 7 red on `main`; the race itself reproduced 3 of 3)
+- [x] Fix: `scripts/smoke-pipes.sh` (`contains`), sourced by smoke-test.sh beside smoke-clients.sh; 33 `| grep -q<flags>` became `| contains <flags>`; `bash -n` clean; all 5 `test-smoke-*.sh` pass; no Java test reads the text; docs (KNOWN_ISSUES, decisions)
+- [x] PR #113 with `run-smoke`
+- [ ] CI green, then STOP for review (the owner may run the k8s smoke: 10 converted checks are k8s-only)
 
 ## Next action
-STOPPED for the owner's review of PR #112. On "approved, merge it": merge commit, merge-verify (`./mvnw -B test` on `main`), tag `ki-032-fixed` for the owner. Open questions for the owner: KI-033 (still true; a leader election is a phase, so Accepted limits or Candidates?); KI-082 (smoke checks racing their pipe) is Open; the stale app.yaml header comment about two relays (the relay has an advisory lock) is to be recorded. Web: the KI-030/031 rows chore waits for web PR #61.
+Watch PR #113 CI; fix anything red; when green, STOP for the owner's review.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

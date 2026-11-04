@@ -154,6 +154,8 @@ ctr_start() {
 # (KI-067). Sourced here, before the container discovery below uses the gate; it only defines functions.
 # shellcheck source=scripts/smoke-clients.sh
 . "$(dirname "${BASH_SOURCE[0]}")/smoke-clients.sh"
+# shellcheck source=scripts/smoke-pipes.sh
+. "$(dirname "${BASH_SOURCE[0]}")/smoke-pipes.sh"
 
 # The Phase 18 section stops the Kafka container on purpose. If anything between the stop and the
 # start fails - a failed check under `set -e`, or a Ctrl-C - the broker would be left down and
@@ -1429,7 +1431,7 @@ if redis_cli PING >/dev/null 2>&1; then
     # password, from inside the pod) must not get PONG: before, it did, and so did anything on the network.
     if [ "$SMOKE_PLATFORM" = "k8s" ]; then
         check "Redis serves TLS only: a plain-text client does not get PONG" "True" \
-            "$(ctr_exec "$REDIS_CONTAINER" sh -c 'redis-cli -h 127.0.0.1 ping 2>&1' | grep -q PONG && echo False || echo True)"
+            "$(ctr_exec "$REDIS_CONTAINER" sh -c 'redis-cli -h 127.0.0.1 ping 2>&1' | contains PONG && echo False || echo True)"
     fi
     as_admin
     STATUS="$(request POST /api/products \
@@ -2374,7 +2376,7 @@ if ctr_available "$KAFKA_CONTAINER"; then
         "/var/lib/kafka/data" "$KAFKA_LOG_DIR"
 
     check "the orders.placed topic exists" "True" \
-        "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed' && echo True || echo False)"
+        "$(printf '%s\n' "$TOPICS" | contains -x 'orders.placed' && echo True || echo False)"
 
     # Created by the application's NewTopic beans, not by a producer's first send: the broker runs
     # with auto.create.topics.enable=false, so a typo in a topic name is an error rather than a new
@@ -2387,11 +2389,11 @@ if ctr_available "$KAFKA_CONTAINER"; then
     # the backoff, and with jitter that is a different number every restart - a new pair of orphan
     # topics for ever. See OrderPlacedListener.
     check "the retry topics exist, named by index" "True" \
-        "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed-retry-0' \
-            && printf '%s\n' "$TOPICS" | grep -qx 'orders.placed-retry-1' && echo True || echo False)"
+        "$(printf '%s\n' "$TOPICS" | contains -x 'orders.placed-retry-0' \
+            && printf '%s\n' "$TOPICS" | contains -x 'orders.placed-retry-1' && echo True || echo False)"
 
     check "and so does the dead-letter topic" "True" \
-        "$(printf '%s\n' "$TOPICS" | grep -qx 'orders.placed-dlt' && echo True || echo False)"
+        "$(printf '%s\n' "$TOPICS" | contains -x 'orders.placed-dlt' && echo True || echo False)"
 
     # --- An order becomes a message, and the message becomes exactly one notification ----------
     as_customer
@@ -2484,12 +2486,12 @@ if ctr_available "$KAFKA_CONTAINER"; then
         --property print.key=true --timeout-ms 8000 2>/dev/null)"
 
     check "the order's event is on the topic" "True" \
-        "$(printf '%s' "$TOPIC_DUMP" | grep -q "\"orderId\":$KAFKA_ORDER_ID" && echo True || echo False)"
+        "$(printf '%s' "$TOPIC_DUMP" | contains "\"orderId\":$KAFKA_ORDER_ID" && echo True || echo False)"
 
     # The key is what routes a message to a partition, and Kafka guarantees order only WITHIN a
     # partition - so keying by order id is what keeps one order's events together and in sequence.
     check "and it is keyed by the order id, which is what fixes its partition" "True" \
-        "$(printf '%s' "$TOPIC_DUMP" | grep -q "^$KAFKA_ORDER_ID	" && echo True || echo False)"
+        "$(printf '%s' "$TOPIC_DUMP" | contains "^$KAFKA_ORDER_ID	" && echo True || echo False)"
 
     # --- A poison message must land on the DLT and must not block the partition -----------------
     DLT_BEFORE="$(topic_message_count orders.placed-dlt)"
@@ -3050,7 +3052,7 @@ check "and allows that origin" "$CORS_ORIGIN" \
 CORS_CART="$(preflight_headers "$CORS_ORIGIN" /api/cart GET authorization)"
 check "the preflight of an authenticated call is answered 200 and allows Authorization" "200|True" \
     "$(printf '%s\n' "$CORS_CART" | head -1 | awk '{print $2}')|$(printf '%s\n' "$CORS_CART" \
-        | header_of Access-Control-Allow-Headers | grep -qi authorization && echo True || echo False)"
+        | header_of Access-Control-Allow-Headers | contains -i authorization && echo True || echo False)"
 check "a preflight from an origin that is not allowed is refused (403)" "403" \
     "$(preflight_headers http://evil.example /api/auth/login POST content-type | head -1 | awk '{print $2}')"
 CORS_REAL="$(curl -sS -o /dev/null -D - "$BASE_URL/api/cart" -H "Origin: $CORS_ORIGIN" \
@@ -3425,7 +3427,7 @@ if ctr_available "${KAFKA_CONTAINER:-ecomdemo-kafka}"; then
     for topic in orders.created inventory.stock-reserved inventory.stock-rejected \
         payments.completed payments.failed; do
         for name in "$topic" "$topic-dlt"; do
-            printf '%s\n' "$SAGA_TOPICS" | grep -qx "$name" || MISSING_TOPICS="$MISSING_TOPICS $name"
+            printf '%s\n' "$SAGA_TOPICS" | contains -x "$name" || MISSING_TOPICS="$MISSING_TOPICS $name"
         done
     done
     check "the saga's five topics and their dead-letter topics exist" "" "${MISSING_TOPICS# }"
@@ -3651,11 +3653,11 @@ if ctr_available "${KAFKA_CONTAINER:-ecomdemo-kafka}" \
     for _ in $(seq 1 30); do
         RESET="$(kafka kafka-consumer-groups.sh --group payment-service --topic inventory.stock-reserved \
             --reset-offsets --to-latest --execute 2>&1 || true)"
-        printf '%s' "$RESET" | grep -q "NEW-OFFSET" && break
+        printf '%s' "$RESET" | contains "NEW-OFFSET" && break
         sleep 2
     done
     check "and payment-service's consumer skips it (offset moved to the end)" "True" \
-        "$(printf '%s' "$RESET" | grep -q "NEW-OFFSET" && echo True || echo False)"
+        "$(printf '%s' "$RESET" | contains "NEW-OFFSET" && echo True || echo False)"
 
     ctr_start "$PAYMENT_CONTAINER" >/dev/null
     PAYMENT_WAS_STOPPED=false
@@ -3913,7 +3915,7 @@ while :; do
         "$BASE_URL/api/products/$LLM_PRODUCT/generate-description" -H "Authorization: Bearer $AUTH")"
     cp "$BODY" "$BODY.llm"
     if [ "$LLM_STATUS" = "503" ] && [ "$LLM_ATTEMPTS" -lt 3 ] \
-        && jget "d['message']" | grep -q "unusable answer"; then
+        && jget "d['message']" | contains "unusable answer"; then
         printf '        attempt %s: the model broke the limits, refused with 503 and retried\n' "$LLM_ATTEMPTS"
         continue
     fi
@@ -3942,7 +3944,7 @@ case "$LLM_STATUS" in
             "$(python3 -c "print('$LLM_TOKENS' != 'MISSING' and float('$LLM_TOKENS') > 0)")"
         ;;
     503)
-        if jget "d['message']" | grep -q "not configured"; then
+        if jget "d['message']" | contains "not configured"; then
             skip "the generator answers with the structured copy: description, tags, SEO title" \
                 "no language model configured. To run it: set AI_CHAT_PROVIDER=openai and OPENAI_API_KEY in .env, or install Ollama on the host, run 'ollama pull llama3.2' and set AI_CHAT_PROVIDER=ollama; then 'docker compose up -d catalog-service' and run this script again"
         else
@@ -4076,7 +4078,7 @@ case "$SEARCH_BACKFILL_STATUS" in
             "$(python3 -c "print('$SEARCH_INDEXING' != 'MISSING' and float('$SEARCH_INDEXING') > 0)")"
         ;;
     503)
-        if python3 -c "import json; print(json.load(open('$BODY.search'))['message'])" | grep -q "not configured"; then
+        if python3 -c "import json; print(json.load(open('$BODY.search'))['message'])" | contains "not configured"; then
             skip "the phase's natural-language query ranks the product it means first" \
                 "no embedding model configured. To run it: install Ollama on the host, run 'ollama pull nomic-embed-text' and set AI_EMBEDDING_PROVIDER=ollama in .env (or AI_EMBEDDING_PROVIDER=openai with OPENAI_API_KEY); then 'docker compose up -d catalog-service' and run this script again"
         else
@@ -4085,7 +4087,7 @@ case "$SEARCH_BACKFILL_STATUS" in
         as_anonymous
         check "search without a model is a 503 that says when to retry" "True" \
             "$(curl -sS -o /dev/null -D - "$BASE_URL/api/products/search?q=laptop" \
-                | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+                | contains -i '^retry-after: [1-9]' && echo True || echo False)"
         ;;
     *)
         fail "the backfill job starts, or is refused with 503 when there is no model" "202 or 503" \
@@ -4231,7 +4233,7 @@ case "$ASSISTANT_STATUS" in
             "$(python3 -c "print('$ASSISTANT_CHATS_AFTER' != 'MISSING' and float('$ASSISTANT_CHATS_AFTER') > float('${ASSISTANT_CHATS_BEFORE/MISSING/0}'))")"
         ;;
     503)
-        if jget "d['message']" | grep -q "not configured"; then
+        if jget "d['message']" | contains "not configured"; then
             skip "the assistant answers a product question and refuses another customer's order" \
                 "no models configured. It needs a chat model AND an embedding model: set AI_CHAT_PROVIDER=ollama and AI_EMBEDDING_PROVIDER=ollama in .env (after 'ollama pull qwen2.5:7b' and 'ollama pull nomic-embed-text' on the host), or both to openai with OPENAI_API_KEY; then 'docker compose up -d assistant-service' and run this script again"
         else
@@ -4240,7 +4242,7 @@ case "$ASSISTANT_STATUS" in
         check "the assistant without a model is a 503 that says when to retry" "True" \
             "$(curl -sS -o /dev/null -D - -X POST "$BASE_URL/api/assistant/chat" \
                 -H "Authorization: Bearer $CUSTOMER_TOKEN" -H 'Content-Type: application/json' \
-                -d '{"message":"hello"}' | grep -qi '^retry-after: [1-9]' && echo True || echo False)"
+                -d '{"message":"hello"}' | contains -i '^retry-after: [1-9]' && echo True || echo False)"
         ;;
     *)
         fail "the assistant answers, or refuses with 503 when there is no model" "200 or 503" \
@@ -4301,7 +4303,7 @@ check "the API is served over HTTPS" "True" \
 check "the plain-HTTP port answers 301, not the API" "301" \
     "$(curl -s -o /dev/null -w '%{http_code}' "$HTTP_INGRESS/api/products")"
 check "and the redirect points at HTTPS" "True" \
-    "$(curl -s -o /dev/null -w '%{redirect_url}' "$HTTP_INGRESS/api/products" | grep -q '^https://' && echo True || echo False)"
+    "$(curl -s -o /dev/null -w '%{redirect_url}' "$HTTP_INGRESS/api/products" | contains '^https://' && echo True || echo False)"
 check "a request with a Bearer token over plain HTTP is also only redirected, never answered" "301" \
     "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer not-a-real-token' "$HTTP_INGRESS/api/orders")"
 check "the certificate verifies against the local CA, for localhost" "Verify return code: 0 (ok)" \
@@ -4332,7 +4334,7 @@ check "a plain-text Kafka client gets no answer from kafka:9092" "True" \
 # into the broker's pod for these checks, never printed, deleted after) reads orders.placed, its topic, without a
 # consumer group (one partition at a time), and is refused payments.completed, which no ACL gives it.
 check "a TLS client without a client certificate is refused by kafka:9092" "True" \
-    "$(kube exec statefulset/kafka -c kafka -- sh -c 'printf "security.protocol=SSL\nssl.truststore.type=PEM\nssl.truststore.location=/etc/ecomdemo-tls/ca.crt\nrequest.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/smoke-no-cert.properties && timeout 60 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-no-cert.properties --list 2>&1; rm -f /tmp/smoke-no-cert.properties' | grep -q 'SslAuthenticationException' && echo True || echo False)"
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'printf "security.protocol=SSL\nssl.truststore.type=PEM\nssl.truststore.location=/etc/ecomdemo-tls/ca.crt\nrequest.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/smoke-no-cert.properties && timeout 60 /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-no-cert.properties --list 2>&1; rm -f /tmp/smoke-no-cert.properties' | contains 'SslAuthenticationException' && echo True || echo False)"
 check "notification-service's client certificate is copied into the broker's pod for the next two checks" "True" \
     "$(kube get secret notification-service-client-tls -o json | python3 -c '
 import base64, json, sys
@@ -4341,9 +4343,9 @@ sys.stdout.write(base64.b64decode(data["tls.key"]).decode() + base64.b64decode(d
         | kube exec -i statefulset/kafka -c kafka -- sh -c 'umask 077 && cat > /tmp/smoke-notification.pem && printf "security.protocol=SSL\nssl.truststore.type=PEM\nssl.truststore.location=/etc/ecomdemo-tls/ca.crt\nssl.keystore.type=PEM\nssl.keystore.location=/tmp/smoke-notification.pem\nrequest.timeout.ms=5000\ndefault.api.timeout.ms=10000\n" > /tmp/smoke-notification.properties' \
         && echo True || echo False)"
 check "notification-service's certificate reads orders.placed, its own topic" "True" \
-    "$(kube exec statefulset/kafka -c kafka -- sh -c 'for partition in 0 1 2; do timeout 60 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-notification.properties --topic orders.placed --partition "$partition" --offset earliest --max-messages 1 --timeout-ms 10000 2>&1; done' | grep -q 'Processed a total of 1 messages' && echo True || echo False)"
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'for partition in 0 1 2; do timeout 60 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-notification.properties --topic orders.placed --partition "$partition" --offset earliest --max-messages 1 --timeout-ms 10000 2>&1; done' | contains 'Processed a total of 1 messages' && echo True || echo False)"
 check "but may not read payments.completed: no ACL gives it that topic" "True" \
-    "$(kube exec statefulset/kafka -c kafka -- sh -c 'timeout 60 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-notification.properties --topic payments.completed --partition 0 --offset earliest --max-messages 1 --timeout-ms 10000 2>&1' | grep -q 'TopicAuthorizationException' && echo True || echo False)"
+    "$(kube exec statefulset/kafka -c kafka -- sh -c 'timeout 60 /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --command-config /tmp/smoke-notification.properties --topic payments.completed --partition 0 --offset earliest --max-messages 1 --timeout-ms 10000 2>&1' | contains 'TopicAuthorizationException' && echo True || echo False)"
 kube exec statefulset/kafka -c kafka -- rm -f /tmp/smoke-notification.pem /tmp/smoke-notification.properties
 # KI-058: every database is TLS-only. From inside its own pod (with the password): a plain-text TCP client
 # is refused by pg_hba.conf ("no encryption"). Phase 35: the database also requires the CLIENT's certificate.
@@ -4354,9 +4356,9 @@ kube exec statefulset/kafka -c kafka -- rm -f /tmp/smoke-notification.pem /tmp/s
 for database in db catalog-db customer-db inventory-db notification-db payment-db; do
     case "$database" in db) database_user=ecomdemo ;; *) database_user="${database%-db}" ;; esac
     check "$database refuses a plain-text client" "True" \
-        "$(kube exec "statefulset/$database" -c postgres -- sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql "host=127.0.0.1 sslmode=disable user=$POSTGRES_USER dbname=$POSTGRES_DB" -Atc "select 1" 2>&1' | grep -q 'no encryption' && echo True || echo False)"
+        "$(kube exec "statefulset/$database" -c postgres -- sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql "host=127.0.0.1 sslmode=disable user=$POSTGRES_USER dbname=$POSTGRES_DB" -Atc "select 1" 2>&1' | contains 'no encryption' && echo True || echo False)"
     check "$database: verify-full TLS as its Service name, then refused without a client certificate" "True" \
-        "$(kube exec "statefulset/$database" -c postgres -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql \"host=$database sslmode=verify-full sslrootcert=/etc/ecomdemo-tls/ca.crt user=\$POSTGRES_USER dbname=\$POSTGRES_DB\" -Atc 'select 1' 2>&1" | grep -q 'requires a valid client certificate' && echo True || echo False)"
+        "$(kube exec "statefulset/$database" -c postgres -- sh -c "PGPASSWORD=\"\$POSTGRES_PASSWORD\" psql \"host=$database sslmode=verify-full sslrootcert=/etc/ecomdemo-tls/ca.crt user=\$POSTGRES_USER dbname=\$POSTGRES_DB\" -Atc 'select 1' 2>&1" | contains 'requires a valid client certificate' && echo True || echo False)"
     check "$database: its service's connections present the client certificate /CN=$database_user" "/CN=$database_user" \
         "$(kube exec "statefulset/$database" -c postgres -- sh -c 'psql -h /var/run/postgresql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "select distinct client_dn from pg_stat_ssl where client_dn is not null"' 2>&1 | tr -d '\r ')"
 done
@@ -4368,8 +4370,8 @@ done
 # deleted after) gets PONG. Without the password a certificate is not enough: "Redis refuses a client that has
 # no password" in the Caching section runs with the pod's certificate.
 check "Redis refuses a TLS client without a client certificate" "True" \
-    "$(if ctr_exec "$REDIS_CONTAINER" sh -c 'redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt ping 2>&1' | grep -q PONG; then echo False
-       else kube logs deployment/cache -c redis --since=60s | grep -q 'peer did not return a certificate' && echo True || echo False; fi)"
+    "$(if ctr_exec "$REDIS_CONTAINER" sh -c 'redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt ping 2>&1' | contains PONG; then echo False
+       else kube logs deployment/cache -c redis --since=60s | contains 'peer did not return a certificate' && echo True || echo False; fi)"
 REDIS_FOREIGN="$(mktemp -d)"
 openssl req -x509 -newkey rsa:2048 -nodes -keyout "$REDIS_FOREIGN/ca.key" -subj /CN=smoke-foreign-ca -days 1 \
     -out "$REDIS_FOREIGN/ca.crt" 2>/dev/null
@@ -4381,8 +4383,8 @@ openssl x509 -req -in "$REDIS_FOREIGN/client.csr" -CA "$REDIS_FOREIGN/ca.crt" -C
 check "Redis refuses a client certificate from another CA" "True" \
     "$(if cat "$REDIS_FOREIGN/client.key" "$REDIS_FOREIGN/client.crt" \
             | ctr_exec -i "$REDIS_CONTAINER" sh -c 'umask 077 && cat > /tmp/smoke-foreign.pem && redis-cli --tls --cacert /etc/ecomdemo-tls/ca.crt --cert /tmp/smoke-foreign.pem --key /tmp/smoke-foreign.pem ping 2>&1; rm -f /tmp/smoke-foreign.pem' \
-            | grep -q PONG; then echo False
-       else kube logs deployment/cache -c redis --since=60s | grep -q 'certificate verify failed' && echo True || echo False; fi)"
+            | contains PONG; then echo False
+       else kube logs deployment/cache -c redis --since=60s | contains 'certificate verify failed' && echo True || echo False; fi)"
 rm -f "$REDIS_FOREIGN/ca.key" "$REDIS_FOREIGN/ca.crt" "$REDIS_FOREIGN/client.key" "$REDIS_FOREIGN/client.csr" \
     "$REDIS_FOREIGN/client.ext" "$REDIS_FOREIGN/client.crt"
 rmdir "$REDIS_FOREIGN"
@@ -4412,20 +4414,20 @@ for redis_client in catalog-service gateway-service assistant-service; do
     check "$redis_client's client certificate, with no password, gets PONG from Redis" "PONG" \
         "$(redis_as "$redis_client-client-tls" PING | tr -d ' ')"
     check "$redis_client's Redis user may read its own key ($own_key)" "True" \
-        "$(redis_as "$redis_client-client-tls" $read_cmd "$own_key" $read_args | grep -qE "NOPERM|NOAUTH|ERR|rror" && echo False || echo True)"
+        "$(redis_as "$redis_client-client-tls" $read_cmd "$own_key" $read_args | contains -E "NOPERM|NOAUTH|ERR|rror" && echo False || echo True)"
     check "$redis_client's Redis user is refused another service's key (NOPERM)" "True" \
-        "$(redis_as "$redis_client-client-tls" $read_cmd "$foreign_key" $read_args | grep -q "$refusal" && echo True || echo False)"
+        "$(redis_as "$redis_client-client-tls" $read_cmd "$foreign_key" $read_args | contains "$refusal" && echo True || echo False)"
 done
 check "catalog-service's Redis user is refused FLUSHALL" "True" \
-    "$(redis_as catalog-service-client-tls FLUSHALL | grep -q "NOPERM User catalog" && echo True || echo False)"
+    "$(redis_as catalog-service-client-tls FLUSHALL | contains "NOPERM User catalog" && echo True || echo False)"
 # KI-074: the catalogue cache clears with SCAN; KEYS (one blocking walk of the whole keyspace) is not granted.
 check "catalog-service's Redis user is refused KEYS (KI-074: the cache clears with SCAN)" "True" \
-    "$(redis_as catalog-service-client-tls KEYS 'productList::*' | grep -q "NOPERM User catalog" && echo True || echo False)"
+    "$(redis_as catalog-service-client-tls KEYS 'productList::*' | contains "NOPERM User catalog" && echo True || echo False)"
 check "a cluster certificate whose CN is not a Redis user gets NOAUTH (customer-service's)" "True" \
-    "$(redis_as customer-service-client-tls PING | grep -q NOAUTH && echo True || echo False)"
+    "$(redis_as customer-service-client-tls PING | contains NOAUTH && echo True || echo False)"
 # KI-073: app uses no Redis key and is no Redis client, so the ACL has no user for its certificate (CN ecomdemo).
 check "app's client certificate is no Redis user (KI-073): NOAUTH" "True" \
-    "$(redis_as app-client-tls PING | grep -q NOAUTH && echo True || echo False)"
+    "$(redis_as app-client-tls PING | contains NOAUTH && echo True || echo False)"
 check "app serves HTTPS and its certificate verifies against the cluster CA (as localhost)" "0" \
     "$(curl -s -o /dev/null -w '%{ssl_verify_result}' "$APP_URL/actuator/health")"
 check "payment-service too" "0" \
