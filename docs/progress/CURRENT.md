@@ -5,7 +5,7 @@
 - **Updated:** 2026-11-04
 - **Fix:** KI-032 (the catalogue cache's hit rate is not observable: no `cache_gets_total` at all). Re-checked against the code; the owner said "continue on next" after KI-031
 - **Branch:** fix/ki-032-cache-metrics (cut from `main` at `d939733`)
-- **Step:** TESTING
+- **Step:** PR_OPEN (#112), waiting on CI
 - **Waiting for user:** no
 - **History:** KI-031 (PR #110) merged as `d939733`, merge-verified 2026-11-04 (tip `16438cd` in `main`; `./mvnw -B test` on `main`: 0 failures, the 29 Docker-only errors in 4 classes). Tags for the owner (403 here): `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`. Web: the approved chore for KI-030/031's stale rows waits for web PR #61 (one PR at a time)
 
@@ -13,10 +13,11 @@
 - [x] Re-checked: Boot binds `RedisCacheMetrics` only to a `RedisCache`; `LoggingCache` hides it; the writer collects no statistics
 - [x] Red first: `CacheMetricsTest` (4 of 4 red on `main`: no `cache.gets` meter for either cache)
 - [x] Fix: `collectStatistics()`; `CacheMeterBinderProvider<LoggingCache>` (named class) binding `RedisCacheMetrics` to `LoggingCache.getDelegate()`; dashboard panel 12 "Catalogue cache hit ratio" (`service="catalog-service"`); DashboardMetricsTest (`cache_gets_total` Boot-provided, panel pinned); smoke check (both caches' series, reads counted); docs (KNOWN_ISSUES, decisions, README caching section)
-- [ ] Tests, docs (KNOWN_ISSUES, decisions, README), PR with `run-smoke`, CI, STOP
+- [x] Full unit run: 0 failures (29 Docker-only errors, as on `main`); fix `53daaa1`; PR #112 with `run-smoke`
+- [ ] CI green, then STOP for review
 
 ## Next action
-CacheMetricsTest and DashboardMetricsTest green; run the reactor unit tests, commit, PR with `run-smoke`, CI, STOP.
+Watch PR #112 CI; fix anything red; when green, STOP for the owner's review.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
