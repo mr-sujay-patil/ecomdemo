@@ -204,6 +204,42 @@ class CacheApiIT extends CatalogIntegrationTest {
         }
     }
 
+    /**
+     * KI-062: the smoke test's burst sends 40 catalogue reads at once into a cold page cache, and each miss used to
+     * run the page query and call inventory-service. On a real Redis, one cold page read by 20 callers at once must
+     * be loaded, and so written to the cache, once. The cache's own statistics (KI-032) count the writes.
+     */
+    @Test
+    @DisplayName("a cold page read by 20 callers at once is loaded once, not once per caller (KI-062)")
+    void concurrentColdReadsLoadThePageOnce() throws Exception {
+        clearCaches();
+        org.springframework.data.redis.cache.RedisCache listing = (org.springframework.data.redis.cache.RedisCache)
+                ((LoggingCache) cacheManager.getCache(CacheNames.PRODUCT_LIST)).getDelegate();
+        long putsBefore = listing.getStatistics().getPuts();
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(20);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        try {
+            List<java.util.concurrent.Future<com.ecomdemo.catalog.dto.ProductPage>> pages = new ArrayList<>();
+            for (int i = 0; i < 20; i++) {
+                pages.add(pool.submit(() -> {
+                    start.await();
+                    return productService.findPage(0, 7);
+                }));
+            }
+            start.countDown();
+            for (java.util.concurrent.Future<com.ecomdemo.catalog.dto.ProductPage> page : pages) {
+                assertThat(page.get(30, java.util.concurrent.TimeUnit.SECONDS)).isNotNull();
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(listing.getStatistics().getPuts() - putsBefore)
+                .as("writes of the one cold page p0:7 to Redis")
+                .isEqualTo(1);
+    }
+
     @Test
     @DisplayName("an update refreshes the entry rather than just dropping it")
     void updateWritesThroughToTheCache() {
