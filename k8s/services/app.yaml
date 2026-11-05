@@ -1,11 +1,13 @@
 # ecomdemo-app, the order service: carts, orders, the batch jobs, and both ends of the checkout saga.
 #
-# ONE replica, deliberately, and the only service here that must not scale out yet. It runs
-# scheduled work - the outbox relay every second, the outbox cleanup and the nightly sales report -
-# and every replica would run all of it. Two relays reading the same outbox would publish rows twice
-# (absorbed downstream, but pointless) and two sales reports would collide on Spring Batch's
-# once-per-date rule. Making it scale means electing one leader for the schedules (ShedLock, or a
-# Kubernetes Lease), which is a follow-up rather than this phase.
+# ONE replica, deliberately, and the only service here that does not scale out yet. It runs
+# scheduled work - the outbox relay every second, the outbox cleanup, the saga deadline sweep and the
+# nightly sales report - and every replica would run all of it. None of that would be WRONG: only
+# one relay publishes at a time (a PostgreSQL advisory lock per batch, fix KI-002), the cleanup and
+# the sweep are idempotent (KI-038), and a second sales report for the same day is refused by
+# Spring Batch's once-per-date rule (KI-033). It would be waste: N relays polling, N sweeps asking
+# the same participants, and a refused report logged as an error every night. Scaling it cleanly
+# means electing one leader for the schedules (ShedLock, or a Kubernetes Lease): a phase of its own.
 #
 # Every service file has the same four objects, explained once here:
 #
