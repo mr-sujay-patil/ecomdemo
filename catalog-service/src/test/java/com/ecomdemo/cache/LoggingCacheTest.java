@@ -99,6 +99,26 @@ class LoggingCacheTest {
         assertThat(cache.get("p0:50", () -> "page")).isEqualTo("page");
     }
 
+    @Test
+    @DisplayName("a write that fails (Redis down) still returns the loaded value, and does not load twice")
+    void aFailedPutStillReturnsTheValue() {
+        AtomicInteger loads = new AtomicInteger();
+        LoggingCache cache = new LoggingCache(new UnlockedCache() {
+            @Override
+            public void put(Object key, Object value) {
+                throw new IllegalStateException("Redis down");
+            }
+        });
+
+        String value = cache.get("p0:50", () -> {
+            loads.incrementAndGet();
+            return "page";
+        });
+
+        assertThat(value).isEqualTo("page");
+        assertThat(loads.get()).isEqualTo(1);
+    }
+
     private static List<String> callTogether(Callable<String> call) throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(CALLERS);
         CountDownLatch start = new CountDownLatch(1);
@@ -122,7 +142,7 @@ class LoggingCacheTest {
     }
 
     /** Like Spring Data Redis's writer without locking: a read-through that checks, loads and puts, unguarded. */
-    private static final class UnlockedCache implements Cache {
+    private static class UnlockedCache implements Cache {
         private final Map<Object, Object> store = new ConcurrentHashMap<>();
 
         @Override
