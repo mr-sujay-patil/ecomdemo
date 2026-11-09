@@ -2,22 +2,22 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-11-04
-- **Fix:** KI-083 (`k8s/services/app.yaml`'s header argues one replica from a double-publishing relay that fix KI-002's lock prevents), with KI-033 moved to Accepted limits (the comment's remaining reason). The owner: "continue on the next task"
-- **Branch:** fix/ki-083-app-one-replica-reasons (cut from `main` at `eeaa277`)
-- **Step:** PR_OPEN (#114), waiting on CI
-- **Waiting for user:** no
-- **History:** KI-082 (PR #113) merged as `eeaa277`, merge-verified 2026-11-04 (tip `f191648` in `main`; the 5 `test-smoke-*.sh` pass; `./mvnw -B test` 0 failures, 29 Docker-only errors). Web PR #65 (KI-047) approved, merges when its CI is green. Tags for the owner (403 here): `ki-082-fixed` `eeaa277`, `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
+- **Updated:** 2026-11-05
+- **Fix:** KI-062 (the burst's admitted requests come back 503: a cold page cache stampedes catalog-service, timeouts open the gateway's breaker). The owner: "continue", on the recommendation to take KI-062
+- **Branch:** fix/ki-062-listing-stampede (cut from `main` at `e836bd3`)
+- **Step:** PR_OPEN (#115), CI green, waiting for the owner
+- **Waiting for user:** yes: review of PR #115 ("approved, merge it")
+- **History:** KI-083 (PR #114) merged as `e836bd3`, merge-verified 2026-11-05 (`./mvnw -B test` 0 failures, 29 Docker-only errors). Tags for the owner (403 here): `ki-083-fixed` `e836bd3`, `ki-082-fixed` `eeaa277`, `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
-- [x] Re-checked each app schedule: relay (KI-002 lock: one publisher), outbox cleanup (idempotent DELETE), saga sweep (KI-038, accepted), sales report (KI-033: a second run for the day is refused)
-- [x] Fix: app.yaml header (schedules safe in N replicas, waste not correctness, leader election a phase); KI-033 to Accepted limits; KI-083 Fixed; decisions `[Fix KI-083]`
-- [x] No automated test (a comment's wording): said in the PR; the manifest still parses (PyYAML, all documents); no test reads the old wording
-- [x] PR #114
-- [ ] CI green, then STOP for review
+- [x] Re-checked: CI bursts 1, 8, 114 x 503; `findPage` `@Cacheable` without `sync`; `DefaultRedisCacheWriter.get(.., Supplier, ..)` only locks with `enableLocking()` (a Redis lock key `productList~lock` the `catalog` ACL user may not touch); breaker window 10, min 5, 50 %, 10 s open
+- [x] Red first: `LoggingCacheTest` red on `main` (20 concurrent misses ran the loader 20 times, expected 1); `CacheApiIT.concurrentColdReadsLoadThePageOnce` (CI, Docker)
+- [x] Fix: per-key single flight in `LoggingCache.get(key, loader)` (a failed load not cached, a failed write still returns the value); `findPage` `@Cacheable(sync = true)`; catalog-service unit run 96 tests, 0 failures (5 Docker-only errors, CatalogSchemaTest); docs (KNOWN_ISSUES, decisions)
+- [x] PR #115 with `run-smoke`
+- [x] CI green on `b43568e` (Build and test with CacheApiIT, Trivy, OWASP, smoke script tests, compose smoke 477 passed / 0 failed); the burst: **150 x 200, 150 x 429, 0 x 503** (was 1, 8, 114 x 503)
 
 ## Next action
-Watch PR #114 CI; when green, STOP for the owner's review.
+STOPPED for the owner's review of PR #115. On "approved, merge it": merge commit, merge-verify (`./mvnw -B test` on `main`), tag `ki-062-fixed` for the owner. Web: the Dependabot chore (branch `chore/dependabot-hold-opentelemetry`, `882a3df`) waits for web PR #67 to free the one-PR slot.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

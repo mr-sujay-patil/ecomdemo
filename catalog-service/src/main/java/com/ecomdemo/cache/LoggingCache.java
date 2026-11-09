@@ -1,6 +1,8 @@
 package com.ecomdemo.cache;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.Cache;
@@ -31,6 +33,9 @@ public class LoggingCache implements Cache {
 
     private final Cache delegate;
 
+    /** One lock per key being loaded right now (KI-062); removed once the value is in the cache. */
+    private final ConcurrentMap<Object, Object> loading = new ConcurrentHashMap<>();
+
     public LoggingCache(Cache delegate) {
         this.delegate = delegate;
     }
@@ -55,24 +60,67 @@ public class LoggingCache implements Cache {
     }
 
     /**
-     * The read-through form: Spring calls this with the method it would otherwise invoke.
+     * The read-through form, for {@code @Cacheable(sync = true)}: Spring calls this with the method it would otherwise
+     * invoke.
      *
      * <p>A miss cannot be detected by inspecting the return value here — the loader has already
      * run by the time it comes back — so the delegate is asked first and the loader is only used
      * when that finds nothing. That is also what makes the logging honest: the "miss" line is
      * written before the database is touched, not after.
+     *
+     * <p><strong>One caller per key loads (KI-062).</strong> Spring Data Redis's cache writer does not serialise
+     * loaders unless it locks through Redis, with a lock key ({@code productList~lock}) the {@code catalog} ACL user
+     * may not touch and one lock for the whole cache. So without this, 40 concurrent misses on a cold catalogue page
+     * ran 40 page queries and 40 inventory calls, the slowest passed the gateway's 2 s timeout, and its breaker
+     * opened. Here the first caller of a key takes that key's lock, checks again, loads and puts; the others wait on
+     * the same lock and then find the value. Different keys never wait for each other. Per instance only: with N
+     * instances a cold key is loaded at most N times, which is the bound that matters.
      */
     @Override
     public <T> T get(Object key, Callable<T> valueLoader) {
-        ValueWrapper existing = delegate.get(key);
-        if (existing != null) {
-            logLookup(key, true);
-            @SuppressWarnings("unchecked")
-            T cached = (T) existing.get();
+        T cached = cached(key);
+        if (cached != null) {
             return cached;
         }
-        logLookup(key, false);
-        return delegate.get(key, valueLoader);
+        Object lock = loading.computeIfAbsent(key, k -> new Object());
+        try {
+            synchronized (lock) {
+                // Another caller may have loaded it while this one waited for the lock.
+                cached = cached(key);
+                if (cached != null) {
+                    return cached;
+                }
+                logLookup(key, false);
+                T value;
+                try {
+                    value = valueLoader.call();
+                } catch (Exception e) {
+                    throw new ValueRetrievalException(key, valueLoader, e);
+                }
+                try {
+                    delegate.put(key, value);
+                } catch (RuntimeException e) {
+                    // As CacheConfig's error handler does for a failed PUT: the value is simply not cached. Thrown
+                    // from here, Spring would treat it as a failed GET and run the method a second time.
+                    log.warn("cache PUT failed on {} for key {} — the value is simply not cached: {}",
+                            delegate.getName(), key, e.toString());
+                }
+                return value;
+            }
+        } finally {
+            loading.remove(key, lock);
+        }
+    }
+
+    /** The cached value for {@code key}, logged as a hit, or {@code null} on a miss (logged by the caller). */
+    @SuppressWarnings("unchecked")
+    private <T> T cached(Object key) {
+        ValueWrapper existing = delegate.get(key);
+        if (existing == null) {
+            return null;
+        }
+        logLookup(key, true);
+        return (T) existing.get();
     }
 
     private void logLookup(Object key, boolean hit) {

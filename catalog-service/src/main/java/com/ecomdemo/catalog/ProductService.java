@@ -103,7 +103,9 @@ public class ProductService {
      * ({@code productList::p0:50}) so each page is cached on its own; any write clears the whole
      * list cache, because a new product moves every later page.
      */
-    @Cacheable(cacheNames = CacheNames.PRODUCT_LIST, key = "'p' + #page + ':' + #size")
+    // sync: concurrent misses on one page load it once (KI-062, see LoggingCache.get(key, loader)); a cold page under
+    // a burst otherwise ran one page query and one inventory call per caller.
+    @Cacheable(cacheNames = CacheNames.PRODUCT_LIST, key = "'p' + #page + ':' + #size", sync = true)
     public ProductPage findPage(int page, int size) {
         Page<Product> found = productRepository.findAll(PageRequest.of(page, size, Sort.by("id")));
         List<Product> products = found.getContent();
