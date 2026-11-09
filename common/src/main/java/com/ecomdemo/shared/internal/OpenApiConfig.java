@@ -65,7 +65,7 @@ public class OpenApiConfig {
             `ApiError` schema.
             """;
 
-    /** Every property of a returned schema is required unless nullable (KI-084, KI-086). */
+    /** Every property of a returned schema is required, its null in its type (KI-084, KI-086, KI-087). */
     @Bean
     public OpenApiCustomizer responseSchemaContract() {
         return new ResponseSchemaContract();

@@ -55,11 +55,12 @@ public final class PublishedApiDocs {
     }
 
     /**
-     * What a response is promised to contain (KI-084, KI-086): every property of a schema a
-     * response returns is {@code required} unless it is nullable, a nullable one is not, and a
-     * {@code $ref} has no sibling {@code type}. Without {@code required} a generated client types
-     * every field as optional; a {@code type} next to a {@code $ref} must hold as well in
-     * OpenAPI 3.1, so {@code {$ref, type: "null"}} reads as "null only".
+     * What a response is promised to contain (KI-084, KI-086, KI-087): every property of a schema
+     * a response returns is {@code required}, a nullable one included (Jackson writes it, as
+     * {@code null}: the key is always there), and a {@code $ref} has no sibling {@code type}.
+     * Without {@code required} a generated client types every field as optional; a {@code type}
+     * next to a {@code $ref} must hold as well in OpenAPI 3.1, so {@code {$ref, type: "null"}}
+     * reads as "null only".
      */
     public static void assertResponseSchemasAreExact(JsonNode spec) {
         JsonNode schemas = spec.path("components").path("schemas");
@@ -78,8 +79,8 @@ public final class PublishedApiDocs {
                         .as("%s has no type beside its $ref (use anyOf for a nullable object)", where)
                         .isFalse();
                 assertThat(required.contains(property.getKey()))
-                        .as("%s is %s", where, nullable(value) ? "nullable, so not required" : "required")
-                        .isEqualTo(!nullable(value));
+                        .as("%s is required (its key is always written, as null when it has no value)", where)
+                        .isTrue();
             });
         }
     }

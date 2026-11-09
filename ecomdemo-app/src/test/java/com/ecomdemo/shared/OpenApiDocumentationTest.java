@@ -174,8 +174,13 @@ class OpenApiDocumentationTest {
         PublishedApiDocs.assertResponseSchemasAreExact(spec);
         assertThat(schema("CartResponse").path("required").valueStream().map(JsonNode::asString))
                 .containsExactlyInAnyOrder("id", "items", "totalAmount");
+        // KI-087: a nullable field is required too: its key is always written, as null. The null
+        // stays in its type.
         assertThat(schema("OrderResponse").path("required").valueStream().map(JsonNode::asString))
-                .doesNotContain("statusReason");
+                .contains("statusReason");
+        assertThat(schema("OrderResponse").path("properties").path("statusReason").path("type")
+                        .valueStream().map(JsonNode::asString))
+                .containsExactlyInAnyOrder("string", "null");
     }
 
     @Test
