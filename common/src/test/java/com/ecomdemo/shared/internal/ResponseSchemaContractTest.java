@@ -29,8 +29,8 @@ class ResponseSchemaContractTest {
 
         new ResponseSchemaContract().customise(api);
 
-        assertThat(schema(api, "Reply").getRequired()).containsExactly("id", "lines", "note", "pending");
-        assertThat(schema(api, "Line").getRequired()).containsExactly("name", "extra");
+        assertThat(schema(api, "Reply").getRequired()).containsExactlyInAnyOrder("id", "lines", "note", "pending");
+        assertThat(schema(api, "Line").getRequired()).containsExactlyInAnyOrder("name", "extra");
     }
 
     @Test

@@ -3,23 +3,21 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-09
-- **Fix:** KI-084 + KI-085 + KI-086 together (the published OpenAPI contract: no response schema lists `required`; a stale `unitPrice` text; a nullable object published as "null only"). Reported by the web team (web KI-016, KI-019, KI-021); the owner: "do the OpenAPI fixes" (2026-11-09)
-- **Branch:** fix/ki-084-085-086-openapi-contract (cut from `main` at `aa5da39`)
-- **Step:** PR_OPEN (#118): waiting for CI
-- **Waiting for user:** YES after CI is green: review of PR #118 (`approved, merge it`)
-- **History:** KI-036 (PR #117, another session's) merged as `e78d5e0`; merged into this branch 2026-11-09 (conflicts in decisions and this file, docs only: both sides kept). KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
+- **Fix:** KI-087 (KI-084's rule left nullable response fields out of `required`, but every key is always written: a client reads them as "may be missing"). Found by this session while moving the web's pin to `2ac9cdf`; part of the owner's "do the OpenAPI fixes" (2026-11-09)
+- **Branch:** fix/ki-087-response-required-includes-nullable (cut from `main` at `2ac9cdf`, the merge of PR #118)
+- **Step:** IN_PROGRESS: red and fix done, targeted tests green; full verify next
+- **Waiting for user:** no
+- **History:** KI-084/085/086 (PR #118) merged as `2ac9cdf` on the owner's `approved, merge it`, merge-verified 2026-11-09 (tip `8b1af75` in `main`, `main`'s tree equal to it; its full verify 974 tests, CI green). Tags for the owner (403 here): `ki-084-fixed`, `ki-085-fixed`, `ki-086-fixed` `2ac9cdf`, and those listed before
 
 ## Checklist
-- [x] Audit: every response record read with its factory; six fields could be null without saying so (`OrderResponse.statusReason`, `OrderStatusResponse.reason`, `JobExecutionResponse.startTime`, `endTime`, `failureMessage`, `ProductImportResponse.errorFile`); `CustomerResponse.fullName` is `NOT NULL`; `exitCode` comes from `ExitStatus`, never null
-- [x] Red first (`2a164d3`): `OpenApiDocumentationTest` 2 new tests red on `main` (`ApiError.status is required`; `unitPrice` says "not a snapshot"); `PublishedApiDocs.assertResponseSchemasAreExact` now runs in every service's docs test; assistant `ApiDocsIT` checks `pendingAction` is `anyOf`
-- [x] Fix (`1c6f4ff`): `ResponseSchemaContract` (common, an `OpenApiCustomizer` bean from `OpenApiConfig`); six fields `nullable = true`; the `unitPrice` text. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
-- [x] Docs: KNOWN_ISSUES KI-084, 085, 086; decisions `[Fix KI-084, KI-085, KI-086]`
-- [x] Full `./mvnw -B verify`: 11 modules, **971 tests, 0 failures, 0 errors**; every service's API documentation test ran (inventory 1, catalog 2, customer 1, notification 1, payment 1, assistant 2 with `pendingAction`, gateway 11, app 23)
-- [x] #117 merged as `e78d5e0`; `main` merged in (`5330d46`); full verify on the merged tree: 974 tests, 0 failures; PR #118
-- [ ] CI green on #118; STOP for the owner. Then the web pins the merge and drops its `PendingCartAddition | null` widening (web KI-021) and regenerates its types (web KI-016)
+- [x] Cause: nothing omits nulls (no `NON_NULL`, `@JsonInclude` or inclusion property in any `src/main`), so every response key is always written; `required` must list nullable properties too
+- [x] Red first (`fd0235a`): `ResponseSchemaContractTest.requiresEveryProperty` red on `main`; `PublishedApiDocs` and `OpenApiDocumentationTest` now expect every property required (`statusReason` required, typed `[string, null]`)
+- [x] Fix: `schema.setRequired(every property)`; the `anyOf` rewrite for a nullable object stays. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
+- [x] Docs: KNOWN_ISSUES KI-087; decisions `[Fix KI-087]`
+- [ ] Full `./mvnw -B verify`; PR; CI green; STOP for the owner. Then the web pins it: regenerated types, no `assumeResponsePropertiesPresent`, no `PendingCartAddition | null` widening
 
 ## Next action
-Wait for CI on PR #118. Green: STOP for `approved, merge it`. After the merge: merge-verify; the owner tags `ki-084-fixed`, `ki-085-fixed`, `ki-086-fixed`; then the web pins the merge (its own PR).
+Run the full `./mvnw -B verify`, open the PR, set KI-087 to Fixed (PR #N).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

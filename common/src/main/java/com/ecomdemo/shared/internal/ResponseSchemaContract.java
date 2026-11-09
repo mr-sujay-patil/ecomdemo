@@ -17,10 +17,12 @@ import org.springdoc.core.customizers.OpenApiCustomizer;
  *
  * <p>springdoc writes {@code required} only for what a request validates, so no response schema
  * had one, and a client generated from the document (the web app's, for one) typed every field of
- * every answer as optional: {@code price?: number} for a price that is never missing. The rule
- * applied here is the one the code already follows: a field of a response record is always there
- * unless it says {@code @Schema(nullable = true)}. So in each schema a response returns, every
- * property is listed as required except the nullable ones.
+ * every answer as optional: {@code price?: number} for a price that is never missing. Nothing in
+ * the backend leaves a field out of a response (no {@code NON_NULL}): every key is written, as
+ * {@code null} when it has no value. So in each schema a response returns, every property is
+ * listed as required, a nullable one included: {@code required} says the key is there, and the
+ * property's type says whether its value may be null (KI-087: the first version left nullable
+ * properties out, which a client reads as "may be missing").
  *
  * <p>A schema that a request body also uses is left alone: there a property can be optional
  * without being nullable, and {@code required} already comes from its validation.
@@ -61,13 +63,7 @@ final class ResponseSchemaContract implements OpenApiCustomizer {
                 continue;
             }
             schema.getProperties().replaceAll((property, value) -> objectOrNull(value));
-            List<String> required = new ArrayList<>();
-            schema.getProperties().forEach((property, value) -> {
-                if (!nullable(value)) {
-                    required.add(property);
-                }
-            });
-            schema.setRequired(required.isEmpty() ? null : required);
+            schema.setRequired(new ArrayList<>(schema.getProperties().keySet()));
         }
     }
 
