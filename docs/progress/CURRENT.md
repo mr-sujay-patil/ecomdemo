@@ -5,8 +5,8 @@
 - **Updated:** 2026-11-09
 - **Fix:** KI-087 (KI-084's rule left nullable response fields out of `required`, but every key is always written: a client reads them as "may be missing"). Found by this session while moving the web's pin to `2ac9cdf`; part of the owner's "do the OpenAPI fixes" (2026-11-09)
 - **Branch:** fix/ki-087-response-required-includes-nullable (cut from `main` at `2ac9cdf`, the merge of PR #118)
-- **Step:** IN_PROGRESS: red and fix done, targeted tests green; full verify next
-- **Waiting for user:** no
+- **Step:** PR_OPEN (#119): waiting for CI
+- **Waiting for user:** YES after CI is green: review of PR #119 (`approved, merge it`)
 - **History:** KI-084/085/086 (PR #118) merged as `2ac9cdf` on the owner's `approved, merge it`, merge-verified 2026-11-09 (tip `8b1af75` in `main`, `main`'s tree equal to it; its full verify 974 tests, CI green). Tags for the owner (403 here): `ki-084-fixed`, `ki-085-fixed`, `ki-086-fixed` `2ac9cdf`, and those listed before
 
 ## Checklist
@@ -14,10 +14,11 @@
 - [x] Red first (`fd0235a`): `ResponseSchemaContractTest.requiresEveryProperty` red on `main`; `PublishedApiDocs` and `OpenApiDocumentationTest` now expect every property required (`statusReason` required, typed `[string, null]`)
 - [x] Fix: `schema.setRequired(every property)`; the `anyOf` rewrite for a nullable object stays. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
 - [x] Docs: KNOWN_ISSUES KI-087; decisions `[Fix KI-087]`
-- [ ] Full `./mvnw -B verify`; PR; CI green; STOP for the owner. Then the web pins it: regenerated types, no `assumeResponsePropertiesPresent`, no `PendingCartAddition | null` widening
+- [x] Full `./mvnw -B verify`: 974 tests, 0 failures; PR #119
+- [ ] CI green on #119; STOP for the owner. Then the web pins it: regenerated types, no `assumeResponsePropertiesPresent`, no `PendingCartAddition | null` widening
 
 ## Next action
-Run the full `./mvnw -B verify`, open the PR, set KI-087 to Fixed (PR #N).
+Wait for CI on PR #119. Green: STOP for `approved, merge it`. After the merge: merge-verify; the owner tags `ki-087-fixed`; then the web pins the merge commit.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
