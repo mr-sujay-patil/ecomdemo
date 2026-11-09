@@ -5,17 +5,17 @@
 - **Updated:** 2026-11-09
 - **Fix:** KI-036 (no metrics cardinality budget is asserted). The owner: "continue", on the recommendation to take KI-036
 - **Branch:** fix/ki-036-meter-tag-budget (cut from `main` at `aa5da39`)
-- **Step:** BRANCHED
+- **Step:** TESTING
 - **Waiting for user:** no
 - **History:** KI-062 (PR #115) merged as `aa5da39`, merge-verified 2026-11-09 (`./mvnw -B test` 0 failures, 29 Docker-only errors; the compose burst had 0 x 503). The web Dependabot hold-back (branch `chore/dependabot-hold-opentelemetry`) is obsolete: web PR #68 moved to OpenTelemetry JS 3; not opened. Tags for the owner (403 here): `ki-062-fixed` `aa5da39`, `ki-083-fixed` `e836bd3`, `ki-082-fixed` `eeaa277`, `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
 
 ## Checklist
 - [x] Re-checked: meters tag outcome/type/key with closed sets; outbox ids are on a span; no lowCardinalityKeyValue; Boot's max-uri-tags at its default
-- [ ] Guard: `MeterTagBudgetTest` (ecomdemo-app; reads every module's main sources): meter tag keys and low-cardinality keys must be in a documented budget; a self-test proves it catches a per-entity tag (literal, constant, low-cardinality) and ignores span tags; max-uri-tags not raised
+- [x] Guard: `MeterTagBudgetTest` (ecomdemo-app; reads every module's main sources): meter tag keys and low-cardinality keys must be in a documented budget; a self-test proves it catches a per-entity tag (literal, constant, low-cardinality) and ignores span tags; max-uri-tags not raised. 3 of 3 pass; no defect to reproduce (a gap): the self-test is the red case
 - [ ] Docs, PR, CI, STOP
 
 ## Next action
-Commit the budget test.
+Docs done (KNOWN_ISSUES, decisions); full unit run, commit, PR, CI, STOP.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
