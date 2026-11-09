@@ -2,22 +2,23 @@
 
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
-- **Updated:** 2026-11-05
-- **Fix:** KI-062 (the burst's admitted requests come back 503: a cold page cache stampedes catalog-service, timeouts open the gateway's breaker). The owner: "continue", on the recommendation to take KI-062
-- **Branch:** fix/ki-062-listing-stampede (cut from `main` at `e836bd3`)
-- **Step:** PR_OPEN (#115), CI green, waiting for the owner
-- **Waiting for user:** yes: review of PR #115 ("approved, merge it")
-- **History:** KI-083 (PR #114) merged as `e836bd3`, merge-verified 2026-11-05 (`./mvnw -B test` 0 failures, 29 Docker-only errors). Tags for the owner (403 here): `ki-083-fixed` `e836bd3`, `ki-082-fixed` `eeaa277`, `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
+- **Updated:** 2026-11-09
+- **Fix:** KI-084 + KI-085 + KI-086 together (the published OpenAPI contract: no response schema lists `required`; a stale `unitPrice` text; a nullable object published as "null only"). Reported by the web team (web KI-016, KI-019, KI-021); the owner: "do the OpenAPI fixes" (2026-11-09)
+- **Branch:** fix/ki-084-085-086-openapi-contract (cut from `main` at `aa5da39`)
+- **Step:** IN_PROGRESS: red, fix and targeted tests done; full `./mvnw -B verify` next. The PR waits for PR #117 (KI-036, another session's) to merge: one open PR at a time
+- **Waiting for user:** no
+- **History:** KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
 
 ## Checklist
-- [x] Re-checked: CI bursts 1, 8, 114 x 503; `findPage` `@Cacheable` without `sync`; `DefaultRedisCacheWriter.get(.., Supplier, ..)` only locks with `enableLocking()` (a Redis lock key `productList~lock` the `catalog` ACL user may not touch); breaker window 10, min 5, 50 %, 10 s open
-- [x] Red first: `LoggingCacheTest` red on `main` (20 concurrent misses ran the loader 20 times, expected 1); `CacheApiIT.concurrentColdReadsLoadThePageOnce` (CI, Docker)
-- [x] Fix: per-key single flight in `LoggingCache.get(key, loader)` (a failed load not cached, a failed write still returns the value); `findPage` `@Cacheable(sync = true)`; catalog-service unit run 96 tests, 0 failures (5 Docker-only errors, CatalogSchemaTest); docs (KNOWN_ISSUES, decisions)
-- [x] PR #115 with `run-smoke`
-- [x] CI green on `b43568e` (Build and test with CacheApiIT, Trivy, OWASP, smoke script tests, compose smoke 477 passed / 0 failed); the burst: **150 x 200, 150 x 429, 0 x 503** (was 1, 8, 114 x 503)
+- [x] Audit: every response record read with its factory; six fields could be null without saying so (`OrderResponse.statusReason`, `OrderStatusResponse.reason`, `JobExecutionResponse.startTime`, `endTime`, `failureMessage`, `ProductImportResponse.errorFile`); `CustomerResponse.fullName` is `NOT NULL`; `exitCode` comes from `ExitStatus`, never null
+- [x] Red first (`2a164d3`): `OpenApiDocumentationTest` 2 new tests red on `main` (`ApiError.status is required`; `unitPrice` says "not a snapshot"); `PublishedApiDocs.assertResponseSchemasAreExact` now runs in every service's docs test; assistant `ApiDocsIT` checks `pendingAction` is `anyOf`
+- [x] Fix (`1c6f4ff`): `ResponseSchemaContract` (common, an `OpenApiCustomizer` bean from `OpenApiConfig`); six fields `nullable = true`; the `unitPrice` text. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
+- [x] Docs: KNOWN_ISSUES KI-084, 085, 086; decisions `[Fix KI-084, KI-085, KI-086]`
+- [ ] Full `./mvnw -B verify` (the service ITs, the assistant's `pendingAction` included)
+- [ ] PR once #117 has merged (merge `main` in first); CI green; STOP for the owner. Then the web pins the merge and drops its `PendingCartAddition | null` widening (web KI-021) and regenerates its types (web KI-016)
 
 ## Next action
-STOPPED for the owner's review of PR #115. On "approved, merge it": merge commit, merge-verify (`./mvnw -B test` on `main`), tag `ki-062-fixed` for the owner. Web: the Dependabot chore (branch `chore/dependabot-hold-opentelemetry`, `882a3df`) waits for web PR #67 to free the one-PR slot.
+Run the full `./mvnw -B verify` (Docker for the ITs). Then, when PR #117 is merged, merge `main` into this branch and open the PR.
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
