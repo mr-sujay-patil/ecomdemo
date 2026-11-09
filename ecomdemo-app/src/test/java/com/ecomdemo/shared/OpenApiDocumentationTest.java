@@ -2,6 +2,7 @@ package com.ecomdemo.shared;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ecomdemo.support.PublishedApiDocs;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -164,6 +165,27 @@ class OpenApiDocumentationTest {
                 .forEach(property -> assertThat(property.getValue().has("example"))
                         .as("%s.%s carries an example", name, property.getKey())
                         .isTrue()));
+    }
+
+    @Test
+    void apiDocs_everyResponseSchema_saysWhichPropertiesAreAlwaysThere() {
+        // KI-084: no response schema listed `required`, so a generated client typed every field
+        // as optional. Every property is required unless it is nullable.
+        PublishedApiDocs.assertResponseSchemasAreExact(spec);
+        assertThat(schema("CartResponse").path("required").valueStream().map(JsonNode::asString))
+                .containsExactlyInAnyOrder("id", "items", "totalAmount");
+        assertThat(schema("OrderResponse").path("required").valueStream().map(JsonNode::asString))
+                .doesNotContain("statusReason");
+    }
+
+    @Test
+    void apiDocs_aCartLinesUnitPrice_isThePriceItWasAddedAt() {
+        // KI-085: the text said "the catalogue price right now, not a snapshot", the opposite of
+        // what CartService has done since Phase 20a (the line snapshots name and price).
+        String description = schema("CartItemResponse").path("properties").path("unitPrice")
+                .path("description").asString("");
+
+        assertThat(description).contains("added").doesNotContain("not a snapshot");
     }
 
     private JsonNode schema(String name) {
