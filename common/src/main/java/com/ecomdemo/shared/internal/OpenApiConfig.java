@@ -9,6 +9,7 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
 import java.util.List;
+import org.springdoc.core.customizers.OpenApiCustomizer;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -63,6 +64,12 @@ public class OpenApiConfig {
             - Every failure returns the same shape, `{"status": <code>, "message": <text>}` - see the \
             `ApiError` schema.
             """;
+
+    /** Every property of a returned schema is required unless nullable (KI-084, KI-086). */
+    @Bean
+    public OpenApiCustomizer responseSchemaContract() {
+        return new ResponseSchemaContract();
+    }
 
     @Bean
     public OpenAPI ecomdemoOpenApi(

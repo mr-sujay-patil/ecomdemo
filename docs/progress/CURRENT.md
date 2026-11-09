@@ -3,20 +3,23 @@
 > The single source of truth for **in-fix** progress. Keep it under ~60 lines. Update and commit it at every step change and before every stop.
 
 - **Updated:** 2026-11-09
-- **Fix:** KI-036 (no metrics cardinality budget is asserted). The owner: "continue", on the recommendation to take KI-036
-- **Branch:** fix/ki-036-meter-tag-budget (cut from `main` at `aa5da39`)
-- **Step:** PR_OPEN (#117), waiting on CI
-- **Waiting for user:** no
-- **History:** KI-062 (PR #115) merged as `aa5da39`, merge-verified 2026-11-09 (`./mvnw -B test` 0 failures, 29 Docker-only errors; the compose burst had 0 x 503). The web Dependabot hold-back (branch `chore/dependabot-hold-opentelemetry`) is obsolete: web PR #68 moved to OpenTelemetry JS 3; not opened. Tags for the owner (403 here): `ki-062-fixed` `aa5da39`, `ki-083-fixed` `e836bd3`, `ki-082-fixed` `eeaa277`, `ki-032-fixed` `9ce4adf`, `ki-031-fixed` `d939733`, `ki-073-fixed` `b712df7`, `ki-076-fixed`/`ki-079-fixed` `f68f00b`, `ki-080-fixed` `f872e3d`, `ki-078-fixed` `d69b738`, `ki-077-fixed` `8d36b19`, `ki-074-fixed`/`ki-075-fixed` `e0a13eb`, `phase-37-complete` `4767124`
+- **Fix:** KI-084 + KI-085 + KI-086 together (the published OpenAPI contract: no response schema lists `required`; a stale `unitPrice` text; a nullable object published as "null only"). Reported by the web team (web KI-016, KI-019, KI-021); the owner: "do the OpenAPI fixes" (2026-11-09)
+- **Branch:** fix/ki-084-085-086-openapi-contract (cut from `main` at `aa5da39`)
+- **Step:** PR_OPEN (#118): waiting for CI
+- **Waiting for user:** YES after CI is green: review of PR #118 (`approved, merge it`)
+- **History:** KI-036 (PR #117, another session's) merged as `e78d5e0`; merged into this branch 2026-11-09 (conflicts in decisions and this file, docs only: both sides kept). KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
 
 ## Checklist
-- [x] Re-checked: meters tag outcome/type/key with closed sets; outbox ids are on a span; no lowCardinalityKeyValue; Boot's max-uri-tags at its default
-- [x] Guard: `MeterTagBudgetTest` (ecomdemo-app; reads every module's main sources): meter tag keys and low-cardinality keys must be in a documented budget; a self-test proves it catches a per-entity tag (literal, constant, low-cardinality) and ignores span tags; max-uri-tags not raised. 3 of 3 pass; no defect to reproduce (a gap): the self-test is the red case
-- [x] Docs (KNOWN_ISSUES, decisions); full unit run 0 failures; PR #117
-- [ ] CI green; STOP for review
+- [x] Audit: every response record read with its factory; six fields could be null without saying so (`OrderResponse.statusReason`, `OrderStatusResponse.reason`, `JobExecutionResponse.startTime`, `endTime`, `failureMessage`, `ProductImportResponse.errorFile`); `CustomerResponse.fullName` is `NOT NULL`; `exitCode` comes from `ExitStatus`, never null
+- [x] Red first (`2a164d3`): `OpenApiDocumentationTest` 2 new tests red on `main` (`ApiError.status is required`; `unitPrice` says "not a snapshot"); `PublishedApiDocs.assertResponseSchemasAreExact` now runs in every service's docs test; assistant `ApiDocsIT` checks `pendingAction` is `anyOf`
+- [x] Fix (`1c6f4ff`): `ResponseSchemaContract` (common, an `OpenApiCustomizer` bean from `OpenApiConfig`); six fields `nullable = true`; the `unitPrice` text. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
+- [x] Docs: KNOWN_ISSUES KI-084, 085, 086; decisions `[Fix KI-084, KI-085, KI-086]`
+- [x] Full `./mvnw -B verify`: 11 modules, **971 tests, 0 failures, 0 errors**; every service's API documentation test ran (inventory 1, catalog 2, customer 1, notification 1, payment 1, assistant 2 with `pendingAction`, gateway 11, app 23)
+- [x] #117 merged as `e78d5e0`; `main` merged in (`5330d46`); full verify on the merged tree: 974 tests, 0 failures; PR #118
+- [ ] CI green on #118; STOP for the owner. Then the web pins the merge and drops its `PendingCartAddition | null` widening (web KI-021) and regenerates its types (web KI-016)
 
 ## Next action
-Watch PR #117 CI; when green, STOP for the owner's review.
+Wait for CI on PR #118. Green: STOP for `approved, merge it`. After the merge: merge-verify; the owner tags `ki-084-fixed`, `ki-085-fixed`, `ki-086-fixed`; then the web pins the merge (its own PR).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)

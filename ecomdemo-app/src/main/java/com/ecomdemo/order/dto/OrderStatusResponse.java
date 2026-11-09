@@ -18,7 +18,7 @@ public record OrderStatusResponse(
         @Schema(description = "PENDING, CONFIRMED or CANCELLED.", example = "CONFIRMED")
         OrderStatus status,
 
-        @Schema(description = "Why it was cancelled; null unless CANCELLED.", example = "Insufficient stock for 'Mouse': requested 3, available 2")
+        @Schema(description = "Why it was cancelled; null unless CANCELLED.", nullable = true, example = "Insufficient stock for 'Mouse': requested 3, available 2")
         String reason,
 
         @Schema(description = "When it left PENDING, UTC; null while PENDING.", example = "2026-09-21T18:30:03Z")

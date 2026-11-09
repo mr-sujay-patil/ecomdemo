@@ -1,5 +1,6 @@
 package com.ecomdemo.batch.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.batch.core.job.JobExecution;
@@ -27,8 +28,14 @@ import org.springframework.batch.core.job.JobExecution;
  * @param steps the per-step detail
  */
 public record JobExecutionResponse(long id, long instanceId, String jobName, String status,
-        String exitCode, LocalDateTime startTime, LocalDateTime endTime, long readCount,
-        long writeCount, long skipCount, String failureMessage,
+        String exitCode,
+        @Schema(description = "When this attempt began; null if it never started.", nullable = true)
+        LocalDateTime startTime,
+        @Schema(description = "When it finished; null while it is running.", nullable = true)
+        LocalDateTime endTime,
+        long readCount, long writeCount, long skipCount,
+        @Schema(description = "The first failure, with its causes; null unless the attempt failed.", nullable = true)
+        String failureMessage,
         List<StepExecutionResponse> steps) {
 
     /** How many links of a cause chain the failure message shows. */

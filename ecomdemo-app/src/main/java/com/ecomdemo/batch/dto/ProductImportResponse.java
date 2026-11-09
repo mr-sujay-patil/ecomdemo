@@ -1,5 +1,7 @@
 package com.ecomdemo.batch.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * The answer to an upload: what the job did, and where to look at what it refused.
  *
@@ -12,5 +14,6 @@ package com.ecomdemo.batch.dto;
  * @param errorFile the rejected rows, or null if there were none
  */
 public record ProductImportResponse(JobExecutionResponse execution, String inputFile,
+        @Schema(description = "The rejected rows; null if there were none.", nullable = true)
         String errorFile) {
 }
