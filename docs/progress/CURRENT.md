@@ -5,7 +5,7 @@
 - **Updated:** 2026-11-09
 - **Fix:** KI-084 + KI-085 + KI-086 together (the published OpenAPI contract: no response schema lists `required`; a stale `unitPrice` text; a nullable object published as "null only"). Reported by the web team (web KI-016, KI-019, KI-021); the owner: "do the OpenAPI fixes" (2026-11-09)
 - **Branch:** fix/ki-084-085-086-openapi-contract (cut from `main` at `aa5da39`)
-- **Step:** IN_PROGRESS: red, fix and targeted tests done; full `./mvnw -B verify` next. The PR waits for PR #117 (KI-036, another session's) to merge: one open PR at a time
+- **Step:** IN_PROGRESS: full verify green; the PR waits for PR #117 (KI-036, another session's) to merge: one open PR at a time
 - **Waiting for user:** no
 - **History:** KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
 
@@ -14,11 +14,11 @@
 - [x] Red first (`2a164d3`): `OpenApiDocumentationTest` 2 new tests red on `main` (`ApiError.status is required`; `unitPrice` says "not a snapshot"); `PublishedApiDocs.assertResponseSchemasAreExact` now runs in every service's docs test; assistant `ApiDocsIT` checks `pendingAction` is `anyOf`
 - [x] Fix (`1c6f4ff`): `ResponseSchemaContract` (common, an `OpenApiCustomizer` bean from `OpenApiConfig`); six fields `nullable = true`; the `unitPrice` text. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
 - [x] Docs: KNOWN_ISSUES KI-084, 085, 086; decisions `[Fix KI-084, KI-085, KI-086]`
-- [ ] Full `./mvnw -B verify` (the service ITs, the assistant's `pendingAction` included)
+- [x] Full `./mvnw -B verify`: 11 modules, **971 tests, 0 failures, 0 errors**; every service's API documentation test ran (inventory 1, catalog 2, customer 1, notification 1, payment 1, assistant 2 with `pendingAction`, gateway 11, app 23)
 - [ ] PR once #117 has merged (merge `main` in first); CI green; STOP for the owner. Then the web pins the merge and drops its `PendingCartAddition | null` widening (web KI-021) and regenerates its types (web KI-016)
 
 ## Next action
-Run the full `./mvnw -B verify` (Docker for the ITs). Then, when PR #117 is merged, merge `main` into this branch and open the PR.
+When PR #117 is merged: merge `main` into this branch (docs conflicts likely in CURRENT.md, KNOWN_ISSUES, decisions: keep both sides), run `./mvnw -B -pl ecomdemo-app -am verify`, open the PR, set KI-084/085/086 to Fixed (PR #N).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
