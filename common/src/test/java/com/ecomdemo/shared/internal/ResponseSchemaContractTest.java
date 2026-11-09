@@ -23,14 +23,14 @@ import org.junit.jupiter.api.Test;
 class ResponseSchemaContractTest {
 
     @Test
-    @DisplayName("a returned schema lists every property as required except the nullable ones")
-    void requiresWhatIsNotNullable() {
+    @DisplayName("a returned schema lists every property as required, the nullable ones too (KI-087)")
+    void requiresEveryProperty() {
         OpenAPI api = document();
 
         new ResponseSchemaContract().customise(api);
 
-        assertThat(schema(api, "Reply").getRequired()).containsExactly("id", "lines");
-        assertThat(schema(api, "Line").getRequired()).containsExactly("name");
+        assertThat(schema(api, "Reply").getRequired()).containsExactly("id", "lines", "note", "pending");
+        assertThat(schema(api, "Line").getRequired()).containsExactly("name", "extra");
     }
 
     @Test
