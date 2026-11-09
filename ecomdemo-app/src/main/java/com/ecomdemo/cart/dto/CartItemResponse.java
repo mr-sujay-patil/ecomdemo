@@ -13,7 +13,7 @@ public record CartItemResponse(
         @Schema(description = "Read live from the catalogue, so a rename shows up here immediately.", example = "Mechanical Keyboard")
         String productName,
 
-        @Schema(description = "The catalogue price right now, not a snapshot. It is fixed only at checkout.", example = "8999.00")
+        @Schema(description = "The price when the product was added to the cart: the line keeps it, so a later catalogue change does not reach this cart. Checkout charges it.", example = "8999.00")
         BigDecimal unitPrice,
 
         @Schema(example = "2")
