@@ -7,7 +7,7 @@
 - **Branch:** fix/ki-084-085-086-openapi-contract (cut from `main` at `aa5da39`)
 - **Step:** IN_PROGRESS: full verify green; the PR waits for PR #117 (KI-036, another session's) to merge: one open PR at a time
 - **Waiting for user:** no
-- **History:** KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
+- **History:** KI-036 (PR #117, another session's) merged as `e78d5e0`; merged into this branch 2026-11-09 (conflicts in decisions and this file, docs only: both sides kept). KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
 
 ## Checklist
 - [x] Audit: every response record read with its factory; six fields could be null without saying so (`OrderResponse.statusReason`, `OrderStatusResponse.reason`, `JobExecutionResponse.startTime`, `endTime`, `failureMessage`, `ProductImportResponse.errorFile`); `CustomerResponse.fullName` is `NOT NULL`; `exitCode` comes from `ExitStatus`, never null
