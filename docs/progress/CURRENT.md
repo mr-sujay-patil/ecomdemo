@@ -5,8 +5,8 @@
 - **Updated:** 2026-11-09
 - **Fix:** KI-084 + KI-085 + KI-086 together (the published OpenAPI contract: no response schema lists `required`; a stale `unitPrice` text; a nullable object published as "null only"). Reported by the web team (web KI-016, KI-019, KI-021); the owner: "do the OpenAPI fixes" (2026-11-09)
 - **Branch:** fix/ki-084-085-086-openapi-contract (cut from `main` at `aa5da39`)
-- **Step:** IN_PROGRESS: full verify green; the PR waits for PR #117 (KI-036, another session's) to merge: one open PR at a time
-- **Waiting for user:** no
+- **Step:** PR_OPEN (#118): waiting for CI
+- **Waiting for user:** YES after CI is green: review of PR #118 (`approved, merge it`)
 - **History:** KI-036 (PR #117, another session's) merged as `e78d5e0`; merged into this branch 2026-11-09 (conflicts in decisions and this file, docs only: both sides kept). KI-062 (PR #115) merged as `aa5da39`. PR #117 (fix/ki-036-meter-tag-budget) is open from another session; this branch touches none of its files
 
 ## Checklist
@@ -15,10 +15,11 @@
 - [x] Fix (`1c6f4ff`): `ResponseSchemaContract` (common, an `OpenApiCustomizer` bean from `OpenApiConfig`); six fields `nullable = true`; the `unitPrice` text. `ResponseSchemaContractTest` 3, `OpenApiDocumentationTest` 23, green
 - [x] Docs: KNOWN_ISSUES KI-084, 085, 086; decisions `[Fix KI-084, KI-085, KI-086]`
 - [x] Full `./mvnw -B verify`: 11 modules, **971 tests, 0 failures, 0 errors**; every service's API documentation test ran (inventory 1, catalog 2, customer 1, notification 1, payment 1, assistant 2 with `pendingAction`, gateway 11, app 23)
-- [ ] PR once #117 has merged (merge `main` in first); CI green; STOP for the owner. Then the web pins the merge and drops its `PendingCartAddition | null` widening (web KI-021) and regenerates its types (web KI-016)
+- [x] #117 merged as `e78d5e0`; `main` merged in (`5330d46`); full verify on the merged tree: 974 tests, 0 failures; PR #118
+- [ ] CI green on #118; STOP for the owner. Then the web pins the merge and drops its `PendingCartAddition | null` widening (web KI-021) and regenerates its types (web KI-016)
 
 ## Next action
-When PR #117 is merged: merge `main` into this branch (docs conflicts likely in CURRENT.md, KNOWN_ISSUES, decisions: keep both sides), run `./mvnw -B -pl ecomdemo-app -am verify`, open the PR, set KI-084/085/086 to Fixed (PR #N).
+Wait for CI on PR #118. Green: STOP for `approved, merge it`. After the merge: merge-verify; the owner tags `ki-084-fixed`, `ki-085-fixed`, `ki-086-fixed`; then the web pins the merge (its own PR).
 
 ## ⚠️ Environment notes (this machine) — full list in `docs/process/development-environment.md`
 - **BEFORE `docker compose up`: `docker ps`.** The frontend team's clone (~/projects/ecomdemo-backend-readonly)
