@@ -63,7 +63,7 @@
 			0.8.15 is the current line and the first few to understand Java 21's class file
 			format; an older one fails to instrument rather than quietly under-reporting.
 		-->
-		<jacoco.version>0.8.15</jacoco.version>
+		<jacoco.version>0.8.16</jacoco.version>
 
 		<!--
 			Pinned here because Spring Boot 4.1.1 does not manage Spring Modulith at all. See the
