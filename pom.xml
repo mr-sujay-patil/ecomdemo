@@ -5,7 +5,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>4.1.1</version>
+		<version>4.1.2</version>
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.ecomdemo</groupId>
@@ -70,7 +70,7 @@
 			dependency block below for why that is survivable: these jars are test-scoped and the
 			application context is never built from them.
 		-->
-		<spring-modulith.version>2.1.1</spring-modulith.version>
+		<spring-modulith.version>2.1.2</spring-modulith.version>
 
 		<!--
 			ArchUnit, pinned because Phase 20b needs it in a module that does NOT depend on Spring
@@ -93,7 +93,7 @@
 			The residual risk is a 4.1-only internal change on a path the probe did not exercise. That is
 			what gateway-service's integration tests are for.
 		-->
-		<spring-cloud.version>2025.1.3</spring-cloud.version>
+		<spring-cloud.version>2025.1.4</spring-cloud.version>
 		<!--
 			Resilience4j, for Phase 22. Not managed by Spring Boot, so pinned here. 2.4.0 ships a
 			`resilience4j-spring-boot4` module built against Boot 4.0 / Spring 7 - the Boot 3 module
@@ -107,7 +107,7 @@
 			here. 2.0.1 is the newest GA and is built against Boot 4.1.1 exactly - the 1.x line is
 			the Boot 3 one.
 		-->
-		<spring-ai.version>2.0.1</spring-ai.version>
+		<spring-ai.version>2.0.2</spring-ai.version>
 		<sonar-maven-plugin.version>5.8.0.7211</sonar-maven-plugin.version>
 
 		<!-- OWASP Dependency-Check (Phase 31), not managed by Boot; configured in pluginManagement. -->
