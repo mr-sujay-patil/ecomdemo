@@ -54,7 +54,7 @@
 
 	<properties>
 		<java.version>21</java.version>
-		<springdoc.version>3.1.1</springdoc.version>
+		<springdoc.version>3.2.0</springdoc.version>
 		<!-- The swagger-core release springdoc ${springdoc.version} is built against. Change the two together. -->
 		<swagger-core.version>2.2.55</swagger-core.version>
 
